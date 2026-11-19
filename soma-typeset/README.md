@@ -68,7 +68,8 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   stretch, footnotes are charged to the marker's line, and page masters add a
   running header, footer, and folio. Figure boxes, table cell boxes,
   code/math/rule boxes, and a `TextSource` seam complete the tree;
-  `soma-md` and `soma-html` parse documented Markdown/HTML subsets into DocIR;
+  `soma-md`, `soma-html`, and `soma-latex` parse documented Markdown/HTML/LaTeX
+  subsets into DocIR;
   `soma-render-html`
   paints absolutely positioned HTML. The WASI fixture hashes DocIR, inline
   layout, and pages together.
@@ -131,6 +132,7 @@ crates/
   soma-layout/ # paragraph boxes, line-level pagination, page masters
   soma-md/     # Markdown subset -> DocIR
   soma-html/   # HTML subset (semantic whitelist) -> DocIR
+  soma-latex/  # LaTeX subset (sections, inline, environments) -> DocIR
   soma-render-html/ # PagedLayout -> absolutely positioned HTML
   soma-render-svg/  # PagedLayout -> SVG (Gate V/R)
   soma-rules/  # text -> ParaIR (Chinese punctuation + CJK/Latin segmentation)
