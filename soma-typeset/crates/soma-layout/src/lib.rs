@@ -41,14 +41,57 @@ pub const FOOTNOTE_MARKER: char = '\u{e000}';
 /// How a page was filled. Only the deterministic greedy path exists in v1.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaginationKind {
+    /// Vertical Knuth-Plass: page breaks minimise summed page badness.
+    VerticalKp,
+    /// Deterministic greedy pass, used for `PaginationStrategy::Greedy` and as
+    /// the fallback when the vertical DP finds no feasible break sequence.
     Greedy,
 }
 
 impl PaginationKind {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::VerticalKp => "verticalKp",
             Self::Greedy => "greedy",
         }
+    }
+}
+
+/// Which paginator to run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaginationStrategy {
+    /// Vertical K-P over flow items (ADR-0005 preferred path).
+    VerticalKp,
+    /// Deterministic greedy fill.
+    Greedy,
+}
+
+/// Vertical cost model. These are pagination-model constants, not engine knobs:
+/// they do not enter `paramHash`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VerticalParams {
+    /// Weight applied for a page whose fill leaves no freedom. `0` keeps the
+    /// page count neutral; the DP then optimises badness only.
+    pub page_weight: i64,
+    /// Scale for `badness = scale * leftover_permille^3 / 1e6`.
+    pub badness_scale: i64,
+    /// Cost of a page that must hold one block taller than the content area.
+    pub overflow_penalty: i64,
+}
+
+impl VerticalParams {
+    pub const fn default_v1() -> Self {
+        Self {
+            page_weight: 0,
+            badness_scale: 100,
+            overflow_penalty: 1_000_000,
+        }
+    }
+}
+
+impl Default for VerticalParams {
+    fn default() -> Self {
+        Self::default_v1()
     }
 }
 
@@ -137,6 +180,9 @@ pub struct PagedLayout {
     pub metrics_version: u16,
     /// Footnote reflow passes actually used (1 = no iteration).
     pub footnote_passes: u32,
+    /// Summed vertical cost of the chosen pagination. Comparable only between
+    /// runs with the same `VerticalParams`.
+    pub pagination_cost: i64,
 }
 
 impl PagedLayout {
@@ -233,12 +279,31 @@ impl core::fmt::Display for LayoutError {
 /// Placeholder style used before the first resolved style is known.
 const ROOT_STYLE: StyleId = StyleId(0);
 
-/// Lay out a document into pages.
+/// Lay out a document into pages with the default strategy (vertical K-P).
 pub fn layout(
     doc: &Document,
     styled: &StyledDoc,
     metrics: &dyn Metrics,
     engine: &BreakConfig,
+) -> Result<PagedLayout, LayoutError> {
+    layout_with(
+        doc,
+        styled,
+        metrics,
+        engine,
+        PaginationStrategy::VerticalKp,
+        VerticalParams::default_v1(),
+    )
+}
+
+/// Lay out with an explicit strategy and vertical cost model.
+pub fn layout_with(
+    doc: &Document,
+    styled: &StyledDoc,
+    metrics: &dyn Metrics,
+    engine: &BreakConfig,
+    strategy: PaginationStrategy,
+    vertical: VerticalParams,
 ) -> Result<PagedLayout, LayoutError> {
     let page = styled.page();
     let content_width = page.content_width();
@@ -259,18 +324,60 @@ pub fn layout(
     builder.text.finish();
 
     let page_height = page.content_height();
-    let mut reserved: Vec<Width> = Vec::new();
-    let mut page_items = greedy_place(&items, page_height, &reserved);
     let mut passes = 1u32;
-    for _ in 0..8 {
-        let heights = footnote_heights(&page_items, &items, &builder.notes);
-        if heights == reserved {
-            break;
+
+    let (mut page_items, mut kind) = match strategy {
+        PaginationStrategy::VerticalKp => {
+            match vertical_place(&items, page_height, &builder.notes, vertical) {
+                Some(pages) => (pages, PaginationKind::VerticalKp),
+                None => {
+                    // No feasible break sequence: fall back to the deterministic
+                    // greedy pass and record it.
+                    let mut reserved: Vec<Width> = Vec::new();
+                    let mut placed = greedy_place(&items, page_height, &reserved);
+                    for _ in 0..8 {
+                        let heights = footnote_heights(&placed, &items, &builder.notes);
+                        if heights == reserved {
+                            break;
+                        }
+                        reserved = heights;
+                        placed = greedy_place(&items, page_height, &reserved);
+                        passes += 1;
+                    }
+                    (placed, PaginationKind::Greedy)
+                }
+            }
         }
-        reserved = heights;
-        page_items = greedy_place(&items, page_height, &reserved);
-        passes += 1;
+        PaginationStrategy::Greedy => {
+            let mut reserved: Vec<Width> = Vec::new();
+            let mut placed = greedy_place(&items, page_height, &reserved);
+            for _ in 0..8 {
+                let heights = footnote_heights(&placed, &items, &builder.notes);
+                if heights == reserved {
+                    break;
+                }
+                reserved = heights;
+                placed = greedy_place(&items, page_height, &reserved);
+                passes += 1;
+            }
+            (placed, PaginationKind::Greedy)
+        }
+    };
+
+    // Drop page groups that contain nothing (a leading forced break).
+    page_items.retain(|group| !group.is_empty());
+    if page_items.is_empty() {
+        page_items.push(Vec::new());
     }
+    if page_items.len() == 1
+        && kind == PaginationKind::Greedy
+        && strategy == PaginationStrategy::VerticalKp
+    {
+        // Fallback already recorded; nothing more to do.
+        kind = PaginationKind::Greedy;
+    }
+
+    let pagination_cost = score_pages(&page_items, &items, &builder.notes, page_height, vertical);
 
     let mut pages = Vec::with_capacity(page_items.len());
     for (index, item_indices) in page_items.iter().enumerate() {
@@ -295,7 +402,7 @@ pub fn layout(
         }
 
         let footnotes = assemble_footnotes(&page_items[index], &items, &builder.notes);
-        let footnote_height = reserved.get(index).copied().unwrap_or(Width::ZERO);
+        let footnote_height = page_note_height(&page_items[index], &items, &builder.notes);
 
         pages.push(Page {
             number: index as u32 + 1,
@@ -312,13 +419,14 @@ pub fn layout(
 
     Ok(PagedLayout {
         page,
-        pagination: PaginationKind::Greedy,
+        pagination: kind,
         pages,
         text: builder.text,
         engine_hash: engine.param_hash().0,
         rules_version: engine.rules_version(),
         metrics_version: engine.metrics_version(),
         footnote_passes: passes,
+        pagination_cost,
     })
 }
 
@@ -1028,6 +1136,193 @@ fn greedy_place(items: &[FlowItem], page_height: Width, reserved: &[Width]) -> V
         pages.push(Vec::new());
     }
     pages
+}
+
+/// Footnote area height for one page group.
+fn page_note_height(page_items: &[usize], items: &[FlowItem], notes: &NoteMap) -> Width {
+    let mut seen: Vec<usize> = Vec::new();
+    for &item_index in page_items {
+        for note in &items[item_index].footnotes {
+            if !seen.contains(note) {
+                seen.push(*note);
+            }
+        }
+    }
+    let mut height = Width::ZERO;
+    for note in seen {
+        if let Some(blocks) = notes.blocks.get(note) {
+            for block in blocks {
+                height = height + block.height;
+            }
+        }
+    }
+    height
+}
+
+/// TeX-style page badness: cubic in the leftover fraction, in permille.
+fn page_badness(used: Width, page_height: Width, overflow: bool, params: VerticalParams) -> i64 {
+    if overflow {
+        return params.overflow_penalty;
+    }
+    let free = page_height.0 - used.0;
+    if free <= 0 || page_height.0 <= 0 {
+        return 0;
+    }
+    let milli = free as i64 * 1000 / page_height.0 as i64;
+    params.badness_scale * milli * milli * milli / 1_000_000
+}
+
+fn relax(best: &mut [(i64, u32, usize)], from: usize, to: usize, page_cost: i64) {
+    let base = best[from];
+    let candidate = (base.0 + page_cost, base.1 + 1, from);
+    if candidate < best[to] {
+        best[to] = candidate;
+    }
+}
+
+/// Vertical Knuth-Plass over flow items: choose page breaks minimizing summed
+/// page badness. The last page is free (like a paragraph's last line). Hard
+/// constraints: forced breaks, `page_break_before`, `keep-with-next`, and a
+/// single overfull block must own its page.
+fn vertical_place(
+    items: &[FlowItem],
+    page_height: Width,
+    notes: &NoteMap,
+    params: VerticalParams,
+) -> Option<Vec<Vec<usize>>> {
+    let n = items.len();
+    if n == 0 {
+        return Some(Vec::new());
+    }
+    const INF: i64 = i64::MAX / 4;
+    let mut best: Vec<(i64, u32, usize)> = vec![(INF, u32::MAX, 0); n + 1];
+    best[0] = (0, 0, 0);
+
+    for i in 0..n {
+        if best[i].0 == INF {
+            continue;
+        }
+        if items[i].forced_break {
+            relax(&mut best, i, i + 1, 0);
+            continue;
+        }
+
+        let mut used = Width::ZERO;
+        let mut notes_seen: Vec<usize> = Vec::new();
+        let mut j = i;
+        while j < n {
+            let item = &items[j];
+            if item.forced_break {
+                break;
+            }
+            if j > i && item.page_break_before {
+                break;
+            }
+
+            let gap = if j == i { Width::ZERO } else { item.before };
+            used = used + gap + item.height + item.after;
+            for note in &item.footnotes {
+                if !notes_seen.contains(note) {
+                    notes_seen.push(*note);
+                }
+            }
+            let total = used + note_height_of(&notes_seen, notes);
+            let overflow = total.0 > page_height.0;
+            let single = j == i;
+
+            if overflow && !single {
+                break;
+            }
+            if overflow && single {
+                let end = j + 1;
+                let last = end == n;
+                let mut cost = params.page_weight;
+                if !last {
+                    cost += page_badness(total, page_height, true, params);
+                }
+                relax(&mut best, i, end, cost);
+                break;
+            }
+
+            let end = j + 1;
+            let last = end == n;
+            let can_break = last
+                || items[end].forced_break
+                || (!items[j].keep_with_next && !items[end].page_break_before);
+            if can_break {
+                let mut cost = params.page_weight;
+                if !last {
+                    cost += page_badness(total, page_height, false, params);
+                }
+                relax(&mut best, i, end, cost);
+            }
+            j += 1;
+        }
+    }
+
+    if best[n].0 == INF {
+        return None;
+    }
+
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    let mut at = n;
+    while at > 0 {
+        let prev = best[at].2;
+        let group: Vec<usize> = (prev..at)
+            .filter(|index| !items[*index].forced_break)
+            .collect();
+        if !group.is_empty() {
+            groups.push(group);
+        }
+        at = prev;
+    }
+    groups.reverse();
+    Some(groups)
+}
+
+fn note_height_of(notes_seen: &[usize], notes: &NoteMap) -> Width {
+    let mut height = Width::ZERO;
+    for note in notes_seen {
+        if let Some(blocks) = notes.blocks.get(*note) {
+            for block in blocks {
+                height = height + block.height;
+            }
+        }
+    }
+    height
+}
+
+/// Cost of a finished pagination under the vertical model. Used for reporting
+/// and for the optimality test against the greedy path.
+fn score_pages(
+    groups: &[Vec<usize>],
+    items: &[FlowItem],
+    notes: &NoteMap,
+    page_height: Width,
+    params: VerticalParams,
+) -> i64 {
+    let last = groups.len().saturating_sub(1);
+    let mut total = 0i64;
+    for (index, group) in groups.iter().enumerate() {
+        let mut used = Width::ZERO;
+        for (offset, &item_index) in group.iter().enumerate() {
+            let item = &items[item_index];
+            if offset > 0 {
+                used = used + item.before;
+            }
+            used = used + item.height + item.after;
+        }
+        let height = used + page_note_height(group, items, notes);
+        let overflow = group
+            .iter()
+            .any(|&item_index| items[item_index].height.0 > page_height.0);
+        let mut cost = params.page_weight;
+        if index != last {
+            cost += page_badness(height, page_height, overflow, params);
+        }
+        total += cost;
+    }
+    total
 }
 
 /// A `keep-with-next` block must not be the last block on a page.

@@ -123,7 +123,7 @@ fn page_geometry_and_versions_are_carried() {
     assert_eq!(layout.engine_hash, engine.param_hash().0);
     assert_eq!(layout.rules_version, engine.rules_version());
     assert_eq!(layout.metrics_version, engine.metrics_version());
-    assert_eq!(layout.pagination.as_str(), "greedy");
+    assert_eq!(layout.pagination.as_str(), "verticalKp");
 }
 
 #[test]

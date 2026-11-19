@@ -6,7 +6,9 @@ use common::{document, engine, metrics, paragraph, styled, TIGHT};
 use soma_doc::block::{Heading, PageBreak};
 use soma_doc::node::NodeMeta;
 use soma_doc::Block;
-use soma_layout::{layout, BoxKind};
+use soma_layout::{
+    layout, layout_with, BoxKind, PaginationKind, PaginationStrategy, VerticalParams,
+};
 
 fn body(count: usize) -> Vec<Block> {
     (0..count)
@@ -130,4 +132,124 @@ fn an_empty_document_still_produces_one_page() {
 
     assert_eq!(layout.page_count(), 1);
     assert!(layout.pages[0].blocks.is_empty());
+}
+
+#[test]
+fn vertical_pagination_never_costs_more_than_greedy() {
+    let doc = document(body(9));
+    let styled = styled(&doc, TIGHT);
+    let vertical = layout_with(
+        &doc,
+        &styled,
+        &metrics(),
+        &engine(),
+        PaginationStrategy::VerticalKp,
+        VerticalParams::default_v1(),
+    )
+    .expect("vertical");
+    let greedy = layout_with(
+        &doc,
+        &styled,
+        &metrics(),
+        &engine(),
+        PaginationStrategy::Greedy,
+        VerticalParams::default_v1(),
+    )
+    .expect("greedy");
+
+    assert_eq!(vertical.pagination, PaginationKind::VerticalKp);
+    assert_eq!(greedy.pagination, PaginationKind::Greedy);
+    assert!(
+        vertical.pagination_cost <= greedy.pagination_cost,
+        "vertical {} must not cost more than greedy {}",
+        vertical.pagination_cost,
+        greedy.pagination_cost
+    );
+    assert!(vertical.page_count() <= greedy.page_count());
+}
+
+#[test]
+fn vertical_pagination_balances_a_ragged_tail() {
+    // Two short blocks and one long one: greedy leaves a nearly empty page,
+    // vertical K-P can pull the last block back.
+    let mut blocks = body(3);
+    blocks.push(paragraph(
+        "这一段很长，用来把内容推到第二页，并让贪心留下一个很空的尾页。中文排版需要断行与对齐。",
+    ));
+    let doc = document(blocks);
+    let styled = styled(&doc, TIGHT);
+
+    let vertical = layout_with(
+        &doc,
+        &styled,
+        &metrics(),
+        &engine(),
+        PaginationStrategy::VerticalKp,
+        VerticalParams::default_v1(),
+    )
+    .expect("vertical");
+    let greedy = layout_with(
+        &doc,
+        &styled,
+        &metrics(),
+        &engine(),
+        PaginationStrategy::Greedy,
+        VerticalParams::default_v1(),
+    )
+    .expect("greedy");
+
+    assert!(vertical.pagination_cost <= greedy.pagination_cost);
+}
+
+#[test]
+fn vertical_pagination_respects_forced_breaks() {
+    let doc = document(vec![
+        paragraph("第一页内容。"),
+        Block::PageBreak(PageBreak::new(NodeMeta::synthesized())),
+        paragraph("第二页内容。"),
+        Block::PageBreak(PageBreak::new(NodeMeta::synthesized())),
+        paragraph("第三页内容。"),
+    ]);
+    let styled = styled(&doc, TIGHT);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+
+    assert_eq!(layout.page_count(), 3);
+    assert_eq!(layout.pages[0].blocks.len(), 1);
+    assert_eq!(layout.pages[2].blocks.len(), 1);
+}
+
+#[test]
+fn vertical_pagination_keeps_headings_with_next() {
+    let mut blocks = Vec::new();
+    for index in 0..4 {
+        blocks.push(Block::Heading(Heading::new(
+            NodeMeta::synthesized(),
+            2,
+            vec![common::text(&format!("小节 {index}"))],
+        )));
+        blocks.push(paragraph(
+            "正文。中文排版需要断行、对齐与标点处理，这一段足够长以占用多行。",
+        ));
+    }
+    let doc = document(blocks);
+    let styled = styled(&doc, TIGHT);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+
+    for page in &layout.pages {
+        if let Some(last) = page.blocks.last() {
+            assert_ne!(last.kind, BoxKind::Heading, "page {}", page.number);
+        }
+    }
+}
+
+#[test]
+fn vertical_pagination_is_deterministic_and_reports_its_cost() {
+    let doc = document(body(10));
+    let styled = styled(&doc, TIGHT);
+    let first = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let second = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+
+    assert_eq!(first.canonical_json(), second.canonical_json());
+    assert!(first.pagination_cost >= 0);
+    assert_eq!(first.footnote_passes, 1);
 }
