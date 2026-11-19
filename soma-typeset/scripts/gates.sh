@@ -41,4 +41,7 @@ fi
 echo "== gate: architecture (Gate A) =="
 bash scripts/gate-a.sh
 
+echo "== gate: content (Gate C) =="
+bash scripts/gate-c.sh
+
 echo "all gates passed"

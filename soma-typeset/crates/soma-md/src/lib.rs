@@ -17,6 +17,8 @@
 
 extern crate alloc;
 
+pub mod capabilities;
+
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -29,6 +31,8 @@ use soma_doc::{
     Block, Code, Document, FootnoteDef, SourceId, SourceInfo, SourceKind, SourceMap, SourceSpan,
     Text,
 };
+
+pub use capabilities::{capability, with_status, Capability, CapabilityStatus, CAPABILITIES};
 
 pub const SYNTAX_ID: &str = "markdown";
 pub const SYNTAX_VERSION: u16 = 1;
