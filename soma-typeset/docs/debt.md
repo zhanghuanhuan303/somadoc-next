@@ -71,7 +71,7 @@
 | D58 | ~~垂直方向没有可拉伸胶水~~ | **已关闭（E2）**：`space-before/after-plus/minus`；页面空白按行高归一化；拉伸量真实分配到块坐标 | — | ✅ 已关闭 | 否 |
 | D59 | ~~垂直代价参数不在 EngineConfig 里~~ | **已关闭（ADR-0016）**：`vertical:` 段覆盖 `VerticalParams`；`verticalHash` 进页面结果 | — | ✅ 已关闭 | 否 |
 | D60 | 无 tracking 兼底 | E6 只做了 `-`/`/` 断点；未做字间 letter-spacing 兼底 | 长 run 仍可能压缩越界 | 未排期（需与内核 emergency 模型一起评估） | 否 |
-| D61 | bold 用 regular advance | 度量表只发行 Regular 面；Latin bold 宽度有轻微偏差，CJK bold 等宽所以无影响 | 强调文本的换行点可能偏差 | 需要 Bold 面时生成第二张表 | 否 |
+| D61 | 斜体仍用 upright advance | **粗体已关闭（ADR-0022）**：Serif/Sans 的 Regular+Bold 四面进表，按 `weight` 选面；CJK 没有斜体面，`slant: italic` 仍用正体宽度（斜体只影响渲染姿态） | 斜体拉丁的换行点可能偏差 | 有斜体字面时再生成表 | 否 |
 | D62 | 母版只有页边带可变 | **已支持命名母版与按节切换（ADR-0021）**：`masters:` + `Section.page_template`，换母版强制新页；母版只改页眉/页脚/folio，**版心几何仍全局一套**，也没有自动封面/首页变体 | 封面等特殊版心做不了 | 后续 | 否 |
 | D63 | 度量表是声明子集 | 覆盖 Latin/标点/假名/CJK 基本区与扩展 A；扩展 B+ 与少数字形回退到 1em | 生僻字宽度不准 | 需要时重新生成表 | 否 |
 | D64 | 页眉页脚只排一行 | running title 过长时溢出而不是换行/缩略 | 超长标题可能压到页边 | 未排期（需要字串截断策略） | 否 |

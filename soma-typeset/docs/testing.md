@@ -110,7 +110,7 @@ Cumulative public test files:
 | `a3_layout.rs` | 7 | paragraph boxes match the kernel, text index, stacking |
 | `a4_pagination.rs` | 13 | vertical K-P optimality, page breaks, keep-with-next, splitting, overflow |
 | `a6_blocks.rs` | 11 | code, math, figures, tables (+colspan), rules, raw, footnotes |
-| `metrics.rs` (layout) | 5 | table-backed metrics, per-style scaling, determinism |
+| `metrics.rs` (layout) | 6 | table-backed metrics, per-style scaling, bold face, determinism |
 | `e2_split.rs` | 7 | line conservation, widows/orphans, footnote lines, glue, vertical hash |
 | `e3_typography.rs` | 2 | hanging punctuation is post-processing and respects the cap |
 | `e4_master.rs` | 6 | header/footer bands, folio, running title, margin limits |
@@ -137,15 +137,15 @@ Cumulative public test files:
 | `soma-wasm` unit | 1 | fixture determinism + forced end + DocIR |
 | `vertical_slice.rs` (rules) | 6 | end-to-end rules + trim + hard break |
 | `soma-rules` unit | 15 | segmentation, punctuation, pair trim, hyphen breaks, rule inventory |
-| `soma-metrics` unit | 8 | table round-trip, CJK/Latin widths, fallback, hash, truncation |
+| `soma-metrics` unit | 9 | table round-trip, CJK/Latin widths, regular/bold faces, fallback, hash, truncation |
 | `soma-core` vertical unit | 1 | vertical cost model hash |
 | core unit | 23 | IR, units, breaker, result |
 | layout unit | 2 | trim scaling at body and non-body sizes |
 
-Total: **353 tests**.
+Total: **355 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
-kerning pairs, bold faces, tracking fallback, and calibrated trim ratios.
+kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.
 
 ## Repository gates
 

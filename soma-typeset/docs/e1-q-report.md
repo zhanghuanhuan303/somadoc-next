@@ -21,7 +21,7 @@
 ### E1 真实字体度量
 
 - 新 crate `soma-metrics`：零依赖、`no_std`，解析提交进仓库的 `soma.metrics/1` 二进制表；
-  查表全整数、跨端一致。表 31,612 bytes，两面：Noto Serif CJK SC / Noto Sans CJK SC（OFL）。
+  查表全整数、跨端一致。表 63,212 bytes，四面：Noto Serif/Sans CJK SC 的 Regular 与 Bold（OFL）。
 - 新工具 `tools/metrics-gen`（std、`publish = false`）：读 OTF/TTC 的
   `head`/`hhea`/`OS/2`/`hmtx`/`maxp`/`cmap`，只提取数值，不提取轮廓。
 - `soma-layout` 新增 `TableMetrics`（单面单号）与 `StyledMetrics`（`StyleId` → 字面 + 字号），
