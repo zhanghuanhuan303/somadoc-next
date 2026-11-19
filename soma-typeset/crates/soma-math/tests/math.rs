@@ -279,7 +279,7 @@ fn inline_style_keeps_big_operator_limits_to_the_right() {
 }
 
 #[test]
-fn an_integral_is_unchanged_by_the_style() {
+fn an_integral_shrinks_but_keeps_its_limits_inline() {
     let inline = MathStyle {
         display: false,
         ..MathStyle::default()
@@ -288,5 +288,204 @@ fn an_integral_is_unchanged_by_the_style() {
     let inline_result = lay_out(&nodes, inline.size, &inline, &TestMetrics);
     let display_result = lay_out(&nodes, inline.size, &MathStyle::default(), &TestMetrics);
 
-    assert_eq!(inline_result, display_result);
+    let inline_int = inline_result
+        .items
+        .iter()
+        .find(|item| item.text == "∫")
+        .expect("operator");
+    let display_int = display_result
+        .items
+        .iter()
+        .find(|item| item.text == "∫")
+        .expect("operator");
+
+    assert!(
+        inline_int.size.0 < display_int.size.0,
+        "text style is smaller"
+    );
+    assert!(inline_result.width.0 < display_result.width.0);
+    let upper_inline = inline_result
+        .items
+        .iter()
+        .find(|item| item.text == "1")
+        .expect("limit");
+    assert!(
+        upper_inline.x.0 >= inline_int.x.0 + TestMetrics.advance("∫", inline_int.size).0,
+        "limits stay to the right in both styles"
+    );
+}
+
+#[test]
+fn display_fractions_use_full_size_parts_and_text_style_shrinks_them() {
+    let display = formula(r"\frac{a}{b}");
+    let inline_style = MathStyle {
+        display: false,
+        ..MathStyle::default()
+    };
+    let nodes = parse(r"\frac{a}{b}").expect("parse");
+    let inline = lay_out(&nodes, inline_style.size, &inline_style, &TestMetrics);
+
+    assert_eq!(
+        display.items[0].size,
+        Width::EM,
+        "display parts are full size"
+    );
+    assert_eq!(
+        inline.items[0].size,
+        Width(Width::EM.0 * 700 / 1000),
+        "inline parts are script size"
+    );
+    assert!(inline.width.0 < display.width.0);
+}
+
+#[test]
+fn a_delimited_group_stretches_its_fences() {
+    let result = formula(r"\left( \frac{a}{b} \right)");
+    let parens: Vec<_> = result
+        .items
+        .iter()
+        .filter(|item| item.text == "(" || item.text == ")")
+        .collect();
+    assert_eq!(parens.len(), 2, "one fence on each side");
+    assert!(
+        parens[0].size.0 > Width::EM.0,
+        "the fences grow with the body"
+    );
+    assert_eq!(parens[0].size, parens[1].size);
+    assert!(parens[0].x.0 < parens[1].x.0);
+
+    // The fence box covers the fraction: no gap between the body and the
+    // fence on either side.
+    let body_top = result
+        .items
+        .iter()
+        .filter(|item| item.text != "(" && item.text != ")")
+        .map(|item| -item.y.0 + TestMetrics.ascent(item.size).0)
+        .max()
+        .expect("body");
+    let fence_top = -parens[0].y.0 + TestMetrics.ascent(parens[0].size).0;
+    assert!(fence_top >= body_top, "{fence_top} >= {body_top}");
+}
+
+#[test]
+fn left_and_right_without_a_tall_body_stay_at_base_size() {
+    let result = formula(r"\left( x \right)");
+    let paren = result
+        .items
+        .iter()
+        .find(|item| item.text == "(")
+        .expect("fence");
+    assert_eq!(paren.size, Width::EM);
+    assert_eq!(paren.y, Width::ZERO, "centred on the baseline");
+}
+
+#[test]
+fn a_matrix_aligns_columns_and_rows() {
+    let result = formula(r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}");
+    let find = |text: &str, min_y: i32| {
+        result
+            .items
+            .iter()
+            .find(|item| item.text == text && item.y.0 >= min_y)
+            .unwrap_or_else(|| panic!("cell {text} at y>={min_y}"))
+            .clone()
+    };
+
+    let a = find("a", i32::MIN);
+    let b = find("b", i32::MIN);
+    let c = find("c", i32::MIN);
+    let d = find("d", i32::MIN);
+
+    assert!(a.x.0 < b.x.0 && c.x.0 < d.x.0, "columns left to right");
+    assert!(a.y.0 < c.y.0 && b.y.0 < d.y.0, "second row is below");
+    assert_eq!(a.x, c.x, "cells in one column share an x");
+    assert_eq!(b.x, d.x);
+    assert_eq!(a.y, b.y, "cells in one row share a baseline");
+
+    let fences: Vec<_> = result
+        .items
+        .iter()
+        .filter(|item| item.text == "(" || item.text == ")")
+        .collect();
+    assert_eq!(fences.len(), 2);
+    assert!(fences[0].x.0 < a.x.0 && fences[1].x.0 > d.x.0);
+}
+
+#[test]
+fn an_aligned_block_aligns_on_the_ampersand() {
+    let result = formula(r"\begin{aligned} \text{x} &= 1 \\ \text{yy} &= 2 \end{aligned}");
+    let equals: Vec<_> = result
+        .items
+        .iter()
+        .filter(|item| item.text == "=")
+        .collect();
+    assert_eq!(equals.len(), 2);
+    assert_eq!(equals[0].x, equals[1].x, "the alignment column is shared");
+
+    let left_cell = |y: i32| {
+        result
+            .items
+            .iter()
+            .find(|item| (item.text == "x" || item.text == "yy") && item.y.0 == y)
+            .expect("left cell")
+    };
+    let first = left_cell(equals[0].y.0);
+    let second = left_cell(equals[1].y.0);
+
+    assert_eq!(first.text, "x");
+    assert_eq!(second.text, "yy");
+    assert!(
+        first.x.0 + TestMetrics.advance("x", first.size).0 <= equals[0].x.0,
+        "the left column hugs the alignment point"
+    );
+    assert!(second.x.0 + TestMetrics.advance("yy", second.size).0 <= equals[1].x.0);
+    assert!(
+        second.x.0 < first.x.0,
+        "right-aligned cells share a right edge"
+    );
+    assert!(result.width.0 > Width::ZERO.0);
+}
+
+#[test]
+fn a_cases_block_draws_one_brace() {
+    let result = formula(r"\begin{cases} x & x > 0 \\ -x & x \le 0 \end{cases}");
+    let braces: Vec<_> = result
+        .items
+        .iter()
+        .filter(|item| item.text == "{")
+        .collect();
+    assert_eq!(braces.len(), 1, "cases has only a left brace");
+    assert!(braces[0].size.0 >= Width::EM.0);
+
+    let top = result
+        .items
+        .iter()
+        .find(|item| item.text == "x")
+        .expect("first row");
+    let bottom = result
+        .items
+        .iter()
+        .rfind(|item| item.text == "x")
+        .expect("last row");
+    assert!(bottom.y.0 > top.y.0);
+}
+
+#[test]
+fn an_unbalanced_environment_is_an_error() {
+    assert!(matches!(
+        parse(r"\begin{matrix} a & b"),
+        Err(MathError::UnbalancedEnvironment(_))
+    ));
+    assert!(matches!(
+        parse(r"\begin{matrix} a \end{pmatrix}"),
+        Err(MathError::UnbalancedEnvironment(_))
+    ));
+    assert!(matches!(
+        parse(r"\begin{unknown} a \end{unknown}"),
+        Err(MathError::UnsupportedCommand(_))
+    ));
+    assert!(matches!(
+        parse(r"\left( x"),
+        Err(MathError::UnbalancedDelimiter)
+    ));
 }

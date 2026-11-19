@@ -60,6 +60,24 @@ impl Metrics for TableMetrics<'_> {
         }
     }
 
+    fn math_advance(&self, text: &str, style: StyleId) -> Width {
+        match self.table.math_face() {
+            Some(face) => Width(scale(face.advance(text), self.size.0)),
+            None => self.advance(text, style),
+        }
+    }
+
+    fn math_metrics(&self, style: StyleId) -> LineMetrics {
+        match self.table.math_face() {
+            Some(face) => LineMetrics {
+                ascent: Width(scale(face.ascent, self.size.0)),
+                descent: Width(scale(face.descent, self.size.0)),
+                leading: Width::ZERO,
+            },
+            None => self.line_metrics(style),
+        }
+    }
+
     fn version(&self) -> u16 {
         soma_metrics::VERSION
     }
@@ -128,6 +146,26 @@ impl Metrics for StyledMetrics<'_> {
         match self.face_of(&computed) {
             Some(face) => Width(scale(face.space, computed.font_size.0)),
             None => self.advance(" ", style),
+        }
+    }
+
+    fn math_advance(&self, text: &str, style: StyleId) -> Width {
+        let computed = self.computed(style);
+        match self.table.math_face() {
+            Some(face) => Width(scale(face.advance(text), computed.font_size.0)),
+            None => self.advance(text, style),
+        }
+    }
+
+    fn math_metrics(&self, style: StyleId) -> LineMetrics {
+        let computed = self.computed(style);
+        match self.table.math_face() {
+            Some(face) => LineMetrics {
+                ascent: Width(scale(face.ascent, computed.font_size.0)),
+                descent: Width(scale(face.descent, computed.font_size.0)),
+                leading: Width::ZERO,
+            },
+            None => self.line_metrics(style),
         }
     }
 

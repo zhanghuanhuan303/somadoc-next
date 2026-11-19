@@ -86,6 +86,19 @@ pub trait Metrics: Sync {
         Width::ZERO
     }
 
+    /// Advance of one math symbol at the style's size.
+    ///
+    /// Hosts with a dedicated math face override this so formula symbols come
+    /// from that face; the default uses the text face.
+    fn math_advance(&self, text: &str, style: StyleId) -> Width {
+        self.advance(text, style)
+    }
+
+    /// Line metrics of the math face. The default reuses the text metrics.
+    fn math_metrics(&self, style: StyleId) -> LineMetrics {
+        self.line_metrics(style)
+    }
+
     /// Advance of an unbreakable object atom (`AtomKind::InlineObject`).
     ///
     /// Hosts that typeset objects themselves (inline math, inline images with

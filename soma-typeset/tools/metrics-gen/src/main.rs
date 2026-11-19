@@ -34,7 +34,11 @@ const UNIFORM_BLOCKS: &[(u32, u32)] = &[
 ];
 
 /// Explicitly enumerated ranges (proportional scripts and punctuation).
-const ENUMERATED_RANGES: &[(u32, u32)] = &[(0x0020, 0x2fff)];
+const ENUMERATED_RANGES: &[(u32, u32)] = &[
+    (0x0020, 0x2fff),
+    // Mathematical alphanumeric symbols: italic/bold/script Latin and Greek.
+    (0x1d400, 0x1d7ff),
+];
 
 struct FaceSpec {
     family: u8,
@@ -252,6 +256,8 @@ impl FaceSpec {
         let family = match family {
             "serif" => 0,
             "sans" => 1,
+            // A dedicated math face: used for formula symbols, not for text.
+            "math" => 2,
             other => return Err(format!("unknown family {other}")),
         };
         let weight = match weight {

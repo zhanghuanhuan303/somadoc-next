@@ -43,16 +43,16 @@ impl<'a> MathAdapter<'a> {
 
 impl MathMetrics for MathAdapter<'_> {
     fn advance(&self, text: &str, size: Width) -> Width {
-        rescale(self.metrics.advance(text, self.style), size, self.base)
+        rescale(self.metrics.math_advance(text, self.style), size, self.base)
     }
 
     fn ascent(&self, size: Width) -> Width {
-        let line = self.metrics.line_metrics(self.style);
+        let line = self.metrics.math_metrics(self.style);
         rescale(line.ascent, size, self.base)
     }
 
     fn descent(&self, size: Width) -> Width {
-        let line = self.metrics.line_metrics(self.style);
+        let line = self.metrics.math_metrics(self.style);
         rescale(line.descent, size, self.base)
     }
 }

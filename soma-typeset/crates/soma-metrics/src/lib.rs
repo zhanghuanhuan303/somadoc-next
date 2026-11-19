@@ -32,6 +32,11 @@ pub const MAGIC: u32 = 0x534d_5431;
 pub const VERSION: u16 = 1;
 pub const UNIT: i32 = 4096;
 
+/// Face family codes in the blob.
+pub const FAMILY_SERIF: u8 = 0;
+pub const FAMILY_SANS: u8 = 1;
+pub const FAMILY_MATH: u8 = 2;
+
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
@@ -201,6 +206,14 @@ impl MetricsTable {
         self.faces.get(index)
     }
 
+    /// The dedicated math face (family `2`), if the table has one.
+    ///
+    /// Formula symbols (operators, radicals, Greek) come from this face so a
+    /// `∑` or `√` has its real advance instead of the body font's fallback.
+    pub fn math_face(&self) -> Option<&Face> {
+        self.faces.iter().find(|face| face.family == FAMILY_MATH)
+    }
+
     pub fn face_count(&self) -> usize {
         self.faces.len()
     }
@@ -313,15 +326,29 @@ mod tests {
     fn embedded_table_has_regular_and_bold_faces() {
         let table = table();
         assert_eq!(table.unit(), UNIT);
-        assert_eq!(table.face_count(), 4);
-        assert_eq!(table.face(0).unwrap().family, 0);
-        assert_eq!(table.face(1).unwrap().family, 1);
+        assert_eq!(table.face_count(), 5);
+        assert_eq!(table.face(0).unwrap().family, FAMILY_SERIF);
+        assert_eq!(table.face(1).unwrap().family, FAMILY_SANS);
         assert!(!table.face(0).unwrap().is_bold());
         assert!(table.face(2).unwrap().is_bold());
         assert!(table.face(3).unwrap().is_bold());
-        assert_eq!(table.face(2).unwrap().family, 0);
-        assert_eq!(table.face(3).unwrap().family, 1);
-        assert!(table.face(4).is_none());
+        assert_eq!(table.face(2).unwrap().family, FAMILY_SERIF);
+        assert_eq!(table.face(3).unwrap().family, FAMILY_SANS);
+        assert_eq!(table.face(4).unwrap().family, FAMILY_MATH);
+        assert!(table.face(5).is_none());
+    }
+
+    #[test]
+    fn the_math_face_covers_operators_and_radicals() {
+        let table = table();
+        let math = table.math_face().expect("math face");
+        // Noto Sans Math sets the summation sign and the radical wider than
+        // one em, which is what makes formula widths right.
+        assert!(math.advance_at('∑' as u32) > 0, "summation");
+        assert!(math.advance_at('√' as u32) > 0, "radical");
+        assert!(math.advance_at('∫' as u32) > 0, "integral");
+        assert!(math.advance_at('α' as u32) > 0, "greek");
+        assert!(math.ascent > 0 && math.descent >= 0);
     }
 
     #[test]
@@ -401,9 +428,23 @@ mod tests {
             assert!(face.ascent > 0);
             assert!(face.descent > 0);
             assert!(face.leading >= 0);
-            assert!((face.ascent + face.descent + face.leading - UNIT).abs() < UNIT / 4);
+            // The math face gets its extents from Noto Sans Math, which is
+            // taller than the CJK faces; body faces are normalised to 1em.
+            let slack = if face.family == FAMILY_MATH {
+                UNIT
+            } else {
+                UNIT / 4
+            };
+            assert!(
+                (face.ascent + face.descent + face.leading - UNIT).abs() < slack,
+                "face {} extents {}/{}/{} (slack {slack})",
+                face.family,
+                face.ascent,
+                face.descent,
+                face.leading
+            );
             assert!(face.entry_count() > 100);
-            assert!(face.block_count() >= 4);
+            assert!(face.block_count() >= if face.family == FAMILY_MATH { 0 } else { 4 });
         }
     }
 }
