@@ -13,8 +13,8 @@ use soma_core::{
     break_paragraph_traced, BreakConfig, ParamSet, Permille, SyntheticMetrics, Weight, Width,
 };
 use soma_eval::{
-    bench, blind_report, build_paragraph, parse_observations, peak_rss_kb, sweep_tolerance,
-    sweep_weight, AggregateMetrics, BlindDecision, CorpusKind, WeightParam,
+    apply_key, bench, blind_report, build_paragraph, parse_key, parse_observations, peak_rss_kb,
+    sweep_tolerance, sweep_weight, AggregateMetrics, BlindDecision, CorpusKind, WeightParam,
 };
 
 const DEFAULT_SIZES: &[usize] = &[100, 500, 1_000, 2_000, 4_000];
@@ -50,7 +50,7 @@ fn print_help() {
     println!("  bench [--repeats N] [--sizes a,b,c] [--max-kp-atoms N] [--check]");
     println!("  sweep-tolerance [--atoms N] [--tolerances a,b,c] [--scales a,b,c]");
     println!("  sweep-weight --param NAME [--values a,b,c] [--atoms N]");
-    println!("  blind <preferences.csv>");
+    println!("  blind <preferences.csv> [--key key.csv]");
     println!("  inspect [--kind pure-cjk|mixed|punct-dense] [--atoms N]");
     println!("  score [--paragraphs N]   (Q' effect scorecard, CSV)");
     println!("  corpus [--dir PATH] [--tolerance N] [--badness-scale N]");
@@ -322,7 +322,26 @@ fn inspect_command(args: &[String]) -> ExitCode {
 }
 
 fn blind_command(args: &[String]) -> ExitCode {
-    let Some(path) = args.first() else {
+    let mut path: Option<&str> = None;
+    let mut key_path: Option<&str> = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--key" => {
+                let Some(value) = args.get(index + 1) else {
+                    return fail("missing value for --key");
+                };
+                key_path = Some(value);
+                index += 2;
+            }
+            other if !other.starts_with('-') && path.is_none() => {
+                path = Some(other);
+                index += 1;
+            }
+            other => return fail(&format!("unknown argument {other}")),
+        }
+    }
+    let Some(path) = path else {
         return fail("missing preferences.csv");
     };
     let input = match std::fs::read_to_string(path) {
@@ -332,10 +351,26 @@ fn blind_command(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let observations = match parse_observations(&input) {
+    let mut observations = match parse_observations(&input) {
         Ok(observations) => observations,
         Err(error) => return fail(&error),
     };
+    if let Some(key_path) = key_path {
+        let key_input = match std::fs::read_to_string(key_path) {
+            Ok(input) => input,
+            Err(error) => {
+                eprintln!("cannot read {key_path}: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let key = match parse_key(&key_input) {
+            Ok(key) => key,
+            Err(error) => return fail(&error),
+        };
+        if let Err(error) = apply_key(&mut observations, &key) {
+            return fail(&error);
+        }
+    }
     let report = match blind_report(&observations) {
         Ok(report) => report,
         Err(error) => return fail(&error),

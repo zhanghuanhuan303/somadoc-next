@@ -13,9 +13,14 @@ replace Gate Q's human review.
 | `mixed.md` | mixed-script note | URLs, code spans, hyphenated terms, percentages |
 | `classics.md` | classical prose (public domain) | long paragraphs, pagination, quotation |
 | `footnotes.md` | footnote-dense note | note area, marker-line coupling |
+| `interview.md` | Q&A interview | long turns, quotes, bold question labels, em dashes |
+| `science.md` | popular-science essay | parentheses, Latin terms, numbers, superscripts |
 | `table-page` (built-in) | table fixture | cell boxes, colspan/rowspan, repeated header |
 | `math-page` (built-in) | formula placeholders | object boxes, order across pages |
 | `book` (built-in) | 30-chapter document | long-run pagination, 810 lines, 30 pages |
+
+`corpus/blind/samples.txt` is the frozen 30-paragraph sample set for the human
+blind test; `corpus/blind/kit/` is generated output and is not committed.
 
 Provenance: the prose files were written for this repository; `classics.md`
 contains public-domain excerpts (Tao Yuanming, Fan Zhongyan, Han Yu, Ouyang

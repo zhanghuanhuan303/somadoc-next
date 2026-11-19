@@ -469,6 +469,68 @@ pub fn parse_observations(input: &str) -> Result<Vec<Observation>, String> {
     Ok(observations)
 }
 
+/// Parse the blind kit's key (`paragraph,kp_side`) into the side that holds
+/// the K-P candidate for each paragraph.
+pub fn parse_key(input: &str) -> Result<Vec<(u32, Choice)>, String> {
+    let mut key = Vec::new();
+    for (line_index, raw) in input.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split(',').map(str::trim).collect();
+        if fields.len() != 2 {
+            return Err(format!("key line {}: expected 2 fields", line_index + 1));
+        }
+        if fields[0].eq_ignore_ascii_case("paragraph") {
+            continue;
+        }
+        let paragraph = fields[0]
+            .parse::<u32>()
+            .map_err(|_| format!("key line {}: invalid paragraph", line_index + 1))?;
+        let side = match fields[1].to_ascii_uppercase().as_str() {
+            "A" => Choice::A,
+            "B" => Choice::B,
+            _ => {
+                return Err(format!(
+                    "key line {}: kp_side must be A or B",
+                    line_index + 1
+                ))
+            }
+        };
+        key.push((paragraph, side));
+    }
+    if key.is_empty() {
+        return Err("key is empty".into());
+    }
+    Ok(key)
+}
+
+/// Translate shown sides into candidate/baseline choices. When the kit placed
+/// the K-P candidate on side B, the reported choice is swapped so that the
+/// report keeps counting A as the candidate.
+pub fn apply_key(observations: &mut [Observation], key: &[(u32, Choice)]) -> Result<(), String> {
+    for observation in observations.iter_mut() {
+        let side = key
+            .iter()
+            .find(|(paragraph, _)| *paragraph == observation.paragraph)
+            .map(|(_, side)| *side)
+            .ok_or_else(|| {
+                format!(
+                    "paragraph {} is missing from the key",
+                    observation.paragraph
+                )
+            })?;
+        if side == Choice::B {
+            observation.choice = match observation.choice {
+                Choice::A => Choice::B,
+                Choice::B => Choice::A,
+            };
+        }
+    }
+    Ok(())
+}
+
 /// Wilson score interval for a binomial proportion.
 pub fn wilson_interval(wins: u32, n: u32, z: f64) -> (f64, f64) {
     if n == 0 {
@@ -666,6 +728,25 @@ mod tests {
             })
             .collect();
         assert_eq!(fleiss_kappa(&observations), Some(1.0));
+    }
+
+    #[test]
+    fn the_key_maps_shown_sides_to_the_candidate() {
+        let key = parse_key("paragraph,kp_side\n0,A\n1,B\n").unwrap();
+        assert_eq!(key, vec![(0, Choice::A), (1, Choice::B)]);
+
+        let mut observations = vec![
+            observation(0, 0, Choice::B),
+            observation(1, 0, Choice::B),
+            observation(1, 1, Choice::A),
+        ];
+        apply_key(&mut observations, &key).unwrap();
+        assert_eq!(observations[0].choice, Choice::B);
+        assert_eq!(observations[1].choice, Choice::A);
+        assert_eq!(observations[2].choice, Choice::B);
+
+        let error = apply_key(&mut observations, &[(0, Choice::A)]).unwrap_err();
+        assert!(error.contains("missing from the key"));
     }
 
     #[test]
