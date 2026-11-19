@@ -60,19 +60,20 @@ check_deps() {
 
 check_deps soma-layout "soma-layout soma-core soma-doc soma-metrics soma-rules soma-template"
 check_deps soma-md "soma-md soma-doc"
+check_deps soma-html "soma-html soma-doc"
 check_deps soma-engine "soma-engine soma-core"
 check_deps soma-metrics "soma-metrics"
 check_deps soma-render-html "soma-render-html soma-core soma-layout soma-template"
 check_deps soma-render-svg "soma-render-svg soma-core soma-layout soma-template"
 
-for crate in soma-engine soma-layout soma-md soma-metrics soma-render-html soma-render-svg; do
+for crate in soma-engine soma-layout soma-md soma-html soma-metrics soma-render-html soma-render-svg; do
     if grep -q 'extern crate std' "crates/$crate/src/lib.rs"; then
         echo "$crate must stay no_std" >&2
         exit 1
     fi
 done
 
-if grep -REn '\b(f32|f64)\b' crates/soma-layout/src crates/soma-md/src crates/soma-metrics/src crates/soma-render-html/src crates/soma-render-svg/src crates/soma-engine/src \
+if grep -REn '\b(f32|f64)\b' crates/soma-layout/src crates/soma-md/src crates/soma-html/src crates/soma-metrics/src crates/soma-render-html/src crates/soma-render-svg/src crates/soma-engine/src \
     --include='*.rs' | grep -vE ':[0-9]+:[[:space:]]*//'; then
     echo "layout, markdown, metrics, render, and engine must stay integer-only" >&2
     exit 1

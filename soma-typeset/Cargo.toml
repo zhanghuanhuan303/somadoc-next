@@ -9,6 +9,7 @@ members = [
     "crates/soma-rules",
     "crates/soma-layout",
     "crates/soma-md",
+    "crates/soma-html",
     "crates/soma-render-html",
     "crates/soma-render-svg",
     "crates/soma-eval",
