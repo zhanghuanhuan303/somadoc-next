@@ -77,7 +77,7 @@ fn canonical_json_is_stable_and_namespaced() {
     let json = template.canonical_json();
 
     assert!(
-        json.starts_with("{\"schema\":\"soma.template/5\""),
+        json.starts_with("{\"schema\":\"soma.template/6\""),
         "{json}"
     );
     assert!(json.contains("\"size\":\"A4\""));
@@ -371,4 +371,72 @@ styles:
     let error =
         parse_template(&source.replace("header-text:", "headerText:")).expect_err("unknown key");
     assert!(error.reason.contains("unknown"));
+}
+
+#[test]
+fn a_toc_section_parses_with_a_depth_and_title() {
+    let source = r#"
+name: toc
+page:
+  size: A4
+  margin: 20mm
+toc:
+  depth: 3
+  title: 目次
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+"#;
+    let template = parse_template(source).expect("toc parses");
+    let toc = template.toc.as_ref().expect("toc");
+    assert_eq!(toc.depth, 3);
+    assert_eq!(toc.title.as_deref(), Some("目次"));
+
+    let json = template.canonical_json();
+    assert!(
+        json.contains("\"toc\":{\"depth\":3,\"title\":\"目次\"}"),
+        "{json}"
+    );
+    assert_eq!(json, template.canonical_json());
+
+    // Depth defaults to 2; an empty value means no heading.
+    let defaulted = parse_template(&source.replace("  depth: 3\n", "")).expect("default depth");
+    assert_eq!(defaulted.toc.as_ref().unwrap().depth, 2);
+    let untitled =
+        parse_template(&source.replace("  title: 目次", "  title:")).expect("null title");
+    assert!(untitled.toc.unwrap().title.is_none());
+
+    let error = parse_template(&source.replace("depth: 3", "depth: 4")).expect_err("too deep");
+    assert!(error.reason.contains("toc depth"));
+    let error = parse_template(&source.replace("depth: 3", "depth: x")).expect_err("not a number");
+    assert!(error.reason.contains("toc depth"));
+    let error = parse_template(&source.replace("depth: 3", "entries: 3")).expect_err("unknown key");
+    assert!(error.reason.contains("unknown"));
+}
+
+#[test]
+fn a_page_master_can_be_bound_to_section_starts() {
+    let source = r#"
+name: chapter-start
+page:
+  size: A4
+  margin: 20mm
+  header: 6mm
+  start-master: plain
+masters:
+  - name: plain
+    header: 0
+    footer: 0
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+"#;
+    let template = parse_template(source).expect("start master parses");
+    assert_eq!(template.page.start_master.as_deref(), Some("plain"));
+    let json = template.canonical_json();
+    assert!(json.contains("\"startMaster\":\"plain\""), "{json}");
 }

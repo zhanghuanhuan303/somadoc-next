@@ -31,7 +31,7 @@ pub use style::{
 pub use template::{
     parse_template, Declaration, FontSlant, FontWeight, FootnoteNumbering, FootnoteSpec,
     MasterSpec, PageSize, PageSpec, Property, PropertyValue, RuleStyle, Selector, StyleRule,
-    TableSpec, Template, ELEMENTS, SCHEMA,
+    TableSpec, Template, TocSpec, ELEMENTS, SCHEMA,
 };
 pub use units::{LengthSpec, LineHeightSpec, Rational, Unit, UNITS_PER_EM};
 

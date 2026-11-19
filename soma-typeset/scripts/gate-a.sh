@@ -67,6 +67,7 @@ check_deps soma-engine "soma-engine soma-core"
 check_deps soma-metrics "soma-metrics"
 check_deps soma-render-html "soma-render-html soma-core soma-layout soma-template"
 check_deps soma-render-svg "soma-render-svg soma-core soma-layout soma-template"
+check_deps soma-cli "soma-cli soma-core soma-doc soma-engine soma-html soma-latex soma-layout soma-md soma-metrics soma-render-html soma-render-svg soma-template"
 
 for crate in soma-engine soma-layout soma-md soma-html soma-latex soma-math soma-metrics soma-render-html soma-render-svg; do
     if grep -q 'extern crate std' "crates/$crate/src/lib.rs"; then
@@ -108,9 +109,9 @@ grep -q 'pub const SCHEMA: ' crates/soma-doc/src/doc.rs
 grep -q '"soma.doc/1"' crates/soma-doc/src/doc.rs
 grep -q 'pub const DOC_IR_VERSION: u16 = 1' crates/soma-doc/src/doc.rs
 grep -q 'soma.layout/6' crates/soma-core/src/result.rs
-grep -q '"soma.template/5"' crates/soma-template/src/template.rs
-grep -q '"soma.styles/2"' crates/soma-template/src/canonical.rs
-grep -q '"soma.pages/6"' crates/soma-layout/src/canonical.rs
+grep -q '"soma.template/6"' crates/soma-template/src/template.rs
+grep -q '"soma.styles/3"' crates/soma-template/src/canonical.rs
+grep -q '"soma.pages/7"' crates/soma-layout/src/canonical.rs
 grep -q '"soma.engine/1"' crates/soma-engine/src/lib.rs
 
 echo "== gate A: DocIR and templates carry no physical style in content =="

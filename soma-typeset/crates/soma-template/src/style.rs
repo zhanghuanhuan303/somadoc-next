@@ -230,6 +230,14 @@ pub struct StyledDoc {
     masters: Vec<ResolvedMaster>,
     header_text: Option<String>,
     folio: Option<String>,
+    /// Table of contents settings, when the template asks for one.
+    toc: Option<crate::template::TocSpec>,
+    /// Style for TOC entries (`element: toc`).
+    toc_style: StyleId,
+    /// Style for the TOC heading (`element: tocTitle`).
+    toc_title_style: StyleId,
+    /// Master index for pages that begin a section.
+    start_master: Option<usize>,
     template_hash: crate::TemplateHash,
 }
 
@@ -289,6 +297,26 @@ impl StyledDoc {
     /// Folio template with `{page}` and `{pages}` placeholders.
     pub fn folio(&self) -> Option<&str> {
         self.folio.as_deref()
+    }
+
+    /// Table of contents settings, when the template asks for one.
+    pub fn toc(&self) -> Option<&crate::template::TocSpec> {
+        self.toc.as_ref()
+    }
+
+    /// Style of one TOC entry.
+    pub fn toc_style(&self) -> StyleId {
+        self.toc_style
+    }
+
+    /// Style of the TOC heading.
+    pub fn toc_title_style(&self) -> StyleId {
+        self.toc_title_style
+    }
+
+    /// Master index for the first page of a section.
+    pub fn start_master(&self) -> Option<usize> {
+        self.start_master
     }
 
     pub fn template_hash(&self) -> crate::TemplateHash {
@@ -414,6 +442,20 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         });
     }
 
+    // Generated content needs styles that no DocIR node carries: TOC entries
+    // and the TOC heading. They inherit the document style.
+    let toc_style =
+        resolver.compute("toc", None, &[], ComputedStyle::inherited_from(&root), &[])?;
+    let toc_style_id = resolver.table.intern(toc_style);
+    let toc_title_style = resolver.compute(
+        "tocTitle",
+        None,
+        &[],
+        ComputedStyle::inherited_from(&root),
+        &[],
+    )?;
+    let toc_title_style_id = resolver.table.intern(toc_title_style);
+
     // Table rules carry their own color; when the template does not set one
     // they inherit the document color (and renderers fall back to black).
     let rule_style = resolver.table.intern(ComputedStyle {
@@ -421,11 +463,31 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         ..root.clone()
     });
 
+    // The section-start master names a defined master; `default` means index 0.
+    let start_master = match template.page.start_master.as_deref() {
+        None => None,
+        Some("default") => Some(0),
+        Some(name) => match masters.iter().position(|master| master.name == name) {
+            Some(index) => Some(index),
+            None => {
+                return Err(TemplateError::new(
+                    1,
+                    1,
+                    "page.start-master",
+                    "start-master must name a defined master or default",
+                ))
+            }
+        },
+    };
+
     Ok(StyledDoc {
         node_style: resolver.node_style,
         table: resolver.table,
         page,
         footnote: template.footnote.numbering,
+        toc: template.toc.clone(),
+        toc_style: toc_style_id,
+        toc_title_style: toc_title_style_id,
         table_rules: TableRules {
             rule: template.table.rule.resolve(root.font_size, body_pt),
             header_rule: template.table.header_rule.resolve(root.font_size, body_pt),
@@ -441,6 +503,7 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         masters,
         header_text: template.page.header_text.clone(),
         folio: template.page.folio.clone(),
+        start_master,
         template_hash: template.template_hash(),
     })
 }

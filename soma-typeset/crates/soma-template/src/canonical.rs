@@ -15,7 +15,7 @@ use crate::units::{LengthSpec, LineHeightSpec, Rational};
 use crate::StyleHash;
 use crate::TemplateHash;
 
-pub(crate) const STYLE_SCHEMA: &str = "soma.styles/2";
+pub(crate) const STYLE_SCHEMA: &str = "soma.styles/3";
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -100,11 +100,23 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
     write_opt_string(out, template.page.header_text.as_deref())?;
     out.write_str(",\"folio\":")?;
     write_opt_string(out, template.page.folio.as_deref())?;
+    out.write_str(",\"startMaster\":")?;
+    write_opt_string(out, template.page.start_master.as_deref())?;
     out.write_char('}')?;
 
     out.write_str(",\"footnote\":{\"numbering\":\"")?;
     out.write_str(template.footnote.numbering.as_str())?;
     out.write_str("\"}")?;
+
+    out.write_str(",\"toc\":")?;
+    match &template.toc {
+        Some(toc) => {
+            write!(out, "{{\"depth\":{},\"title\":", toc.depth)?;
+            write_opt_string(out, toc.title.as_deref())?;
+            out.write_char('}')?;
+        }
+        None => out.write_str("null")?,
+    }
 
     out.write_str(",\"table\":{\"ruleWidth\":")?;
     write_length_object(out, template.table.rule)?;
@@ -273,10 +285,25 @@ fn write_style(out: &mut impl Write, styled: &StyledDoc) -> fmt::Result {
     write_opt_string(out, styled.header_text())?;
     out.write_str(",\"folio\":")?;
     write_opt_string(out, styled.folio())?;
+    write!(out, ",\"startMaster\":")?;
+    match styled.start_master() {
+        Some(index) => write!(out, "{index}")?,
+        None => out.write_str("null")?,
+    }
 
     out.write_str(",\"footnote\":{\"numbering\":\"")?;
     out.write_str(styled.footnote_numbering().as_str())?;
     out.write_str("\"}")?;
+
+    out.write_str(",\"toc\":")?;
+    match styled.toc() {
+        Some(toc) => {
+            write!(out, "{{\"depth\":{},\"title\":", toc.depth)?;
+            write_opt_string(out, toc.title.as_deref())?;
+            out.write_char('}')?;
+        }
+        None => out.write_str("null")?,
+    }
 
     out.write_str(",\"masters\":[")?;
     for (index, master) in styled.masters().iter().enumerate() {

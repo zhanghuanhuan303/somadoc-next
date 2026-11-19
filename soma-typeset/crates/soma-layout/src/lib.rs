@@ -37,7 +37,7 @@ use soma_doc::{Block, Document, Inline, NodeId};
 use soma_rules::{paragraph_from_spans, paragraph_from_text, InlineSpan, RuleError, SpanKind};
 use soma_template::{ComputedStyle, ResolvedPage, StyledDoc};
 
-pub const SCHEMA: &str = "soma.pages/6";
+pub const SCHEMA: &str = "soma.pages/7";
 
 /// Placeholder atom for a footnote marker. Renderers replace the marked atom
 /// with [`Mark::number`].
@@ -195,6 +195,27 @@ pub struct Page {
     pub overflow: bool,
 }
 
+/// One table-of-contents row: heading level, text, and resolved page number.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TocEntry {
+    pub level: u8,
+    pub text: String,
+    pub page: u32,
+}
+
+/// What the table of contents did during layout.
+///
+/// `passes` is how many full layouts ran (1 = the entries were already stable),
+/// and `stable` is `false` when the pass cap was reached before the entries
+/// stopped moving — in that case the printed page numbers come from the
+/// previous pass.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TocReport {
+    pub passes: u8,
+    pub stable: bool,
+    pub entries: u32,
+}
+
 /// The complete, owned layout result.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PagedLayout {
@@ -214,6 +235,8 @@ pub struct PagedLayout {
     /// Summed vertical cost of the chosen pagination. Comparable only between
     /// runs with the same `VerticalParams`.
     pub pagination_cost: i64,
+    /// Present when the template asks for a table of contents.
+    pub toc: Option<TocReport>,
 }
 
 impl PagedLayout {
@@ -246,6 +269,10 @@ pub trait TextSource {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TextIndex {
     entries: Vec<(NodeId, Vec<(String, StyleId)>)>,
+    /// Highest node id inserted so far. Tracked explicitly: `entries` is only
+    /// sorted at `finish`, so the last element is not the maximum while blocks
+    /// are still being added (the TOC adds ids above the document's).
+    max: u32,
 }
 
 impl TextIndex {
@@ -254,6 +281,7 @@ impl TextIndex {
     }
 
     fn insert(&mut self, node: NodeId, atoms: Vec<(String, StyleId)>) {
+        self.max = self.max.max(node.0);
         self.entries.push((node, atoms));
     }
 
@@ -262,7 +290,7 @@ impl TextIndex {
     }
 
     fn max_node(&self) -> u32 {
-        self.entries.last().map(|(node, _)| node.0).unwrap_or(0)
+        self.max
     }
 }
 
@@ -331,7 +359,26 @@ pub fn layout(
     )
 }
 
+/// One layout pass. The TOC driver repeats it with the entries found by the
+/// previous pass; everything else passes the same values.
+struct Pass<'a> {
+    doc: &'a Document,
+    styled: &'a StyledDoc,
+    metrics: &'a dyn Metrics,
+    engine: &'a BreakConfig,
+    strategy: PaginationStrategy,
+    vertical: VerticalParams,
+    /// Entries printed by this pass (from the previous pass's pagination).
+    toc_entries: &'a [TocEntry],
+    /// Template TOC settings; `None` disables TOC generation.
+    toc: Option<&'a soma_template::TocSpec>,
+}
+
 /// Lay out with an explicit strategy and vertical cost model.
+///
+/// When the template asks for a table of contents, this runs the layout again
+/// until the entry page numbers stop moving (at most [`TOC_MAX_PASSES`]).
+/// Everything else is a single pass.
 pub fn layout_with(
     doc: &Document,
     styled: &StyledDoc,
@@ -340,12 +387,69 @@ pub fn layout_with(
     strategy: PaginationStrategy,
     vertical: VerticalParams,
 ) -> Result<PagedLayout, LayoutError> {
+    let Some(spec) = styled.toc() else {
+        let (pages, _) = layout_once(&Pass {
+            doc,
+            styled,
+            metrics,
+            engine,
+            strategy,
+            vertical,
+            toc_entries: &[],
+            toc: None,
+        })?;
+        return Ok(pages);
+    };
+
+    let mut entries: Vec<TocEntry> = Vec::new();
+    let mut passes: u8 = 0;
+    loop {
+        passes += 1;
+        let (mut pages, found) = layout_once(&Pass {
+            doc,
+            styled,
+            metrics,
+            engine,
+            strategy,
+            vertical,
+            toc_entries: &entries,
+            toc: Some(spec),
+        })?;
+        let stable = found == entries;
+        if stable || passes >= TOC_MAX_PASSES {
+            pages.toc = Some(TocReport {
+                passes,
+                stable,
+                entries: entries.len() as u32,
+            });
+            return Ok(pages);
+        }
+        entries = found;
+    }
+}
+
+/// Bound on TOC fixed-point iterations. Each pass is a full layout, so a stuck
+/// document is reported as unstable instead of looping.
+const TOC_MAX_PASSES: u8 = 4;
+
+fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Vec<TocEntry>), LayoutError> {
+    let Pass {
+        doc,
+        styled,
+        metrics,
+        engine,
+        strategy,
+        vertical,
+        toc_entries,
+        toc,
+    } = *pass;
     let page = styled.page();
     let content_width = page.content_width();
     if content_width.0 <= 0 || page.content_height().0 <= 0 {
         return Err(LayoutError::new(None, "page content box must be positive"));
     }
 
+    let generated_base = doc.node_ids().iter().map(|id| id.0).max().unwrap_or(0) + 1;
     let mut builder = Builder {
         styled,
         metrics,
@@ -356,8 +460,16 @@ pub fn layout_with(
         headings: Vec::new(),
         tables: Vec::new(),
         current_master: 0,
+        generated: generated_base,
+        section_start_pending: false,
+        toc_depth: toc.map(|spec| spec.depth).unwrap_or(0),
+        toc_entries: toc_entries.to_vec(),
     };
-    let items = builder.flow(&doc.blocks, ROOT_STYLE)?;
+    let mut items = Vec::new();
+    if let Some(spec) = toc {
+        builder.toc_rows(spec, &mut items)?;
+    }
+    builder.flow_into(&doc.blocks, ROOT_STYLE, &mut items)?;
     builder.compile_notes(doc)?;
 
     let page_height = page.content_height();
@@ -426,12 +538,25 @@ pub fn layout_with(
         let footnotes =
             pagination::assemble_footnotes(previous, end, &vertical_items, &builder.notes);
 
-        let master = styled.master(
-            vertical_items
-                .get(previous)
-                .map(|item| item.master)
-                .unwrap_or(0),
-        );
+        // A page that opens a section may use the section-start master: book
+        // design usually drops the running head on a chapter opening.
+        let first_item = vertical_items
+            .get(previous)
+            .map(|item| item.item)
+            .unwrap_or(0);
+        let section_start = items
+            .get(first_item)
+            .map(|item| item.section_start)
+            .unwrap_or(false);
+        let base_master = vertical_items
+            .get(previous)
+            .map(|item| item.master)
+            .unwrap_or(0);
+        let master_index = match styled.start_master() {
+            Some(index) if section_start => index,
+            _ => base_master,
+        };
+        let master = styled.master(master_index);
         let mut header = Vec::new();
         let mut footer = Vec::new();
         if master.header_height.0 > 0 {
@@ -445,8 +570,8 @@ pub fn layout_with(
                     .headings
                     .iter()
                     .rev()
-                    .find(|(position, _, _)| *position <= item_index)
-                    .map(|(_, _, title)| title.clone())
+                    .find(|heading| heading.item <= item_index)
+                    .map(|heading| heading.text.clone())
                     .unwrap_or_default()
             } else {
                 String::from(source)
@@ -513,19 +638,49 @@ pub fn layout_with(
     let mut numbering = Numbering::new(styled.footnote_numbering());
     numbering.assign(&mut pages);
 
-    Ok(PagedLayout {
-        page,
-        pagination: kind,
-        pages,
-        text: builder.text,
-        engine_hash: engine.param_hash().0,
-        rules_version: engine.rules_version(),
-        metrics_version: engine.metrics_version(),
-        metrics_hash: metrics.hash(),
-        vertical_hash: vertical.hash(),
-        footnote_passes: passes,
-        pagination_cost,
-    })
+    // Resolve the heading page numbers for the next pass.
+    let mut page_of_item = vec![0u32; items.len()];
+    let mut start = 0usize;
+    for (index, &end) in ends.iter().enumerate() {
+        for item in &vertical_items[start..end] {
+            if let Some(slot) = page_of_item.get_mut(item.item) {
+                *slot = index as u32 + 1;
+            }
+        }
+        start = end;
+    }
+    let toc_found: Vec<TocEntry> = if builder.toc_depth == 0 {
+        Vec::new()
+    } else {
+        builder
+            .headings
+            .iter()
+            .filter(|heading| heading.level <= builder.toc_depth)
+            .map(|heading| TocEntry {
+                level: heading.level,
+                text: heading.text.clone(),
+                page: page_of_item.get(heading.item).copied().unwrap_or(0).max(1),
+            })
+            .collect()
+    };
+
+    Ok((
+        PagedLayout {
+            page,
+            pagination: kind,
+            pages,
+            text: builder.text,
+            engine_hash: engine.param_hash().0,
+            rules_version: engine.rules_version(),
+            metrics_version: engine.metrics_version(),
+            metrics_hash: metrics.hash(),
+            vertical_hash: vertical.hash(),
+            footnote_passes: passes,
+            pagination_cost,
+            toc: None,
+        },
+        toc_found,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -692,6 +847,9 @@ struct FlowItem {
     keep_with_next: bool,
     page_break_before: bool,
     forced_break: bool,
+    /// First item after a section marker: the page it starts may use the
+    /// section-start master.
+    section_start: bool,
     footnotes: Vec<usize>,
     /// Empty for atomic blocks; one entry per line for splittable blocks.
     parts: Vec<Part>,
@@ -699,6 +857,14 @@ struct FlowItem {
     master: usize,
     /// Set for table row groups; drives header repetition.
     table: Option<TableContext>,
+}
+
+/// One heading recorded during the flow, for running titles and the TOC.
+struct Heading {
+    /// Index of the heading's flow item.
+    item: usize,
+    level: u8,
+    text: String,
 }
 
 /// One vertical item handed to the page breaker.
@@ -754,11 +920,19 @@ struct Builder<'a> {
     text: TextIndex,
     notes: NoteMap,
     /// `(flow item index, node, plain text)` for headings, in document order.
-    headings: Vec<(usize, NodeId, String)>,
+    headings: Vec<Heading>,
     /// Repeated header templates, indexed by `TableContext::id`.
     tables: Vec<TableHeader>,
     /// Page master selected by the most recent `Section`.
     current_master: usize,
+    /// Next synthetic node id for generated content (TOC rows, running text).
+    generated: u32,
+    /// A `Section` was seen and its first content item is still unmarked.
+    section_start_pending: bool,
+    /// Heading depth the TOC includes; `0` disables collection.
+    toc_depth: u8,
+    /// Entries from the previous TOC pass; empty on the first pass.
+    toc_entries: Vec<TocEntry>,
 }
 
 impl Builder<'_> {
@@ -789,12 +963,6 @@ impl Builder<'_> {
         }
     }
 
-    fn flow(&mut self, blocks: &[Block], fallback: StyleId) -> Result<Vec<FlowItem>, LayoutError> {
-        let mut items = Vec::new();
-        self.flow_into(blocks, fallback, &mut items)?;
-        Ok(items)
-    }
-
     fn flow_into(
         &mut self,
         blocks: &[Block],
@@ -802,6 +970,7 @@ impl Builder<'_> {
         items: &mut Vec<FlowItem>,
     ) -> Result<(), LayoutError> {
         for block in blocks {
+            let before = items.len();
             match block {
                 Block::Paragraph(node) => {
                     let style = self.style(node.meta.id, fallback);
@@ -818,8 +987,16 @@ impl Builder<'_> {
                         self.paragraph_item(node.meta.id, BoxKind::Heading, &node.inlines, style)?
                     {
                         items.push(item);
-                        self.headings
-                            .push((index, node.meta.id, inline_text(&node.inlines)));
+                        self.headings.push(Heading {
+                            item: index,
+                            level: node.level,
+                            text: inline_text(&node.inlines),
+                        });
+                        // A level-1 heading opens a chapter: if it opens a
+                        // page, that page may use the section-start master.
+                        if node.level == 1 {
+                            items[index].section_start = true;
+                        }
                     }
                 }
                 Block::List(node) => {
@@ -1228,6 +1405,7 @@ impl Builder<'_> {
                         keep_with_next: false,
                         page_break_before: false,
                         forced_break: false,
+                        section_start: false,
                         footnotes: Vec::new(),
                         parts,
                         master: self.current_master,
@@ -1269,6 +1447,7 @@ impl Builder<'_> {
                         keep_with_next: false,
                         page_break_before: false,
                         forced_break: false,
+                        section_start: false,
                         footnotes: Vec::new(),
                         parts: Vec::new(),
                         master: self.current_master,
@@ -1283,6 +1462,7 @@ impl Builder<'_> {
                     keep_with_next: false,
                     page_break_before: false,
                     forced_break: true,
+                    section_start: false,
                     footnotes: Vec::new(),
                     parts: Vec::new(),
                     master: self.current_master,
@@ -1290,6 +1470,7 @@ impl Builder<'_> {
                 }),
                 Block::Section(node) => {
                     let style = self.style(node.meta.id, fallback);
+                    self.section_start_pending = true;
                     if let Some(name) = &node.page_template {
                         let index = self.styled.master_index(name).ok_or_else(|| {
                             LayoutError::new(Some(node.meta.id), "unknown page master")
@@ -1307,6 +1488,7 @@ impl Builder<'_> {
                                     keep_with_next: false,
                                     page_break_before: false,
                                     forced_break: true,
+                                    section_start: false,
                                     footnotes: Vec::new(),
                                     parts: Vec::new(),
                                     master: index,
@@ -1321,8 +1503,11 @@ impl Builder<'_> {
                             self.paragraph_item(node.meta.id, BoxKind::Heading, title, style)?
                         {
                             items.push(item);
-                            self.headings
-                                .push((index, node.meta.id, inline_text(title)));
+                            self.headings.push(Heading {
+                                item: index,
+                                level: node.level,
+                                text: inline_text(title),
+                            });
                         }
                     }
                 }
@@ -1340,6 +1525,17 @@ impl Builder<'_> {
                             style,
                         )?);
                     }
+                }
+            }
+
+            // The first content item after a section marker opens a chapter
+            // page; empty break markers do not count.
+            if self.section_start_pending {
+                if let Some(position) =
+                    (before..items.len()).find(|index| !items[*index].blocks.is_empty())
+                {
+                    items[position].section_start = true;
+                    self.section_start_pending = false;
                 }
             }
         }
@@ -1467,6 +1663,7 @@ impl Builder<'_> {
             keep_with_next: computed.keep_with_next,
             page_break_before: computed.page_break_before,
             forced_break: false,
+            section_start: false,
             footnotes,
             parts,
             master: self.current_master,
@@ -1654,6 +1851,7 @@ impl Builder<'_> {
             keep_with_next: computed.keep_with_next,
             page_break_before: computed.page_break_before,
             forced_break: false,
+            section_start: false,
             footnotes: Vec::new(),
             parts: Vec::new(),
             master: self.current_master,
@@ -1684,9 +1882,24 @@ impl Builder<'_> {
         text: &str,
         style_id: StyleId,
     ) -> Result<FlowItem, LayoutError> {
+        self.object_item_at(node, kind, text, style_id, Width::ZERO, self.content_width)
+    }
+
+    /// An object paragraph at an explicit position and width. Used by the TOC,
+    /// where rows carry their own indent and the page number sits in a narrow
+    /// right-hand box.
+    fn object_item_at(
+        &mut self,
+        node: NodeId,
+        kind: BoxKind,
+        text: &str,
+        style_id: StyleId,
+        x: Width,
+        width: Width,
+    ) -> Result<FlowItem, LayoutError> {
         let computed = self.computed(style_id);
         let paragraph_style = ParagraphStyle {
-            width: self.content_width,
+            width,
             first_indent: Width::ZERO,
             line_height: computed.line_height,
             align: computed.align,
@@ -1723,6 +1936,7 @@ impl Builder<'_> {
             keep_with_next: computed.keep_with_next,
             page_break_before: computed.page_break_before,
             forced_break: false,
+            section_start: false,
             footnotes: Vec::new(),
             parts: Vec::new(),
             master: self.current_master,
@@ -1731,9 +1945,9 @@ impl Builder<'_> {
                 node,
                 kind,
                 style: style_id,
-                x: Width::ZERO,
+                x,
                 y: Width::ZERO,
-                width: self.content_width,
+                width,
                 height: y,
                 lines,
                 marks: Vec::new(),
@@ -1744,6 +1958,103 @@ impl Builder<'_> {
                 inline_math: Vec::new(),
             }],
         })
+    }
+
+    /// A fresh synthetic node id for generated content.
+    fn generated_id(&mut self) -> NodeId {
+        let id = NodeId(self.generated);
+        self.generated += 1;
+        id
+    }
+
+    /// Emit the table of contents at the head of the flow.
+    ///
+    /// Entries come from the previous layout pass (page numbers are only known
+    /// after pagination); `layout_with` iterates until they stop moving. Each
+    /// row is one flow item holding two boxes: the title and the page number.
+    fn toc_rows(
+        &mut self,
+        spec: &soma_template::TocSpec,
+        items: &mut Vec<FlowItem>,
+    ) -> Result<(), LayoutError> {
+        let entry_style = self.styled.toc_style();
+        let title_style = self.styled.toc_title_style();
+
+        if let Some(title) = spec.title.as_deref().filter(|title| !title.is_empty()) {
+            let node = self.generated_id();
+            let item = self.object_item_at(
+                node,
+                BoxKind::Paragraph,
+                title,
+                title_style,
+                Width::ZERO,
+                self.content_width,
+            )?;
+            items.push(item);
+        }
+
+        if self.toc_entries.is_empty() {
+            return Ok(());
+        }
+
+        // Reserve four digits so a growing page count never reflows the rows.
+        let reserve = self.metrics.advance("0000", entry_style).0.max(Width::EM.0);
+        let step = Width::from_em_frac(3, 2);
+        let gap = Width::from_em_frac(1, 2);
+        let entries = self.toc_entries.clone();
+
+        for entry_row in &entries {
+            let level = entry_row.level.max(1) as i32;
+            let indent = Width(step.0 * (level - 1));
+            let title_width = Width(self.content_width.0 - indent.0 - reserve - gap.0);
+            if title_width.0 <= Width::EM.0 {
+                continue;
+            }
+            let number = entry_row.page.to_string();
+            let number_width = self.metrics.advance(&number, entry_style);
+            let number_x = Width(self.content_width.0 - number_width.0);
+
+            let title_node = self.generated_id();
+            let mut row = self.object_item_at(
+                title_node,
+                BoxKind::Paragraph,
+                &entry_row.text,
+                entry_style,
+                indent,
+                title_width,
+            )?;
+            let number_node = self.generated_id();
+            let mut number_item = self.object_item_at(
+                number_node,
+                BoxKind::Paragraph,
+                &number,
+                entry_style,
+                number_x,
+                number_width,
+            )?;
+            row.height = row.height.max(number_item.height);
+            row.blocks.append(&mut number_item.blocks);
+            // A TOC entry never carries the entry style's block spacing.
+            row.before = Glue::ZERO;
+            items.push(row);
+        }
+
+        // The contents end the page they start on.
+        items.push(FlowItem {
+            blocks: Vec::new(),
+            height: Width::ZERO,
+            before: Glue::ZERO,
+            after: Glue::ZERO,
+            keep_with_next: false,
+            page_break_before: false,
+            forced_break: true,
+            section_start: false,
+            footnotes: Vec::new(),
+            parts: Vec::new(),
+            master: self.current_master,
+            table: None,
+        });
+        Ok(())
     }
 
     /// Place a display formula centred in the content box.
@@ -1763,6 +2074,7 @@ impl Builder<'_> {
             keep_with_next: computed.keep_with_next,
             page_break_before: computed.page_break_before,
             forced_break: false,
+            section_start: false,
             footnotes: Vec::new(),
             parts: Vec::new(),
             master: self.current_master,
@@ -1813,6 +2125,7 @@ impl Builder<'_> {
             keep_with_next: computed.keep_with_next,
             page_break_before: computed.page_break_before,
             forced_break: false,
+            section_start: false,
             footnotes: Vec::new(),
             parts: Vec::new(),
             master: self.current_master,

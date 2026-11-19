@@ -14,7 +14,7 @@ use crate::units::{LengthSpec, LineHeightSpec, Rational, Unit};
 use crate::yaml::{Key, Value, ValueKind};
 use crate::TemplateError;
 
-pub const SCHEMA: &str = "soma.template/5";
+pub const SCHEMA: &str = "soma.template/6";
 
 /// Element names a selector may target. Derived from DocIR node kinds; a typo is
 /// an error instead of silently matching nothing.
@@ -55,6 +55,9 @@ pub const ELEMENTS: &[&str] = &[
     "ruby",
     "lineBreak",
     "rawInline",
+    // Generated content: table of contents entries and their heading.
+    "toc",
+    "tocTitle",
 ];
 
 /// A parsed, validated template.
@@ -64,6 +67,7 @@ pub struct Template {
     pub version: Option<String>,
     pub page: PageSpec,
     pub footnote: FootnoteSpec,
+    pub toc: Option<TocSpec>,
     pub table: TableSpec,
     /// Named page masters beyond the default `page:` geometry.
     pub masters: Vec<MasterSpec>,
@@ -121,6 +125,8 @@ pub struct PageSpec {
     pub header_text: Option<String>,
     /// Folio template: `{page}` and `{pages}` are substituted.
     pub folio: Option<String>,
+    /// Master used for a page that begins a section (a chapter opening).
+    pub start_master: Option<String>,
 }
 
 /// Named page size or an explicit pair of lengths.
@@ -188,6 +194,16 @@ impl FootnoteNumbering {
             Self::Section => "section",
         }
     }
+}
+
+/// Table of contents settings. Entries come from the document headings; the
+/// layout knows the page numbers, so the template only chooses depth and title.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TocSpec {
+    /// Heading levels included, `1..=3`.
+    pub depth: u8,
+    /// Heading above the entries; `None` prints no title.
+    pub title: Option<String>,
 }
 
 /// Footnote settings.
@@ -471,7 +487,7 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
     let root = crate::yaml::parse(source)?;
     let fields = Fields::new(&root, "")?;
     fields.reject_unknown(&[
-        "name", "version", "page", "footnote", "table", "masters", "styles",
+        "name", "version", "page", "footnote", "toc", "table", "masters", "styles",
     ])?;
 
     let name = fields.require_str("name")?;
@@ -482,6 +498,10 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
     let footnote = match fields.optional("footnote") {
         Some(value) if !value.is_null() => parse_footnote(value, "footnote")?,
         _ => FootnoteSpec::default(),
+    };
+    let toc = match fields.optional("toc") {
+        Some(value) if !value.is_null() => Some(parse_toc(value, "toc")?),
+        _ => None,
     };
     let table = match fields.optional("table") {
         Some(value) if !value.is_null() => parse_table(value, "table")?,
@@ -503,6 +523,7 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
         version,
         page,
         footnote,
+        toc,
         table,
         masters,
         styles,
@@ -584,6 +605,7 @@ fn parse_page(value: &Value, path: &str) -> Result<PageSpec, TemplateError> {
         "footer",
         "header-text",
         "folio",
+        "start-master",
     ])?;
 
     let size_text = fields.require_str("size")?;
@@ -649,6 +671,7 @@ fn parse_page(value: &Value, path: &str) -> Result<PageSpec, TemplateError> {
         .unwrap_or(zero);
     let header_text = fields.optional_str("header-text")?;
     let folio = fields.optional_str("folio")?;
+    let start_master = fields.optional_str("start-master")?;
 
     Ok(PageSpec {
         size,
@@ -660,7 +683,28 @@ fn parse_page(value: &Value, path: &str) -> Result<PageSpec, TemplateError> {
         footer,
         header_text,
         folio,
+        start_master,
     })
+}
+
+fn parse_toc(value: &Value, path: &str) -> Result<TocSpec, TemplateError> {
+    let fields = Fields::new(value, path)?;
+    fields.reject_unknown(&["depth", "title"])?;
+    let depth = match fields.optional("depth") {
+        Some(value) => {
+            let text = value.as_str("toc.depth")?;
+            let depth = text
+                .parse::<u8>()
+                .map_err(|_| fields.error("toc depth must be 1, 2, or 3"))?;
+            if !(1..=3).contains(&depth) {
+                return Err(fields.error("toc depth must be 1, 2, or 3"));
+            }
+            depth
+        }
+        None => 2,
+    };
+    let title = fields.optional_str("title")?;
+    Ok(TocSpec { depth, title })
 }
 
 fn parse_footnote(value: &Value, path: &str) -> Result<FootnoteSpec, TemplateError> {
