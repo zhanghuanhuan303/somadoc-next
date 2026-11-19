@@ -1,0 +1,10 @@
+[package]
+name = "soma-doc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Clean-room semantic document IR (DocIR): nodes, source spans, canonical JSON, hashes"
+
+[dependencies]
