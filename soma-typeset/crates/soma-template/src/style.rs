@@ -208,6 +208,16 @@ impl TableRules {
     }
 }
 
+/// One named page master resolved to em units.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedMaster {
+    pub name: String,
+    pub header_height: Width,
+    pub footer_height: Width,
+    pub header_text: Option<String>,
+    pub folio: Option<String>,
+}
+
 /// The resolved style layer for one document.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StyledDoc {
@@ -217,6 +227,7 @@ pub struct StyledDoc {
     page: ResolvedPage,
     footnote: crate::template::FootnoteNumbering,
     table_rules: TableRules,
+    masters: Vec<ResolvedMaster>,
     header_text: Option<String>,
     folio: Option<String>,
     template_hash: crate::TemplateHash,
@@ -253,6 +264,21 @@ impl StyledDoc {
     /// Table rules resolved from the template's `table` section.
     pub fn table_rules(&self) -> TableRules {
         self.table_rules
+    }
+
+    /// Master 0 is the default `page:` geometry, then `masters:` in order.
+    pub fn masters(&self) -> &[ResolvedMaster] {
+        &self.masters
+    }
+
+    /// Index of a named master, or `None` when the name is unknown.
+    pub fn master_index(&self, name: &str) -> Option<usize> {
+        self.masters.iter().position(|master| master.name == name)
+    }
+
+    /// Master by index; an out-of-range index falls back to the default.
+    pub fn master(&self, index: usize) -> &ResolvedMaster {
+        self.masters.get(index).unwrap_or(&self.masters[0])
     }
 
     /// Literal header text, or `running-title` when the template says so.
@@ -352,6 +378,42 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         ));
     }
 
+    let mut masters = Vec::with_capacity(template.masters.len() + 1);
+    masters.push(ResolvedMaster {
+        name: String::from("default"),
+        header_height: page.header_height,
+        footer_height: page.footer_height,
+        header_text: template.page.header_text.clone(),
+        folio: template.page.folio.clone(),
+    });
+    for master in &template.masters {
+        let header_height = master.header.resolve(root.font_size, body_pt);
+        let footer_height = master.footer.resolve(root.font_size, body_pt);
+        if header_height.0 > page.margin_top.0 {
+            return Err(TemplateError::new(
+                1,
+                1,
+                "masters",
+                "master header height must fit inside the top margin",
+            ));
+        }
+        if footer_height.0 > page.margin_bottom.0 {
+            return Err(TemplateError::new(
+                1,
+                1,
+                "masters",
+                "master footer height must fit inside the bottom margin",
+            ));
+        }
+        masters.push(ResolvedMaster {
+            name: master.name.clone(),
+            header_height,
+            footer_height,
+            header_text: master.header_text.clone(),
+            folio: master.folio.clone(),
+        });
+    }
+
     // Table rules carry their own color; when the template does not set one
     // they inherit the document color (and renderers fall back to black).
     let rule_style = resolver.table.intern(ComputedStyle {
@@ -376,6 +438,7 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
             style: template.table.style,
             style_id: rule_style,
         },
+        masters,
         header_text: template.page.header_text.clone(),
         folio: template.page.folio.clone(),
         template_hash: template.template_hash(),

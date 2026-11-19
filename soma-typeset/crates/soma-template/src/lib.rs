@@ -25,11 +25,13 @@ pub mod template;
 pub mod units;
 mod yaml;
 
-pub use style::{resolve, ComputedStyle, ResolvedPage, StyleTable, StyledDoc, TableRules};
+pub use style::{
+    resolve, ComputedStyle, ResolvedMaster, ResolvedPage, StyleTable, StyledDoc, TableRules,
+};
 pub use template::{
-    parse_template, Declaration, FontSlant, FontWeight, FootnoteNumbering, FootnoteSpec, PageSize,
-    PageSpec, Property, PropertyValue, RuleStyle, Selector, StyleRule, TableSpec, Template,
-    ELEMENTS, SCHEMA,
+    parse_template, Declaration, FontSlant, FontWeight, FootnoteNumbering, FootnoteSpec,
+    MasterSpec, PageSize, PageSpec, Property, PropertyValue, RuleStyle, Selector, StyleRule,
+    TableSpec, Template, ELEMENTS, SCHEMA,
 };
 pub use units::{LengthSpec, LineHeightSpec, Rational, Unit, UNITS_PER_EM};
 

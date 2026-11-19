@@ -14,7 +14,7 @@ use crate::units::{LengthSpec, LineHeightSpec, Rational, Unit};
 use crate::yaml::{Key, Value, ValueKind};
 use crate::TemplateError;
 
-pub const SCHEMA: &str = "soma.template/4";
+pub const SCHEMA: &str = "soma.template/5";
 
 /// Element names a selector may target. Derived from DocIR node kinds; a typo is
 /// an error instead of silently matching nothing.
@@ -65,6 +65,8 @@ pub struct Template {
     pub page: PageSpec,
     pub footnote: FootnoteSpec,
     pub table: TableSpec,
+    /// Named page masters beyond the default `page:` geometry.
+    pub masters: Vec<MasterSpec>,
     pub styles: Vec<StyleRule>,
 }
 
@@ -263,6 +265,17 @@ impl TableSpec {
     }
 }
 
+/// A named page master. Masters change the margin bands (header, footer,
+/// running text, folio); the content box stays the document geometry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MasterSpec {
+    pub name: String,
+    pub header: LengthSpec,
+    pub footer: LengthSpec,
+    pub header_text: Option<String>,
+    pub folio: Option<String>,
+}
+
 /// One style rule: a selector plus declarations.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StyleRule {
@@ -457,7 +470,9 @@ pub enum FontSlant {
 pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
     let root = crate::yaml::parse(source)?;
     let fields = Fields::new(&root, "")?;
-    fields.reject_unknown(&["name", "version", "page", "footnote", "table", "styles"])?;
+    fields.reject_unknown(&[
+        "name", "version", "page", "footnote", "table", "masters", "styles",
+    ])?;
 
     let name = fields.require_str("name")?;
     check_token(&name, fields.error("name must be a non-empty token"))?;
@@ -472,6 +487,10 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
         Some(value) if !value.is_null() => parse_table(value, "table")?,
         _ => TableSpec::default(),
     };
+    let masters = match fields.optional("masters") {
+        Some(value) if !value.is_null() => parse_masters(value, "masters")?,
+        _ => Vec::new(),
+    };
 
     let style_nodes = fields.require("styles")?.as_seq("styles")?;
     let mut styles = Vec::with_capacity(style_nodes.len());
@@ -485,6 +504,7 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
         page,
         footnote,
         table,
+        masters,
         styles,
     };
     validate_template(&template)?;
@@ -713,6 +733,46 @@ fn parse_table(value: &Value, path: &str) -> Result<TableSpec, TemplateError> {
     }
 
     Ok(spec)
+}
+
+fn parse_masters(value: &Value, path: &str) -> Result<Vec<MasterSpec>, TemplateError> {
+    let mut out: Vec<MasterSpec> = Vec::new();
+    for (index, item) in value.as_seq(path)?.iter().enumerate() {
+        let path = alloc::format!("{path}[{index}]");
+        let fields = Fields::new(item, &path)?;
+        fields.reject_unknown(&["name", "header", "footer", "header-text", "folio"])?;
+
+        let name = fields.require_str("name")?;
+        check_token(&name, fields.error("master name must be a non-empty token"))?;
+        if name == "default" || out.iter().any(|master| master.name == name) {
+            return Err(fields.error("duplicate or reserved master name"));
+        }
+
+        let header = fields
+            .optional("header")
+            .map(|value| parse_length(value, &path))
+            .transpose()?
+            .unwrap_or_else(LengthSpec::zero);
+        let footer = fields
+            .optional("footer")
+            .map(|value| parse_length(value, &path))
+            .transpose()?
+            .unwrap_or_else(LengthSpec::zero);
+        for length in [header, footer] {
+            if length.value.num() < 0 {
+                return Err(fields.error("master band height must not be negative"));
+            }
+        }
+
+        out.push(MasterSpec {
+            name,
+            header,
+            footer,
+            header_text: fields.optional_str("header-text")?,
+            folio: fields.optional_str("folio")?,
+        });
+    }
+    Ok(out)
 }
 
 fn parse_rule(value: &Value, index: usize) -> Result<StyleRule, TemplateError> {

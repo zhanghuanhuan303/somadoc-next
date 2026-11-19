@@ -129,6 +129,25 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
     }
     out.write_char('}')?;
 
+    out.write_str(",\"masters\":[")?;
+    for (index, master) in template.masters.iter().enumerate() {
+        if index > 0 {
+            out.write_char(',')?;
+        }
+        out.write_str("{\"name\":")?;
+        write_string(out, &master.name)?;
+        out.write_str(",\"header\":")?;
+        write_length_object(out, master.header)?;
+        out.write_str(",\"footer\":")?;
+        write_length_object(out, master.footer)?;
+        out.write_str(",\"headerText\":")?;
+        write_opt_string(out, master.header_text.as_deref())?;
+        out.write_str(",\"folio\":")?;
+        write_opt_string(out, master.folio.as_deref())?;
+        out.write_char('}')?;
+    }
+    out.write_str("]")?;
+
     out.write_str(",\"styles\":[")?;
     for (index, rule) in template.styles.iter().enumerate() {
         if index > 0 {
@@ -258,6 +277,23 @@ fn write_style(out: &mut impl Write, styled: &StyledDoc) -> fmt::Result {
     out.write_str(",\"footnote\":{\"numbering\":\"")?;
     out.write_str(styled.footnote_numbering().as_str())?;
     out.write_str("\"}")?;
+
+    out.write_str(",\"masters\":[")?;
+    for (index, master) in styled.masters().iter().enumerate() {
+        if index > 0 {
+            out.write_char(',')?;
+        }
+        out.write_str("{\"name\":")?;
+        write_string(out, &master.name)?;
+        write!(out, ",\"headerHeight\":{}", master.header_height.0)?;
+        write!(out, ",\"footerHeight\":{}", master.footer_height.0)?;
+        out.write_str(",\"headerText\":")?;
+        write_opt_string(out, master.header_text.as_deref())?;
+        out.write_str(",\"folio\":")?;
+        write_opt_string(out, master.folio.as_deref())?;
+        out.write_char('}')?;
+    }
+    out.write_str("]")?;
 
     out.write_str(",\"styles\":[")?;
     for (index, style) in styled.table().styles().iter().enumerate() {

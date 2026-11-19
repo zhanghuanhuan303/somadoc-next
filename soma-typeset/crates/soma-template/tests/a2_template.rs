@@ -77,7 +77,7 @@ fn canonical_json_is_stable_and_namespaced() {
     let json = template.canonical_json();
 
     assert!(
-        json.starts_with("{\"schema\":\"soma.template/4\""),
+        json.starts_with("{\"schema\":\"soma.template/5\""),
         "{json}"
     );
     assert!(json.contains("\"size\":\"A4\""));
@@ -320,4 +320,55 @@ styles:
 
     let error = parse_template(&source.replace("aa0000", "red")).expect_err("bad color");
     assert_eq!(error.reason, "rule color must be #rrggbb");
+}
+
+#[test]
+fn masters_parse_canonicalize_and_reject_bad_names() {
+    let source = r#"
+name: masters
+page:
+  size: A4
+  header: 6mm
+  footer: 6mm
+masters:
+  - name: chapter
+    header: 4mm
+    footer: 0
+    header-text: 章节页
+  - name: cover
+    folio: null
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+"#;
+    let template = parse_template(source).expect("masters parse");
+    assert_eq!(template.masters.len(), 2);
+    assert_eq!(template.masters[0].name, "chapter");
+    assert_eq!(template.masters[0].header_text.as_deref(), Some("章节页"));
+    assert_eq!(template.masters[1].name, "cover");
+
+    let json = template.canonical_json();
+    assert!(
+        json.contains("\"masters\":[{\"name\":\"chapter\""),
+        "{json}"
+    );
+    assert_eq!(json, template.canonical_json());
+
+    let error =
+        parse_template(&source.replace("name: cover", "name: chapter")).expect_err("duplicate");
+    assert_eq!(error.reason, "duplicate or reserved master name");
+
+    let error =
+        parse_template(&source.replace("name: cover", "name: default")).expect_err("reserved");
+    assert_eq!(error.reason, "duplicate or reserved master name");
+
+    let error =
+        parse_template(&source.replace("header: 4mm", "header: -4mm")).expect_err("negative");
+    assert_eq!(error.reason, "master band height must not be negative");
+
+    let error =
+        parse_template(&source.replace("header-text:", "headerText:")).expect_err("unknown key");
+    assert!(error.reason.contains("unknown"));
 }

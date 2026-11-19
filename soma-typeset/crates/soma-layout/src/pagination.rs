@@ -51,6 +51,7 @@ fn push_item(out: &mut Vec<VItem>, index: usize, item: &FlowItem, params: Vertic
             notes: item.footnotes.clone(),
             penalty: 0,
             can_break: !item.keep_with_next,
+            master: item.master,
             table: item.table,
         });
         return;
@@ -92,6 +93,7 @@ fn push_item(out: &mut Vec<VItem>, index: usize, item: &FlowItem, params: Vertic
             notes: part.notes.clone(),
             penalty,
             can_break: !(part_index == last && item.keep_with_next),
+            master: item.master,
             table: item.table.map(|mut table| {
                 table.row = part.row;
                 table

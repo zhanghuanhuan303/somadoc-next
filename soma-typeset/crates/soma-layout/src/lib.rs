@@ -322,6 +322,7 @@ pub fn layout_with(
         notes: NoteMap::build(doc),
         headings: Vec::new(),
         tables: Vec::new(),
+        current_master: 0,
     };
     let items = builder.flow(&doc.blocks, ROOT_STYLE)?;
     builder.compile_notes(doc)?;
@@ -392,10 +393,16 @@ pub fn layout_with(
         let footnotes =
             pagination::assemble_footnotes(previous, end, &vertical_items, &builder.notes);
 
+        let master = styled.master(
+            vertical_items
+                .get(previous)
+                .map(|item| item.master)
+                .unwrap_or(0),
+        );
         let mut header = Vec::new();
         let mut footer = Vec::new();
-        if page.header_height.0 > 0 {
-            let source = styled.header_text().unwrap_or("running-title");
+        if master.header_height.0 > 0 {
+            let source = master.header_text.as_deref().unwrap_or("running-title");
             let text = if source == "running-title" {
                 let item_index = vertical_items
                     .get(previous)
@@ -417,15 +424,15 @@ pub fn layout_with(
                 &text,
                 ROOT_STYLE,
                 content_width,
-                page.header_height,
-                Width(-page.header_height.0),
+                master.header_height,
+                Width(-master.header_height.0),
             ) {
                 header.push(block);
                 next_node += 1;
             }
         }
-        if page.footer_height.0 > 0 {
-            if let Some(format) = styled.folio() {
+        if master.footer_height.0 > 0 {
+            if let Some(format) = master.folio.as_deref() {
                 let text = format
                     .replace("{page}", &(index as u32 + 1).to_string())
                     .replace("{pages}", &total_pages.to_string());
@@ -435,7 +442,7 @@ pub fn layout_with(
                     &text,
                     ROOT_STYLE,
                     content_width,
-                    page.footer_height,
+                    master.footer_height,
                     page_height,
                 ) {
                     footer.push(block);
@@ -653,6 +660,8 @@ struct FlowItem {
     footnotes: Vec<usize>,
     /// Empty for atomic blocks; one entry per line for splittable blocks.
     parts: Vec<Part>,
+    /// Page master index in effect for this item (`0` is the default).
+    master: usize,
     /// Set for table row groups; drives header repetition.
     table: Option<TableContext>,
 }
@@ -669,6 +678,8 @@ struct VItem {
     penalty: i64,
     /// `false` when `keep-with-next` forbids a break here.
     can_break: bool,
+    /// Page master index, copied from the flow item.
+    master: usize,
     /// Table metadata, copied from the flow item.
     table: Option<TableContext>,
 }
@@ -711,6 +722,8 @@ struct Builder<'a> {
     headings: Vec<(usize, NodeId, String)>,
     /// Repeated header templates, indexed by `TableContext::id`.
     tables: Vec<TableHeader>,
+    /// Page master selected by the most recent `Section`.
+    current_master: usize,
 }
 
 impl Builder<'_> {
@@ -1177,6 +1190,7 @@ impl Builder<'_> {
                         forced_break: false,
                         footnotes: Vec::new(),
                         parts,
+                        master: self.current_master,
                         table: Some(TableContext {
                             id: table_id,
                             row: 0,
@@ -1215,6 +1229,7 @@ impl Builder<'_> {
                         forced_break: false,
                         footnotes: Vec::new(),
                         parts: Vec::new(),
+                        master: self.current_master,
                         table: None,
                     });
                 }
@@ -1228,10 +1243,36 @@ impl Builder<'_> {
                     forced_break: true,
                     footnotes: Vec::new(),
                     parts: Vec::new(),
+                    master: self.current_master,
                     table: None,
                 }),
                 Block::Section(node) => {
                     let style = self.style(node.meta.id, fallback);
+                    if let Some(name) = &node.page_template {
+                        let index = self.styled.master_index(name).ok_or_else(|| {
+                            LayoutError::new(Some(node.meta.id), "unknown page master")
+                        })?;
+                        if index != self.current_master {
+                            self.current_master = index;
+                            // A new master starts a new page; otherwise the
+                            // first item on the old page would keep the master.
+                            if !items.is_empty() {
+                                items.push(FlowItem {
+                                    blocks: Vec::new(),
+                                    height: Width::ZERO,
+                                    before: Glue::ZERO,
+                                    after: Glue::ZERO,
+                                    keep_with_next: false,
+                                    page_break_before: false,
+                                    forced_break: true,
+                                    footnotes: Vec::new(),
+                                    parts: Vec::new(),
+                                    master: index,
+                                    table: None,
+                                });
+                            }
+                        }
+                    }
                     if let Some(title) = &node.title {
                         let index = items.len();
                         if let Some(item) =
@@ -1367,6 +1408,7 @@ impl Builder<'_> {
             forced_break: false,
             footnotes,
             parts,
+            master: self.current_master,
             table: None,
             blocks: vec![PlacedBlock {
                 node,
@@ -1534,6 +1576,7 @@ impl Builder<'_> {
             forced_break: false,
             footnotes: Vec::new(),
             parts: Vec::new(),
+            master: self.current_master,
             table: None,
             blocks: vec![PlacedBlock {
                 node,
@@ -1600,6 +1643,7 @@ impl Builder<'_> {
             forced_break: false,
             footnotes: Vec::new(),
             parts: Vec::new(),
+            master: self.current_master,
             table: None,
             blocks: vec![PlacedBlock {
                 node,
@@ -1641,6 +1685,7 @@ impl Builder<'_> {
             forced_break: false,
             footnotes: Vec::new(),
             parts: Vec::new(),
+            master: self.current_master,
             table: None,
             blocks: vec![PlacedBlock {
                 node,
