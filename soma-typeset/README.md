@@ -77,6 +77,10 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   punctuation compresses, closing punctuation can hang, and a baseline grid is
   available per template. `soma-render-svg` is a second renderer used by Gate R;
   `soma-eval score` prints the effect scorecard.
+- Real corpus: `corpus/zh/` holds five self-authored documents (technical note,
+  notice, abstract, essay, mixed-script notes). `soma-eval corpus` measures them
+  and `soma-eval calibrate` sweeps tolerance × badness scale on a proxy
+  objective; see [`docs/corpus-calibration.md`](docs/corpus-calibration.md).
 - Engine configuration: `soma-engine` parses `soma.engine/1` (preset, window,
   atom window, fallback switches, vertical cost model) into the same
   `BreakConfig`/`VerticalParams` the hand-built path uses. See
@@ -131,12 +135,16 @@ crates/
   soma-wasm/   # native/WASI fixture for cross-target byte verification
 tools/
   metrics-gen/ # offline OTF/TTC -> soma.metrics/1 (numbers only)
+corpus/
+  zh/          # self-authored evaluation corpus (five genres)
+  README.md    # provenance and corpus rules
 scripts/
   gates.sh     # fmt, clippy, tests, wasm hash, demo smoke, dependency guard, gates
   gate-a.sh    # architecture gate: layer boundaries, DocIR purity, schema versions
   gate-c.sh    # content gate: capability matrix, degradation, renderer safety
   gate-r.sh    # Gate V/R: SVG visual lock + cross-renderer atom parity
   gate-q.sh    # Gate Q': effect scorecard tests + report
+  corpus.sh    # corpus metrics + calibration sweep
   effect-score.sh # alias for gate-q.sh
   bench.sh     # P50/P95 budget check
   sweep.sh     # tolerance x badness sweep
@@ -151,6 +159,7 @@ docs/
   proposal-effect-max.md # E1–E6 + Q′ proposal
   e1-q-report.md      # E1–Q′ delivery report
   engine.md           # soma.engine/1: shape, defaults, errors, usage
+  corpus-calibration.md # real corpus: metrics and proxy calibration
   docir.md            # DocIR contract: nodes, canonical JSON, validation
   template.md         # template DSL: YAML subset, units, cascade, hashes
   a1-report.md        # A1 milestone report (Gate A1 checklist)
@@ -203,7 +212,7 @@ cargo run -p soma-eval --release -- blind preferences.csv
 scripts/gates.sh
 ```
 
-The gate runs format, clippy, 315 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 320 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-template`,
 `soma-layout`, `soma-md`, `soma-render-html`, and `soma-render-svg`, a
 native/`wasm32-wasip1` canonical-byte comparison (DocIR + inline layout + pages),

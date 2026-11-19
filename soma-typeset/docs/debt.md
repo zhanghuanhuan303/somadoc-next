@@ -16,11 +16,11 @@
 
 | ID | 项 | 现状 | 影响 | 关闭点 | 阻塞 |
 |---|---|---|---|---|---|
-| D01 | Gate Q 质量宣称 | **Inconclusive**：无真实盲测、无质量标注语料 | 不能对外宣称「比贪心好」 | 未排期（需语料 + 5 评审） | 否 |
+| D01 | Gate Q 质量宣称 | **Inconclusive**：`corpus/zh` 已建（5 篇、135 行、原创），但仍无人工盲测与偏好标注 | 不能对外宣称「比贪心好」 | 未排期（需 5 评审 + 标注协议） | 否 |
 | D02 | Gate D 交付指标 | **Partial**：无浏览器 wasm 包体积、无首段延迟实测 | 移动端预算无法承诺 | A5 | 否 |
 | D03 | `FallbackStage::Overfull` | 字段保留但从未发射；长英文词走 `Emergency` | 语义上等价，报告口径少一档 | 未排期 | 否 |
 | D04 | trim/gap 比例 | 6 条 `ParamOnly`，比例值未标定 | Gate Q 不能引用这些数值 | A6 后标定窗口 | 否 |
-| D05 | Tier A 权重 | `default-v1` 是工程起点，未用真实语料拟合 | 质量上限未知；`sweep` 只给敏感度 | A6 后标定窗口 | 否 |
+| D05 | Tier A 权重 | **Proxy 已扫**：`corpus/zh` 上 `tolerance=1500` 优于 `3000`（过压 0 vs 2 行，抖动 337 vs 500，页数不变）；无人工偏好，不修改 `default-v1` | 质量上限仍未知 | 待 Gate Q 后决定是否新增 `zh-book-v1` preset | 否 |
 | D06 | ~~真实字体度量~~ | **已关闭（E1）**：`soma-metrics`（零依赖、no_std）+ `tools/metrics-gen` + Noto CJK SC 整数表；`TableMetrics`/`StyledMetrics` 按字号缩放；`metricsHash` 进入 `soma.pages/2`。覆盖范围与 bold 近似见 D61/D63 | — | ✅ 已关闭 | 否 |
 | D07 | wasm 执行时延 | 只证明了编译 + 字节一致，没测运行时间 | wasm 预算只有推算 | A5 | 否 |
 | D08 | ~~叠标点挤压 / 按字号缩放 trim~~ | **已关闭（E3）**：`trim.pair`（1/4em，ParamOnly）+ trim 按 atom 字号缩放 + 行尾悬挂标点（`hanging-punctuation`，opt-in） | — | ✅ 已关闭 | 否 |
@@ -77,6 +77,7 @@
 | D64 | 页眉页脚只排一行 | running title 过长时溢出而不是换行/缩略 | 超长标题可能压到页边 | 未排期（需要字串截断策略） | 否 |
 | D65 | 引擎配置用固定形状解析器 | 不复用模板的 YAML 子集：无序列、无锚点、长度只支持整数 `em` | 配置 DSL 与模板 DSL 是两套错误面 | 有真实需求时再抽公共 YAML crate | 否 |
 | D66 | 引擎只支持 `paragraph` 窗口 | `window: page`/`chapter` 在配置层被拒绝；内核本来也报 `UnsupportedWindow` | 页级/章级搜索未实现 | 未排期（需要页级 DP 上下文） | 否 |
+| D67 | 语料规模小且自著 | `corpus/zh` 只有 5 篇、135 行；未覆盖表格页、公式页、脚注密集页、长书稿 | 代理标定的外推能力有限 | 持续补充；至少加入公共领域长篇与另一文体 | 否 |
 | D50 | ~~无页面母版 / 页眉页脚 / 页码~~ | **已关闭（E4）**：页眉（running-title 或字面量）、页脚、`{page}`/`{pages}` 页码；两遍无重排 | 首页/封面变体未做（D62） | ✅ 已关闭 | 否 |
 | D51 | 盒子树是扁平的 | 没有嵌套 `VBox`/`HBox`；表格单元按列偏移摆放，无行线、无 colspan 网格、无表头重复 | 复杂表格与嵌套布局受限 | 未排期 | 否 |
 | D52 | 公式是文本占位 | `MathBlock` 渲染 `source`，没有 Math 适配器 | 公式不美观 | 未排期 | 否 |
@@ -118,5 +119,6 @@
 | E5 | **已完成**：基线网格（`baseline-grid`，opt-in） |
 | E6 | **已完成**：D09 的断点部分、D28 的 Gate V/R |
 | Q′ | **已完成**：`soma-eval score` 效果记分卡与 `scripts/gate-q.sh` |
+| Q′+ | **已完成**：`corpus/zh` 真实语料 + `soma-eval corpus/calibrate` + 代理标定报告；部分关闭 D05 的语料前提 |
 | E7 | **已完成**：D29、D59（`soma.engine/1`，ADR-0016）；新增 D65、D66 |
 | 未排期 | D01、D03、D04、D05、D10、D11、D12、D13、D60、N1–N6 |

@@ -172,6 +172,7 @@ A1–A6 与 Gate C/垂直 K-P 全部落地后，按 `docs/proposal-effect-max.md
 | E6 | `-`/`/` 断点、SVG 渲染器、Gate V/R | D09 部分、D28 | SVG 坐标 = 布局坐标 |
 | Q′ | 效果记分卡（`soma-eval score`） | 新能力 | 7 个结构断言 |
 | E7 | `soma.engine/1` 引擎配置（ADR-0016） | D29、D59 | 15 个测试；默认配置与手写参数逐字节一致 |
+| Q′+ | 真实语料 `corpus/zh` + `soma-eval corpus/calibrate` | D05 的语料前提 | 5 篇、135 行；代理标定 `tolerance=1500` 优于 `3000` |
 
 交付报告：`docs/e1-q-report.md`。当前测试数 **299**，全部门禁：
 fmt / clippy / tests / wasm 字节一致 / demo / 依赖边界 / Gate A / Gate C /
