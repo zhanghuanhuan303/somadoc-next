@@ -63,12 +63,13 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   (`docHash` for exact reproduction, `contentHash` for content identity). The
   crate has **zero dependencies** and no floats; Gate A enforces that.
 - A3–A6 pipeline: `soma-layout` builds paragraph boxes over the frozen kernel and
-  paginates with **line-level vertical K-P** by default (`soma.pages/3`):
+  paginates with **line-level vertical K-P** by default (`soma.pages/4`):
   paragraphs split across pages, widows/orphans are penalties, vertical glue can
   stretch, footnotes are charged to the marker's line, and page masters add a
   running header, footer, and folio. Figure boxes, table cell boxes,
   code/math/rule boxes, and a `TextSource` seam complete the tree;
-  `soma-md` parses a documented Markdown subset into DocIR; `soma-render-html`
+  `soma-md` and `soma-html` parse documented Markdown/HTML subsets into DocIR;
+  `soma-render-html`
   paints absolutely positioned HTML. The WASI fixture hashes DocIR, inline
   layout, and pages together.
 - E1–Q′ effect layer: `soma-metrics` ships a committed `soma.metrics/1` table
@@ -77,7 +78,7 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   punctuation compresses, closing punctuation can hang, and a baseline grid is
   available per template. `soma-render-svg` is a second renderer used by Gate R;
   `soma-eval score` prints the effect scorecard.
-- Real corpus: `corpus/zh/` holds seven prose documents (technical note,
+- Real corpus: `corpus/zh/` holds nine prose documents (technical note,
   notice, abstract, essay, mixed-script notes, public-domain classics,
   footnote-dense note) plus table (colspan/rowspan/repeated header), math-placeholder, and 30-page book fixtures.
   `soma-eval corpus` measures them and `soma-eval calibrate` sweeps tolerance ×
@@ -129,6 +130,7 @@ crates/
   soma-template/ # pure-YAML template: parse, exact units, cascade, StyledDoc
   soma-layout/ # paragraph boxes, line-level pagination, page masters
   soma-md/     # Markdown subset -> DocIR
+  soma-html/   # HTML subset (semantic whitelist) -> DocIR
   soma-render-html/ # PagedLayout -> absolutely positioned HTML
   soma-render-svg/  # PagedLayout -> SVG (Gate V/R)
   soma-rules/  # text -> ParaIR (Chinese punctuation + CJK/Latin segmentation)

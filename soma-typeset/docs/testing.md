@@ -126,6 +126,7 @@ Cumulative public test files:
 | `engine.rs` | 15 | `soma.engine/1`: parse, reject, canonical hash, layout equivalence |
 | `corpus.rs` (eval) | 9 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
 | `a5_md.rs` | 11 | Markdown subset, inlines, spans, validity |
+| `html.rs` (html) | 9 | HTML subset shapes, table grid, degradation, recovery, pipeline |
 | `a5_render.rs` | 6 | absolute positions, escaping, no re-breaking |
 | `capabilities.rs` (md) | 7 | Gate C matrix, degradation promise, docs parity |
 | `safety.rs` (render) | 3 | Gate C: no scripts, links, images, or URLs |
@@ -142,7 +143,7 @@ Cumulative public test files:
 | core unit | 24 | IR, units, breaker, result, presets |
 | layout unit | 2 | trim scaling at body and non-body sizes |
 
-Total: **360 tests**.
+Total: **369 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.
