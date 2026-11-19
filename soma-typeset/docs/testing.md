@@ -103,9 +103,10 @@ Cumulative public test files:
 | `a1_model.rs` | 9 | node coverage, renumbering, text projection |
 | `a1_raw.rs` | 4 | raw payload preservation |
 | `a1_validate.rs` | 26 | every DocIR invariant has a failing case (incl. table grid) |
-| `a2_template.rs` | 10 | YAML subset, validation, positions, hash |
+| `a2_template.rs` | 12 | YAML subset, validation, positions, hash, `within`, `table:` |
 | `a2_units.rs` | 7 | exact conversion, truncation, strict grammar |
 | `a2_resolve.rs` | 11 | cascade, inheritance, page geometry, style hash |
+| `a2_cell_context.rs` | 1 | `within: cell` overrides body rules and sets cell padding |
 | `a3_layout.rs` | 7 | paragraph boxes match the kernel, text index, stacking |
 | `a4_pagination.rs` | 13 | vertical K-P optimality, page breaks, keep-with-next, splitting, overflow |
 | `a6_blocks.rs` | 11 | code, math, figures, tables (+colspan), rules, raw, footnotes |
@@ -116,7 +117,10 @@ Cumulative public test files:
 | `e5_grid.rs` | 3 | baseline grid alignment, unchanged text, wider grid leading |
 | `e7_tables.rs` | 2 | rowspan coverage without overlap, repeated header on every table page |
 | `e8_table_split.rs` | 4 | row bands continue across pages, spanning rows stay whole, tall cells are moved not clipped |
+| `e9_table_rules.rs` | 4 | outer/header/internal rules, continuation headers, rules skip spanning cells |
 | `gate_r.rs` (svg) | 4 | Gate V/R: SVG golden, coordinates = layout, HTML/SVG atom parity |
+| `table_rules.rs` (svg) | 1 | rules are painted at layout coordinates |
+| `table_rules.rs` (html) | 1 | rules reach the HTML renderer as positioned boxes |
 | `effect.rs` (eval) | 7 | Gate Q′ structural claims on the scorecard |
 | `engine.rs` | 15 | `soma.engine/1`: parse, reject, canonical hash, layout equivalence |
 | `corpus.rs` (eval) | 9 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
@@ -137,7 +141,7 @@ Cumulative public test files:
 | core unit | 23 | IR, units, breaker, result |
 | layout unit | 2 | trim scaling at body and non-body sizes |
 
-Total: **334 tests**.
+Total: **343 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, bold faces, tracking fallback, and calibrated trim ratios.

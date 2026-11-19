@@ -2,9 +2,10 @@
 
 Status: **frozen on 2026-11-20** with `docs/architecture-v2.md`.
 ADR-0010 amends §15.1 (one extra crate) and fixes shapes that
-architecture v2 left open; ADR-0012…0018 extend the implemented system
+architecture v2 left open; ADR-0012…0019 extend the implemented system
 (table metrics, line-level pagination, typography, page masters, engine
-configuration, table continuation) without changing the layer contract.
+configuration, table continuation, table rules and context selectors)
+without changing the layer contract.
 
 These ADRs record the decisions that shape the next phase. They are aligned
 with the already-implemented code; they do not change the frozen inline kernel.
@@ -29,6 +30,7 @@ with the already-implemented code; they do not change the frozen inline kernel.
 | [0016](0016-engine-config.md) | `soma.engine/1` engine configuration; preset + window + vertical knobs | Accepted |
 | [0017](0017-table-grids-and-headers.md) | Table grids (rowspan), atomic span groups, repeated headers | Accepted; band rule superseded by 0018 |
 | [0018](0018-table-continuation-bands.md) | Table continuation by row bands; safe row boundaries; header reuse per part | Accepted |
+| [0019](0019-table-rules-and-within.md) | Template-level table rules; `within` selectors for cell context | Accepted |
 
 ## Rules
 

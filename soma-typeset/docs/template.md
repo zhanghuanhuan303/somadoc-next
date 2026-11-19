@@ -1,10 +1,11 @@
 # 模板规范（`soma-template`）
 
-状态：**A2 已落地，E4 扩展**（schema `soma.template/2` / `soma.styles/2`）。
+状态：**A2 已落地，E4 扩展，表格规则与单元上下文已加**（schema `soma.template/3` / `soma.styles/2`）。
 代码是权威，本文解释 DSL、单位与级联规则。
 
 参考：`docs/architecture-v2.md` §7、ADR-0003（纯 YAML）、ADR-0009（语义/呈现边界）、
-ADR-0010 §3（`StyledDoc` 为纯数据）、ADR-0014（标点/网格）、ADR-0015（页面母版）。
+ADR-0010 §3（`StyledDoc` 为纯数据）、ADR-0014（标点/网格）、ADR-0015（页面母版）、
+ADR-0019（表格规则与 `within`）。
 
 ---
 
@@ -12,7 +13,7 @@ ADR-0010 §3（`StyledDoc` 为纯数据）、ADR-0014（标点/网格）、ADR-0
 
 | 问题 | 答案 |
 |---|---|
-| 它拥有什么 | 页面几何、样式规则、脚注编号 |
+| 它拥有什么 | 页面几何、样式规则、脚注编号、表格线宽 |
 | 它不拥有什么 | 内容结构、断行参数、分页算法、字体解析 |
 | 输入 | 一份 YAML 文本 |
 | 输出 | `Template`（已校验、可 hash） → `resolve(doc, template)` → `StyledDoc` |
@@ -75,6 +76,10 @@ page:
   folio: "第 {page} 页 / 共 {pages} 页"
 footnote:
   numbering: document      # document | page | section
+table:
+  rule-width: 0            # 行之间；0 = 不画
+  header-rule-width: 0.6pt # 表头下方
+  outer-rule-width: 0.8pt  # 表格上下两条
 styles:                    # 必填，非空序列
   - selector:
       element: paragraph
@@ -83,16 +88,30 @@ styles:                    # 必填，非空序列
       classes: [first, wide]
     declarations:
       first-indent: 2em
+  - selector:
+      element: paragraph
+      within: cell         # 只匹配单元里的段落
+    declarations:
+      first-indent: 0
+      indent-left: 0.25em
 ```
 
 页面默认：A4，四边 20mm。页边距属于模板（呈现）；只有 `window` 属于引擎配置。
 
+`table:` 整段可省略；省略或全为 `0` 时不画线，表格几何与旧版一致
+（页面 canonical 只差 schema 版本号）。
+线宽是全表统一参数（暂不支持按表/按行覆盖），`pt`/`em`/`mm` 都可以，
+负值报错。三条线各自独立：**没有隐式回退**，想要网格就三条都写。
+
 ## 5. 选择器与级联
 
-- 选择器可以是 `element`、`role`、`class`/`classes` 的任意组合；**所有给出的部分都必须匹配**。
+- 选择器可以是 `element`、`role`、`class`/`classes`、`within` 的任意组合；
+  **所有给出的部分都必须匹配**。
+- `within: cell` 表示“某个块级祖先的元素名是 `cell`”，用来把单元内的段落和正文段落
+  分开。可用值同 `ELEMENTS`，写错是错误。
 - 元素名来自 DocIR 节点种类（`paragraph`、`heading`、`strong`、`table`、`cell`、`footnote`…），
   完整清单在 `soma_template::ELEMENTS`；写错名字是错误，不会静默不匹配。
-- 特异性从低到高：`element` < `role` < 每个 `class`。
+- 特异性从低到高：`element` < `role` / `within` < 每个 `class`。
 - 同特异性按**声明顺序**，后面的覆盖前面的。
 - 规则内属性按固定顺序应用：`font-size` → `line-height` → 其余，因此 `em` 长度看到的是新字号。
 - 同一规则内同属性重复声明时，最后一条生效。
@@ -102,6 +121,10 @@ styles:                    # 必填，非空序列
 | 继承 | 不继承（每个节点重置） |
 |---|---|
 | `font-size`、`line-height`、`align`、`family`、`color`、`weight`、`slant`、`small-caps` | `first-indent`、`indent-left`、`indent-right`、`space-before`、`space-after`、`space-before-plus`、`space-before-minus`、`space-after-plus`、`space-after-minus`、`widow-lines`、`orphan-lines`、`hanging-punctuation`、`hanging-cap`、`baseline-grid`、`underline`、`keep-with-next`、`page-break-before` |
+
+布局属性不继承，所以单元内边距不是“继承 body 的缩进”，而是显式写
+`element: paragraph` + `within: cell` + `indent-left/indent-right`；
+这样正文段落和单元段落可以各自独立设置。
 
 ## 6. 属性白名单
 
@@ -137,6 +160,7 @@ pub struct StyledDoc {
     table: StyleTable,                  // 去重后的 ComputedStyle
     page: ResolvedPage,                 // em 单位
     footnote: FootnoteNumbering,
+    table_rules: TableRules,            // 模板 table: 段解析后的线宽
     template_hash: TemplateHash,
 }
 ```
@@ -151,7 +175,7 @@ pub struct StyledDoc {
 
 | Hash | 覆盖 |
 |---|---|
-| `template_hash()` | `soma.template/2` canonical JSON：名称、版本、页面（含母版）、脚注、全部规则与声明 |
+| `template_hash()` | `soma.template/3` canonical JSON：名称、版本、页面（含母版）、脚注、表格线宽、全部规则与声明 |
 | `style_hash()` | `soma.styles/2` canonical JSON：模板 hash + 解析后的页面/样式/节点映射 |
 
 两者都是 FNV-1a 64，与 `paramHash` / `docHash` 同一原语。
@@ -166,7 +190,7 @@ pub struct StyledDoc {
 
 ## 10. 明确不做（v1）
 
-- 选择器组合子（后代、子代、伪类）与 `@` 规则；
+- 选择器组合子（更深的后代、子代、伪类）与 `@` 规则（`within` 只覆盖“某一层祖先”）；
 - 百分比长度（需要知道参照系，先不做）；
 - 模板继承 / `@import`；
 - 命名槽位与封面布局（`GeneratedBlock` 已有，模板侧待 A6）；
