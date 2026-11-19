@@ -79,9 +79,10 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   `soma-eval score` prints the effect scorecard.
 - Real corpus: `corpus/zh/` holds seven prose documents (technical note,
   notice, abstract, essay, mixed-script notes, public-domain classics,
-  footnote-dense note) plus a built-in table fixture. `soma-eval corpus`
-  measures them and `soma-eval calibrate` sweeps tolerance × badness scale on a
-  proxy objective; see [`docs/corpus-calibration.md`](docs/corpus-calibration.md).
+  footnote-dense note) plus table, math-placeholder, and 30-page book fixtures.
+  `soma-eval corpus` measures them and `soma-eval calibrate` sweeps tolerance ×
+  badness scale on a proxy objective; see
+  [`docs/corpus-calibration.md`](docs/corpus-calibration.md).
 - Engine configuration: `soma-engine` parses `soma.engine/1` (preset, window,
   atom window, fallback switches, vertical cost model) into the same
   `BreakConfig`/`VerticalParams` the hand-built path uses. See
@@ -213,7 +214,7 @@ cargo run -p soma-eval --release -- blind preferences.csv
 scripts/gates.sh
 ```
 
-The gate runs format, clippy, 322 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 325 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-template`,
 `soma-layout`, `soma-md`, `soma-render-html`, and `soma-render-svg`, a
 native/`wasm32-wasip1` canonical-byte comparison (DocIR + inline layout + pages),

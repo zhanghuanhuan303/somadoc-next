@@ -108,7 +108,7 @@ Cumulative public test files:
 | `a2_resolve.rs` | 11 | cascade, inheritance, page geometry, style hash |
 | `a3_layout.rs` | 7 | paragraph boxes match the kernel, text index, stacking |
 | `a4_pagination.rs` | 13 | vertical K-P optimality, page breaks, keep-with-next, splitting, overflow |
-| `a6_blocks.rs` | 10 | code, math, figures, tables, rules, raw, footnotes |
+| `a6_blocks.rs` | 11 | code, math, figures, tables (+colspan), rules, raw, footnotes |
 | `metrics.rs` (layout) | 5 | table-backed metrics, per-style scaling, determinism |
 | `e2_split.rs` | 7 | line conservation, widows/orphans, footnote lines, glue, vertical hash |
 | `e3_typography.rs` | 2 | hanging punctuation is post-processing and respects the cap |
@@ -117,7 +117,7 @@ Cumulative public test files:
 | `gate_r.rs` (svg) | 4 | Gate V/R: SVG golden, coordinates = layout, HTML/SVG atom parity |
 | `effect.rs` (eval) | 7 | Gate Q′ structural claims on the scorecard |
 | `engine.rs` | 15 | `soma.engine/1`: parse, reject, canonical hash, layout equivalence |
-| `corpus.rs` (eval) | 7 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table fixture |
+| `corpus.rs` (eval) | 9 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
 | `a5_md.rs` | 11 | Markdown subset, inlines, spans, validity |
 | `a5_render.rs` | 6 | absolute positions, escaping, no re-breaking |
 | `capabilities.rs` (md) | 7 | Gate C matrix, degradation promise, docs parity |
@@ -135,7 +135,7 @@ Cumulative public test files:
 | core unit | 23 | IR, units, breaker, result |
 | layout unit | 2 | trim scaling at body and non-body sizes |
 
-Total: **322 tests**.
+Total: **325 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, bold faces, tracking fallback, and calibrated trim ratios.
