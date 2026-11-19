@@ -895,7 +895,7 @@ fn pdf_outline(
 
     let page_height = number(scale.milli(layout.page.height.0));
     let mut bodies = Vec::with_capacity(nodes.len());
-    for node in &nodes {
+    for (node_index, node) in nodes.iter().enumerate() {
         let entry = &entries[node.entry];
         let page = page_ids
             .get(entry.page.saturating_sub(1) as usize)
@@ -923,7 +923,7 @@ fn pdf_outline(
             let _ = write!(body, " /Last {last} 0 R");
         }
         if !node.children.is_empty() {
-            let _ = write!(body, " /Count {}", node.children.len());
+            let _ = write!(body, " /Count {}", descendants(&nodes, node_index));
         }
         let _ = write!(body, " /Dest [{page} 0 R /XYZ 0 {page_height} null] >>");
         bodies.push(body);
@@ -942,6 +942,14 @@ fn pdf_outline(
     let _ = write!(root, " /Count {} >>", entries.len());
     pdf.set(root_object, root.into_bytes());
     Some(root_object)
+}
+
+fn descendants(nodes: &[OutlineNode], index: usize) -> usize {
+    nodes[index]
+        .children
+        .iter()
+        .map(|child| 1 + descendants(nodes, *child))
+        .sum()
 }
 
 fn page_labels(pdf: &mut Pdf, pages: &[soma_layout::Page]) -> Option<u32> {
