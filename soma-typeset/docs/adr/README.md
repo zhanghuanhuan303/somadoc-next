@@ -27,6 +27,7 @@ with the already-implemented code; they do not change the frozen inline kernel.
 | [0014](0014-typography-refinements.md) | Trim scaling, pair compression, hanging punctuation | Accepted |
 | [0015](0015-page-masters.md) | Page masters: running header, footer, folio | Accepted |
 | [0016](0016-engine-config.md) | `soma.engine/1` engine configuration; preset + window + vertical knobs | Accepted |
+| [0017](0017-table-grids-and-headers.md) | Table grids (rowspan), atomic span groups, repeated headers | Accepted |
 
 ## Rules
 

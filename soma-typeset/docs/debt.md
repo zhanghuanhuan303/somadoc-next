@@ -50,7 +50,7 @@
 | D30 | ~~层哈希~~ | **已关闭（A3）**：`paramHash` + `docHash`/`contentHash` + `templateHash`/`styleHash` + 页面结果里的 `engineHash` | — | ✅ 已关闭 | 否 |
 | D31 | DocIR 没有 reader | canonical JSON 是 write-only；只有 writer 与 golden 测试 | 不能回读、不能做 round-trip fuzz，调试只能看输出 | 未排期（真需要的场景：跨进程传递 DocIR） | 否 |
 | D32 | canonical writer 两份实现 | `soma-core::result` 与 `soma-doc::canonical` 各有一个手写 writer | 改格式要改两处；容易出现风格漂移 | 第三个消费者出现时抽公共 crate | 否 |
-| D33 | `rowspan > 1` 未做网格占位校验 | 只校验每行 `colspan` 之和；跨行占位重叠/越界不报错 | 复杂表格可能产出不一致网格 | 未排期 | 否 |
+| D33 | ~~`rowspan > 1` 未做网格占位校验~~ | **已关闭（ADR-0017）**：`rows × columns` 占位图；越界、重叠、未填满一行都报错 | — | ✅ 已关闭 | 否 |
 | D34 | `Date` 不校验月份天数 | 接受 2 月 30 日；只检查 year/month/day 范围 | 无法发现源侧的非法日期 | 未排期（来源已经是日期文本） | 否 |
 | D35 | DocIR 两条平行遍历 | `for_each_meta` / `for_each_meta_mut` 是两份手写 match，靠测试锁同步 | 加字段时两处都可能漏 | 用宏/visitor 合并 | 否 |
 | D36 | ~~Raw 内容未做安全白名单~~ | **已关闭（Gate C）**：渲染器只画 fallback 文本，输出转义且不含 `href`/`src`/脚本；内容侧无执行路径 | — | ✅ 已关闭 | 否 |
@@ -77,9 +77,9 @@
 | D64 | 页眉页脚只排一行 | running title 过长时溢出而不是换行/缩略 | 超长标题可能压到页边 | 未排期（需要字串截断策略） | 否 |
 | D65 | 引擎配置用固定形状解析器 | 不复用模板的 YAML 子集：无序列、无锚点、长度只支持整数 `em` | 配置 DSL 与模板 DSL 是两套错误面 | 有真实需求时再抽公共 YAML crate | 否 |
 | D66 | 引擎只支持 `paragraph` 窗口 | `window: page`/`chapter` 在配置层被拒绝；内核本来也报 `UnsupportedWindow` | 页级/章级搜索未实现 | 未排期（需要页级 DP 上下文） | 否 |
-| D67 | 语料规模仍有限 | `corpus/zh` 现有 10 个文档/1140 行：长篇（30 页）、脚注密集、colspan 表格、公式占位已覆盖；仍缺真实公式排版、rowspan/表头重复、目录/章节页与质量标注 | 代理标定的外推能力有限 | 持续补充 | 否 |
+| D67 | 语料规模仍有限 | `corpus/zh` 现有 10 个文档/1141 行：长篇（30 页）、脚注密集、colspan/rowspan 表格、表头重复、公式占位已覆盖；仍缺真实公式排版、行线、目录/章节页与质量标注 | 代理标定的外推能力有限 | 持续补充 | 否 |
 | D50 | ~~无页面母版 / 页眉页脚 / 页码~~ | **已关闭（E4）**：页眉（running-title 或字面量）、页脚、`{page}`/`{pages}` 页码；两遍无重排 | 首页/封面变体未做（D62） | ✅ 已关闭 | 否 |
-| D51 | 盒子树是扁平的 | **colspan 已支持**（单元宽度与 x 按跨度计算，单元按自身宽度排版）；仍无嵌套 VBox/HBox、rowspan 占位、行线、表头重复 | 复杂表格与嵌套布局受限 | 后续（D33/D51 一起做） | 否 |
+| D51 | 盒子树是扁平的 | **colspan、rowspan、表头重复已支持**（ADR-0017）；跨行单元合并为原子组，续表每页预留表头高度；仍无嵌套 VBox/HBox、行线、单元格内容跨页拆分 | 复杂表格与嵌套布局受限 | 后续 | 否 |
 | D52 | 公式是文本占位 | `MathBlock` 渲染 `source`，没有 Math 适配器 | 公式不美观 | 未排期 | 否 |
 | D53 | Markdown 子集有限 | 无嵌套列表、setext 标题、表格、HTML 块、链接引用定义 | 复杂 Markdown 会退化为文本 | 未排期 | 否 |
 | D54 | 行内代码/对象无独立度量 | 二者都是单个 `AtomKind::Other` / `InlineObject` atom，使用正文字体 | 代码与公式的宽度不准 | 未排期 | 否 |
@@ -121,4 +121,5 @@
 | Q′ | **已完成**：`soma-eval score` 效果记分卡与 `scripts/gate-q.sh` |
 | Q′+ | **已完成**：`corpus/zh` 真实语料 + `soma-eval corpus/calibrate` + 代理标定报告；部分关闭 D05 的语料前提 |
 | E7 | **已完成**：D29、D59（`soma.engine/1`，ADR-0016）；新增 D65、D66 |
+| E7+ | **已完成**：D33、D51 的表格部分（ADR-0017：网格、rowspan、表头重复） |
 | 未排期 | D01、D03、D04、D05、D10、D11、D12、D13、D60、N1–N6 |

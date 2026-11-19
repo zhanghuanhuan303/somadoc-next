@@ -102,7 +102,7 @@ Cumulative public test files:
 | `a1_canonical.rs` | 8 | DocIR canonical bytes, escaping, hash modes |
 | `a1_model.rs` | 9 | node coverage, renumbering, text projection |
 | `a1_raw.rs` | 4 | raw payload preservation |
-| `a1_validate.rs` | 23 | every DocIR invariant has a failing case |
+| `a1_validate.rs` | 26 | every DocIR invariant has a failing case (incl. table grid) |
 | `a2_template.rs` | 10 | YAML subset, validation, positions, hash |
 | `a2_units.rs` | 7 | exact conversion, truncation, strict grammar |
 | `a2_resolve.rs` | 11 | cascade, inheritance, page geometry, style hash |
@@ -114,6 +114,7 @@ Cumulative public test files:
 | `e3_typography.rs` | 2 | hanging punctuation is post-processing and respects the cap |
 | `e4_master.rs` | 6 | header/footer bands, folio, running title, margin limits |
 | `e5_grid.rs` | 3 | baseline grid alignment, unchanged text, wider grid leading |
+| `e7_tables.rs` | 2 | rowspan coverage without overlap, repeated header on every table page |
 | `gate_r.rs` (svg) | 4 | Gate V/R: SVG golden, coordinates = layout, HTML/SVG atom parity |
 | `effect.rs` (eval) | 7 | Gate Q′ structural claims on the scorecard |
 | `engine.rs` | 15 | `soma.engine/1`: parse, reject, canonical hash, layout equivalence |
@@ -135,7 +136,7 @@ Cumulative public test files:
 | core unit | 23 | IR, units, breaker, result |
 | layout unit | 2 | trim scaling at body and non-body sizes |
 
-Total: **325 tests**.
+Total: **330 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, bold faces, tracking fallback, and calibrated trim ratios.
