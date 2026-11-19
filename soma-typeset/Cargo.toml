@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/soma-core",
+    "crates/soma-doc",
+    "crates/soma-template",
+    "crates/soma-rules",
+    "crates/soma-layout",
+    "crates/soma-md",
+    "crates/soma-render-html",
+    "crates/soma-eval",
+    "crates/soma-demo",
+    "crates/soma-wasm",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0"
+authors = ["zhanghuanhuan303"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
