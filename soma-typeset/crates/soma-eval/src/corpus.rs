@@ -10,7 +10,10 @@
 use std::path::{Path, PathBuf};
 
 use soma_core::{BreakConfig, ParamSet, Permille, Weight, Window};
-use soma_doc::Block;
+use soma_doc::block::{Cell, Column, Paragraph, Row, Table};
+use soma_doc::meta::DocumentMeta;
+use soma_doc::node::NodeMeta;
+use soma_doc::{Block, CellAlign, Document, Text};
 use soma_layout::{layout_with, PaginationStrategy, StyledMetrics, VerticalParams};
 use soma_md::parse_markdown;
 use soma_metrics::MetricsTable;
@@ -126,26 +129,51 @@ pub fn files(dir: &Path) -> Result<Vec<PathBuf>, String> {
 
 /// Lay out every document in `dir` with `params`.
 pub fn evaluate_dir(dir: &Path, params: &ParamSet) -> Result<CorpusReport, String> {
+    evaluate_documents(load_files(dir)?, params)
+}
+
+/// Files plus the structured fixtures that Markdown cannot express yet.
+pub fn evaluate_all(dir: &Path, params: &ParamSet) -> Result<CorpusReport, String> {
+    let mut documents = load_files(dir)?;
+    documents.push((String::from("table-page"), table_document()));
+    evaluate_documents(documents, params)
+}
+
+fn load_files(dir: &Path) -> Result<Vec<(String, Document)>, String> {
     let paths = files(dir)?;
     if paths.is_empty() {
         return Err(format!("{}: no .md files", dir.display()));
     }
+    let mut documents = Vec::with_capacity(paths.len());
+    for path in paths {
+        let source = std::fs::read_to_string(&path)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let name = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("document")
+            .to_string();
+        documents.push((name, parse_markdown(&source)));
+    }
+    Ok(documents)
+}
+
+fn evaluate_documents(
+    documents: Vec<(String, Document)>,
+    params: &ParamSet,
+) -> Result<CorpusReport, String> {
     let template = parse_template(TEMPLATE).map_err(|error| error.to_string())?;
     let table = MetricsTable::embedded();
     let engine = BreakConfig::new(*params, Window::Paragraph);
     let vertical = VerticalParams::default_v1();
 
-    let mut documents = Vec::with_capacity(paths.len());
+    let mut reports = Vec::with_capacity(documents.len());
     let mut pooled = PageMetrics::default();
     let mut pages = 0u32;
     let mut paragraphs = 0u32;
 
-    for path in paths {
-        let source = std::fs::read_to_string(&path)
-            .map_err(|error| format!("{}: {error}", path.display()))?;
-        let document = parse_markdown(&source);
-        let styled = resolve(&document, &template)
-            .map_err(|error| format!("{}: {error}", path.display()))?;
+    for (name, document) in documents {
+        let styled = resolve(&document, &template).map_err(|error| format!("{name}: {error}"))?;
         let metrics = StyledMetrics::new(&table, &styled);
         let layout = layout_with(
             &document,
@@ -155,30 +183,74 @@ pub fn evaluate_dir(dir: &Path, params: &ParamSet) -> Result<CorpusReport, Strin
             PaginationStrategy::VerticalKp,
             vertical,
         )
-        .map_err(|error| format!("{}: {error}", path.display()))?;
+        .map_err(|error| format!("{name}: {error}"))?;
 
         let measured = measure(&layout);
         pooled.merge(&measured);
         pages += layout.page_count();
-        paragraphs += count_blocks(&document.blocks);
-        documents.push(DocumentReport {
-            name: path
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .unwrap_or("document")
-                .to_string(),
+        let blocks = count_blocks(&document.blocks);
+        paragraphs += blocks;
+        reports.push(DocumentReport {
+            name,
             pages: layout.page_count(),
-            paragraphs: count_blocks(&document.blocks),
+            paragraphs: blocks,
             metrics: measured,
         });
     }
 
     Ok(CorpusReport {
-        documents,
+        documents: reports,
         metrics: pooled,
         pages,
         paragraphs,
     })
+}
+
+/// A table taller than a page: exercises cell boxes and row stacking.
+pub fn table_document() -> Document {
+    let mut document = Document::new(DocumentMeta::new().with_language("zh-Hans"));
+    document.push_block(Block::Paragraph(Paragraph::new(
+        NodeMeta::synthesized(),
+        vec![text(
+            "下面是一张跨页表格，用来检验单元盒、行高与分页是否稳定。",
+        )],
+    )));
+
+    let columns = (0..3)
+        .map(|_| Column::new(NodeMeta::synthesized(), CellAlign::Default))
+        .collect();
+    let mut rows = Vec::new();
+    for row in 0..16 {
+        let cells = (0..3)
+            .map(|column| {
+                Cell::new(
+                    NodeMeta::synthesized(),
+                    vec![Block::Paragraph(Paragraph::new(
+                        NodeMeta::synthesized(),
+                        vec![text(&format!(
+                            "第{row}行第{column}列：单元格里的中文需要换行与对齐，长度足够触发多行。"
+                        ))],
+                    ))],
+                )
+            })
+            .collect();
+        rows.push(Row::new(NodeMeta::synthesized(), row == 0, cells));
+    }
+    document.push_block(Block::Table(Table::new(
+        NodeMeta::synthesized(),
+        columns,
+        rows,
+    )));
+    document.push_block(Block::Paragraph(Paragraph::new(
+        NodeMeta::synthesized(),
+        vec![text("表格之后的正文，用来确认分页没有丢失内容。")],
+    )));
+    document.renumber();
+    document
+}
+
+fn text(value: &str) -> soma_doc::Inline {
+    Text::new(NodeMeta::synthesized(), value).into()
 }
 
 /// Sweep tolerance × badness scale and return rows ordered by the proxy
@@ -192,7 +264,7 @@ pub fn calibrate(dir: &Path, tolerances: &[u16], scales: &[u32]) -> Result<Vec<S
             params.break_params.tolerance = Permille(tolerance);
             params.break_params.costs.badness_scale = Weight(scale);
             params.validate().map_err(|error| error.to_string())?;
-            let report = evaluate_dir(dir, &params)?;
+            let report = evaluate_all(dir, &params)?;
             rows.push(SweepRow {
                 tolerance,
                 scale,

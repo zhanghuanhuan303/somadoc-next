@@ -436,7 +436,7 @@ fn corpus_command(args: &[String]) -> ExitCode {
             }
         }
     }
-    match soma_eval::corpus::evaluate_dir(std::path::Path::new(&dir), &params) {
+    match soma_eval::corpus::evaluate_all(std::path::Path::new(&dir), &params) {
         Ok(report) => {
             print!("{}", report.csv());
             ExitCode::SUCCESS

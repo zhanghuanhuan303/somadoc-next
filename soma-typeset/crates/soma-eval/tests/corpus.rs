@@ -1,7 +1,7 @@
 //! Real-corpus evaluation: structural claims that must hold on `corpus/zh`.
 
 use soma_core::ParamSet;
-use soma_eval::corpus::{calibrate, evaluate_dir, repository_dir};
+use soma_eval::corpus::{calibrate, evaluate_all, evaluate_dir, repository_dir, table_document};
 
 #[test]
 fn the_corpus_is_present_and_every_document_lays_out() {
@@ -62,4 +62,59 @@ fn calibration_finds_a_point_without_over_compression() {
         soma_eval::corpus::SweepRow::csv_header(),
         "tolerance,scale,over_compress,emergency,page_free_p95,jitter_p95,pages"
     );
+}
+
+#[test]
+fn the_expanded_corpus_includes_long_form_footnotes_and_a_table() {
+    let report = evaluate_all(&repository_dir(), &ParamSet::default_v1()).expect("evaluate");
+    let names: Vec<&str> = report
+        .documents
+        .iter()
+        .map(|document| document.name.as_str())
+        .collect();
+    assert!(names.contains(&"classics"), "long-form prose: {names:?}");
+    assert!(names.contains(&"footnotes"), "footnote-dense: {names:?}");
+    assert!(names.contains(&"table-page"), "table fixture: {names:?}");
+    assert!(report.documents.len() >= 7);
+    assert!(report.pages >= 8);
+
+    let table = report
+        .documents
+        .iter()
+        .find(|document| document.name == "table-page")
+        .expect("table page");
+    assert!(table.pages >= 1);
+    assert!(table.metrics.lines > 0);
+}
+
+#[test]
+fn the_table_fixture_produces_cell_boxes() {
+    use soma_core::BreakConfig;
+    use soma_layout::{layout_with, BoxKind, PaginationStrategy, StyledMetrics, VerticalParams};
+    use soma_metrics::MetricsTable;
+    use soma_template::{parse_template, resolve};
+
+    let document = table_document();
+    let template = parse_template(soma_eval::score::TEMPLATE).expect("template");
+    let styled = resolve(&document, &template).expect("styles");
+    let table = MetricsTable::embedded();
+    let metrics = StyledMetrics::new(&table, &styled);
+    let layout = layout_with(
+        &document,
+        &styled,
+        &metrics,
+        &BreakConfig::default(),
+        PaginationStrategy::VerticalKp,
+        VerticalParams::default_v1(),
+    )
+    .expect("layout");
+
+    let cells = layout
+        .pages
+        .iter()
+        .flat_map(|page| page.blocks.iter())
+        .filter(|block| block.kind == BoxKind::TableCell)
+        .count();
+    assert!(cells >= 16, "expected one box per cell, got {cells}");
+    assert!(!layout.pages.is_empty());
 }

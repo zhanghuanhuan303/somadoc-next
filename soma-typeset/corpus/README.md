@@ -11,10 +11,16 @@ replace Gate Q's human review.
 | `abstract.md` | paper abstract | dense punctuation, semicolons, mixed terminology |
 | `editorial.md` | essay | long sentences, quotes, em dashes, rhetorical rhythm |
 | `mixed.md` | mixed-script note | URLs, code spans, hyphenated terms, percentages |
+| `classics.md` | classical prose (public domain) | long paragraphs, pagination, quotation |
+| `footnotes.md` | footnote-dense note | note area, marker-line coupling |
+| `table-page` (built-in) | table fixture | cell boxes, row stacking, a table taller than a page |
 
-Provenance: every file was written for this repository. No third-party text is
-included. The corpus is dedicated to the project under CC-BY-4.0, matching the
-sample-document policy in `prd.md`.
+Provenance: the prose files were written for this repository; `classics.md`
+contains public-domain excerpts (Tao Yuanming, Fan Zhongyan, Han Yu, Ouyang
+Xiu, Wang Xizhi, Su Shi) with modern punctuation, not a critical edition. The
+table fixture is built in code because `soma-md` does not parse tables yet. The
+corpus is dedicated to the project under CC-BY-4.0, matching the sample-document
+policy in `prd.md`.
 
 Rules:
 
