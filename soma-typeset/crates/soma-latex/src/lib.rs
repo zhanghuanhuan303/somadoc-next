@@ -31,7 +31,7 @@ use soma_doc::block::{
 };
 use soma_doc::inline::FootnoteRef;
 use soma_doc::inline::{Container, Inline, LineBreak, LineBreakKind, Link, MathInline};
-use soma_doc::meta::{Author, Date, DocumentMeta};
+use soma_doc::meta::{Author, CoverData, Date, DocumentMeta};
 use soma_doc::node::NodeMeta;
 use soma_doc::{Block, Code, Document, FootnoteDef, Text};
 
@@ -71,6 +71,17 @@ pub fn parse_latex_with_meta(source: &str, mut meta: DocumentMeta) -> Document {
         if let Some(date) = preamble_group(&cleaned, "date") {
             if let Some(value) = parse_date(date.trim()) {
                 meta.date = Some(value);
+            }
+        }
+    }
+    // `\subtitle{...}` has no DocIR field of its own; it belongs to the cover,
+    // which the layout generates from the metadata.
+    if let Some(subtitle) = preamble_group(&cleaned, "subtitle") {
+        let text = subtitle.trim();
+        if !text.is_empty() {
+            let cover = meta.cover.get_or_insert_with(CoverData::new);
+            if cover.subtitle.is_none() {
+                cover.subtitle = Some(String::from(text));
             }
         }
     }

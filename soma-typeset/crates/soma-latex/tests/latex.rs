@@ -255,3 +255,18 @@ styles:
     assert!(text.contains("正文"), "{text}");
     assert!(text.contains("重点"), "{text}");
 }
+
+#[test]
+fn a_subtitle_reaches_the_cover_data() {
+    let source = r#"\title{书名}
+\subtitle{副标题}
+\author{作者}
+\begin{document}
+正文。
+\end{document}
+"#;
+    let doc = parse_latex(source);
+    let cover = doc.meta.cover.as_ref().expect("cover data");
+    assert_eq!(cover.subtitle.as_deref(), Some("副标题"));
+    assert!(doc.meta.title.is_some());
+}

@@ -218,6 +218,15 @@ pub struct ResolvedMaster {
     pub folio: Option<String>,
 }
 
+/// Style ids for the four generated cover lines.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CoverStyles {
+    pub title: StyleId,
+    pub subtitle: StyleId,
+    pub author: StyleId,
+    pub date: StyleId,
+}
+
 /// The resolved style layer for one document.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StyledDoc {
@@ -232,10 +241,14 @@ pub struct StyledDoc {
     folio: Option<String>,
     /// Table of contents settings, when the template asks for one.
     toc: Option<crate::template::TocSpec>,
+    /// Cover settings, when the template asks for a cover page.
+    cover: Option<crate::template::CoverSpec>,
     /// Style for TOC entries (`element: toc`).
     toc_style: StyleId,
     /// Style for the TOC heading (`element: tocTitle`).
     toc_title_style: StyleId,
+    /// Styles for the generated cover lines.
+    cover_styles: CoverStyles,
     /// Master index for pages that begin a section.
     start_master: Option<usize>,
     template_hash: crate::TemplateHash,
@@ -312,6 +325,16 @@ impl StyledDoc {
     /// Style of the TOC heading.
     pub fn toc_title_style(&self) -> StyleId {
         self.toc_title_style
+    }
+
+    /// Cover settings, when the template asks for a cover page.
+    pub fn cover(&self) -> Option<&crate::template::CoverSpec> {
+        self.cover.as_ref()
+    }
+
+    /// Styles of the generated cover lines.
+    pub fn cover_styles(&self) -> CoverStyles {
+        self.cover_styles
     }
 
     /// Master index for the first page of a section.
@@ -447,6 +470,12 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
     let toc_style =
         resolver.compute("toc", None, &[], ComputedStyle::inherited_from(&root), &[])?;
     let toc_style_id = resolver.table.intern(toc_style);
+    let cover_styles = CoverStyles {
+        title: intern_element(&mut resolver, "coverTitle", &root)?,
+        subtitle: intern_element(&mut resolver, "coverSubtitle", &root)?,
+        author: intern_element(&mut resolver, "coverAuthor", &root)?,
+        date: intern_element(&mut resolver, "coverDate", &root)?,
+    };
     let toc_title_style = resolver.compute(
         "tocTitle",
         None,
@@ -486,8 +515,10 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         page,
         footnote: template.footnote.numbering,
         toc: template.toc.clone(),
+        cover: template.cover.clone(),
         toc_style: toc_style_id,
         toc_title_style: toc_title_style_id,
+        cover_styles,
         table_rules: TableRules {
             rule: template.table.rule.resolve(root.font_size, body_pt),
             header_rule: template.table.header_rule.resolve(root.font_size, body_pt),
@@ -506,6 +537,16 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         start_master,
         template_hash: template.template_hash(),
     })
+}
+
+/// Resolve and intern one generated element style.
+fn intern_element(
+    resolver: &mut Resolver<'_>,
+    element: &str,
+    root: &ComputedStyle,
+) -> Result<StyleId, TemplateError> {
+    let style = resolver.compute(element, None, &[], ComputedStyle::inherited_from(root), &[])?;
+    Ok(resolver.table.intern(style))
 }
 
 struct Resolver<'a> {
@@ -697,14 +738,9 @@ impl Resolver<'_> {
             }
         }
 
-        if style.align != Align::Justify {
-            return Err(TemplateError::new(
-                1,
-                1,
-                "styles",
-                "only justify alignment is implemented in model v1",
-            ));
-        }
+        // All four alignments are supported. The kernel only justifies or
+        // flushes left; `soma-layout` shifts centered and right-aligned lines
+        // after breaking, so the frozen DP never sees them.
         Ok(style)
     }
 }

@@ -246,9 +246,16 @@ styles:
 }
 
 #[test]
-fn non_justify_alignment_is_rejected() {
-    let source = r##"
-name: bad
+fn every_alignment_resolves() {
+    for (value, expected) in [
+        ("justify", soma_core::Align::Justify),
+        ("left", soma_core::Align::Left),
+        ("center", soma_core::Align::Center),
+        ("right", soma_core::Align::Right),
+    ] {
+        let source = format!(
+            r##"
+name: align
 page:
   size: A4
 styles:
@@ -256,14 +263,22 @@ styles:
       element: document
     declarations:
       font-size: 10.5pt
-      align: left
-"##;
-    let template = parse_template(source).expect("template parses");
-    let error = resolve(&document(), &template).expect_err("model v1 is justify-only");
-    assert_eq!(
-        error.reason,
-        "only justify alignment is implemented in model v1"
-    );
+      align: {value}
+"##
+        );
+        let template = parse_template(&source).expect("template parses");
+        let styled = resolve(&document(), &template).expect("all four alignments resolve");
+        let root = styled
+            .table()
+            .get(soma_core::StyleId(0))
+            .expect("root style");
+        assert_eq!(root.align, expected, "{value}");
+    }
+
+    // A value outside the set is still a parse error.
+    let bad = "name: n\npage:\n  size: A4\nstyles:\n  - selector:\n      element: document\n    declarations:\n      font-size: 10.5pt\n      align: sideways\n";
+    let error = parse_template(bad).expect_err("unknown alignment");
+    assert!(error.reason.contains("align must be"), "{}", error.reason);
 }
 
 #[test]

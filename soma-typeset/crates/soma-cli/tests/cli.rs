@@ -228,3 +228,43 @@ styles:
     assert!(stdout.contains("\"entries\":2"), "{stdout}");
     assert!(stdout.contains("\"pageCount\":2"), "{stdout}");
 }
+
+#[test]
+fn the_example_book_renders_cover_contents_and_chapters() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("workspace root");
+    let input = root.join("examples/book/book.tex");
+    let template = root.join("examples/book/book.yaml");
+
+    let (ok, stdout, stderr) = run(&[
+        "render",
+        "--input",
+        input.to_str().unwrap(),
+        "--template",
+        template.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+
+    assert!(ok, "stderr: {stderr}");
+    // Cover page, contents page, and one page per chapter (6 chapters, one of
+    // them spilling onto a second page): 9 pages today. The assertion is a
+    // range so content edits do not need a test edit.
+    assert!(stdout.contains("\"toc\":{\"passes\":"), "{stdout}");
+    assert!(stdout.contains("\"stable\":true"), "the TOC converged");
+    assert!(stdout.contains("\"entries\":6"), "six chapters");
+    assert!(!stdout.contains("\"overflow\":true"), "no page overflows");
+    assert!(
+        !stdout.contains("\"stage\":\"emergency\"") && !stdout.contains("\"stage\":\"overfull\""),
+        "the book lays out without a degraded line"
+    );
+    let pages: u32 = stdout
+        .split("\"pageCount\":")
+        .nth(1)
+        .and_then(|rest| rest.split(',').next())
+        .and_then(|value| value.parse().ok())
+        .expect("pageCount");
+    assert!((8..=12).contains(&pages), "page count {pages}");
+}

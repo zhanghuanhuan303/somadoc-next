@@ -14,7 +14,7 @@ use crate::units::{LengthSpec, LineHeightSpec, Rational, Unit};
 use crate::yaml::{Key, Value, ValueKind};
 use crate::TemplateError;
 
-pub const SCHEMA: &str = "soma.template/6";
+pub const SCHEMA: &str = "soma.template/7";
 
 /// Element names a selector may target. Derived from DocIR node kinds; a typo is
 /// an error instead of silently matching nothing.
@@ -58,6 +58,11 @@ pub const ELEMENTS: &[&str] = &[
     // Generated content: table of contents entries and their heading.
     "toc",
     "tocTitle",
+    // Generated cover page.
+    "coverTitle",
+    "coverSubtitle",
+    "coverAuthor",
+    "coverDate",
 ];
 
 /// A parsed, validated template.
@@ -68,6 +73,7 @@ pub struct Template {
     pub page: PageSpec,
     pub footnote: FootnoteSpec,
     pub toc: Option<TocSpec>,
+    pub cover: Option<CoverSpec>,
     pub table: TableSpec,
     /// Named page masters beyond the default `page:` geometry.
     pub masters: Vec<MasterSpec>,
@@ -204,6 +210,14 @@ pub struct TocSpec {
     pub depth: u8,
     /// Heading above the entries; `None` prints no title.
     pub title: Option<String>,
+}
+
+/// Cover page settings. The *content* comes from the document metadata; the
+/// template decides that a cover exists and which master draws it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CoverSpec {
+    /// Page master for the cover page; `default` is the document master.
+    pub master: Option<String>,
 }
 
 /// Footnote settings.
@@ -487,7 +501,7 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
     let root = crate::yaml::parse(source)?;
     let fields = Fields::new(&root, "")?;
     fields.reject_unknown(&[
-        "name", "version", "page", "footnote", "toc", "table", "masters", "styles",
+        "name", "version", "page", "footnote", "toc", "cover", "table", "masters", "styles",
     ])?;
 
     let name = fields.require_str("name")?;
@@ -502,6 +516,12 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
     let toc = match fields.optional("toc") {
         Some(value) if !value.is_null() => Some(parse_toc(value, "toc")?),
         _ => None,
+    };
+    let cover = match fields.optional("cover") {
+        Some(value) if !value.is_null() => Some(parse_cover(value, "cover")?),
+        // `cover:` with an empty value still asks for a cover page.
+        Some(_) => Some(CoverSpec { master: None }),
+        None => None,
     };
     let table = match fields.optional("table") {
         Some(value) if !value.is_null() => parse_table(value, "table")?,
@@ -524,6 +544,7 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
         page,
         footnote,
         toc,
+        cover,
         table,
         masters,
         styles,
@@ -685,6 +706,13 @@ fn parse_page(value: &Value, path: &str) -> Result<PageSpec, TemplateError> {
         folio,
         start_master,
     })
+}
+
+fn parse_cover(value: &Value, path: &str) -> Result<CoverSpec, TemplateError> {
+    let fields = Fields::new(value, path)?;
+    fields.reject_unknown(&["master"])?;
+    let master = fields.optional_str("master")?;
+    Ok(CoverSpec { master })
 }
 
 fn parse_toc(value: &Value, path: &str) -> Result<TocSpec, TemplateError> {

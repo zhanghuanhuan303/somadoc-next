@@ -1,3 +1,9 @@
 /target
 *.wasm
 corpus/blind/kit/
+examples/book/out/
+examples/book/*.aux
+examples/book/*.log
+examples/book/*.fls
+examples/book/*.fdb_latexmk
+examples/book/*.synctex.gz

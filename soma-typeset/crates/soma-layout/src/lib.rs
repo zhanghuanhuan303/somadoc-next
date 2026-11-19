@@ -25,13 +25,14 @@ mod pagination;
 
 pub use metrics::{StyledMetrics, TableMetrics};
 
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
 use soma_core::{
-    break_paragraph, BreakConfig, Cost, FallbackStage, Line, Metrics, Paragraph, ParagraphStyle,
-    PunctClass, StyleId, Width,
+    break_paragraph, Align, BreakConfig, Cost, FallbackStage, Line, Metrics, Paragraph,
+    ParagraphStyle, PunctClass, StyleId, Width,
 };
 use soma_doc::{Block, Document, Inline, NodeId};
 use soma_rules::{paragraph_from_spans, paragraph_from_text, InlineSpan, RuleError, SpanKind};
@@ -466,6 +467,9 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Vec<TocEntry>), LayoutEr
         toc_entries: toc_entries.to_vec(),
     };
     let mut items = Vec::new();
+    if styled.cover().is_some() {
+        builder.cover_rows(doc, &mut items)?;
+    }
     if let Some(spec) = toc {
         builder.toc_rows(spec, &mut items)?;
     }
@@ -1556,7 +1560,9 @@ impl Builder<'_> {
             width: inner,
             first_indent: computed.first_indent,
             line_height: computed.line_height,
-            align: computed.align,
+            // The kernel only justifies or flushes left; centering and
+            // right-alignment are applied to the finished lines below.
+            align: kernel_align(computed.align),
         };
 
         let mut spans: Vec<OwnedSpan> = Vec::new();
@@ -1589,8 +1595,9 @@ impl Builder<'_> {
         scale_trim(&mut paragraph, |style| self.computed(style).font_size.0);
 
         let object_metrics = math::ObjectMetrics::new(self.metrics, &objects);
-        let result = break_paragraph(&paragraph, &object_metrics, self.engine)
+        let mut result = break_paragraph(&paragraph, &object_metrics, self.engine)
             .map_err(|_| LayoutError::new(Some(node), "line breaking failed"))?;
+        align_lines(&mut result.lines, computed.align);
 
         let inline_math: Vec<InlineMathBox> = objects
             .resolve(&paragraph.atoms)
@@ -1624,7 +1631,7 @@ impl Builder<'_> {
         let mut y = Width::ZERO;
         for line in &result.lines {
             let mut line = line.clone();
-            let hang = if computed.hanging_punctuation {
+            let hang = if computed.hanging_punctuation && computed.align == Align::Justify {
                 hanging_amount(&paragraph, &line, computed.hanging_cap)
             } else {
                 0
@@ -1902,13 +1909,14 @@ impl Builder<'_> {
             width,
             first_indent: Width::ZERO,
             line_height: computed.line_height,
-            align: computed.align,
+            align: kernel_align(computed.align),
         };
         let spans = [InlineSpan::object(text, style_id)];
         let paragraph = paragraph_from_spans(&spans, paragraph_style)
             .map_err(|_| LayoutError::new(Some(node), "object compilation failed"))?;
-        let result = break_paragraph(&paragraph, self.metrics, self.engine)
+        let mut result = break_paragraph(&paragraph, self.metrics, self.engine)
             .map_err(|_| LayoutError::new(Some(node), "object breaking failed"))?;
+        align_lines(&mut result.lines, computed.align);
         self.text.insert(
             node,
             paragraph
@@ -1958,6 +1966,96 @@ impl Builder<'_> {
                 inline_math: Vec::new(),
             }],
         })
+    }
+
+    /// Generate the cover page from the document metadata.
+    ///
+    /// The template decides that a cover exists (`cover:`) and which master
+    /// draws it; the *content* is the document's: `meta.cover` when present,
+    /// otherwise `meta.title`, `meta.authors` and `meta.date`. Each line is a
+    /// normal paragraph in `coverTitle`/`coverSubtitle`/`coverAuthor`/
+    /// `coverDate`, so centering and spacing come from the stylesheet.
+    fn cover_rows(&mut self, doc: &Document, items: &mut Vec<FlowItem>) -> Result<(), LayoutError> {
+        let spec = self
+            .styled
+            .cover()
+            .cloned()
+            .unwrap_or(soma_template::CoverSpec { master: None });
+        let master = match spec.master.as_deref() {
+            None | Some("default") => self.current_master,
+            Some(name) => self
+                .styled
+                .master_index(name)
+                .ok_or_else(|| LayoutError::new(None, "unknown cover master"))?,
+        };
+        let styles = self.styled.cover_styles();
+        let (title, subtitle, authors, date) = cover_lines(doc);
+
+        // The cover is one atomic flow item: a cover that does not fit on one
+        // page is an overflow, never a spill onto page two. All spacing is
+        // internal — the first block's `space-before` positions the title, it is
+        // not page glue.
+        let mut blocks = Vec::new();
+        let mut y = Width::ZERO;
+        for (style, text) in [
+            (styles.title, title),
+            (styles.subtitle, subtitle),
+            (styles.author, authors),
+            (styles.date, date),
+        ] {
+            let Some(text) = text else { continue };
+            if text.trim().is_empty() {
+                continue;
+            }
+            let node = self.generated_id();
+            let inline = Inline::Text(soma_doc::Text::new(soma_doc::NodeMeta::synthesized(), text));
+            let Some(item) = self.paragraph_item(node, BoxKind::Paragraph, &[inline], style)?
+            else {
+                continue;
+            };
+            y = y + item.before.width;
+            for mut block in item.blocks {
+                block.y = y;
+                blocks.push(block);
+            }
+            y = y + item.height;
+            y = y + item.after.width;
+        }
+
+        if blocks.is_empty() {
+            return Ok(());
+        }
+
+        items.push(FlowItem {
+            height: y,
+            before: Glue::ZERO,
+            after: Glue::ZERO,
+            keep_with_next: false,
+            page_break_before: false,
+            forced_break: false,
+            section_start: false,
+            footnotes: Vec::new(),
+            parts: Vec::new(),
+            master,
+            table: None,
+            blocks,
+        });
+        // The cover is a page of its own.
+        items.push(FlowItem {
+            blocks: Vec::new(),
+            height: Width::ZERO,
+            before: Glue::ZERO,
+            after: Glue::ZERO,
+            keep_with_next: false,
+            page_break_before: false,
+            forced_break: true,
+            section_start: false,
+            footnotes: Vec::new(),
+            parts: Vec::new(),
+            master,
+            table: None,
+        });
+        Ok(())
     }
 
     /// A fresh synthetic node id for generated content.
@@ -2284,6 +2382,47 @@ fn snap_to_grid(height: Width, grid: Width) -> Width {
 }
 
 /// Scale the rules layer's base-em trim caps to each atom's own font size.
+/// The kernel only knows Justify and Left. Centering and right-alignment are
+/// applied to the finished lines, so the kernel sees a left-aligned paragraph
+/// (no stretch, no trim redistribution).
+fn kernel_align(align: Align) -> Align {
+    match align {
+        Align::Center | Align::Right => Align::Left,
+        other => other,
+    }
+}
+
+/// Shift every line of a centered or right-aligned paragraph.
+///
+/// `Line.target_width` excludes the first-line indent and `Line.indent` is the
+/// line's own left offset, so the full line box is `target + indent`; a centered
+/// line starts at `(full - natural) / 2`, a right-aligned one at
+/// `full - natural`. Overfull lines stay where they are and overflow instead.
+fn align_lines(lines: &mut [Line], align: Align) {
+    if matches!(align, Align::Justify | Align::Left) {
+        return;
+    }
+    for line in lines {
+        let full = line.target_width.0 + line.indent.0;
+        let slack = full - line.natural_width.0;
+        if slack <= 0 {
+            continue;
+        }
+        let start = match align {
+            Align::Center => slack / 2,
+            Align::Right => slack,
+            _ => 0,
+        };
+        let shift = start - line.indent.0;
+        if shift == 0 {
+            continue;
+        }
+        for atom in &mut line.boxes {
+            atom.x = Width(atom.x.0 + shift);
+        }
+    }
+}
+
 fn scale_trim(paragraph: &mut Paragraph, size_of: impl Fn(StyleId) -> i32) {
     for atom in &mut paragraph.atoms {
         let size = size_of(atom.style);
@@ -2375,6 +2514,56 @@ impl Numbering {
             }
         }
     }
+}
+
+/// The four cover lines, taken from the document metadata.
+fn cover_lines(
+    doc: &Document,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    let meta = &doc.meta;
+    let cover = meta.cover.as_ref();
+    let zh = meta
+        .language
+        .as_deref()
+        .map(|tag| tag.starts_with("zh"))
+        .unwrap_or(false);
+
+    let title = cover
+        .and_then(|cover| cover.title.clone())
+        .or_else(|| meta.title.as_deref().map(inline_text))
+        .filter(|text| !text.is_empty());
+    let subtitle = cover
+        .and_then(|cover| cover.subtitle.clone())
+        .filter(|text| !text.is_empty());
+
+    let mut names: Vec<String> = match cover {
+        Some(cover) if !cover.authors.is_empty() => cover.authors.clone(),
+        _ => meta
+            .authors
+            .iter()
+            .map(|author| author.name.clone())
+            .collect(),
+    };
+    names.retain(|name| !name.is_empty());
+    let authors = if names.is_empty() {
+        None
+    } else {
+        let separator = if zh { "、" } else { ", " };
+        Some(names.join(separator))
+    };
+
+    let date = match cover.and_then(|cover| cover.date.clone()) {
+        Some(date) => Some(date),
+        None => meta
+            .date
+            .map(|date| format!("{}-{:02}-{:02}", date.year, date.month, date.day)),
+    };
+    (title, subtitle, authors, date)
 }
 
 #[cfg(test)]

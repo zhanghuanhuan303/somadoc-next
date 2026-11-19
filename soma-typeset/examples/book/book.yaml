@@ -1,0 +1,132 @@
+# A book template: cover, contents, chapter openings, running heads, folio.
+# Build with: scripts/book.sh
+name: soma-book
+version: 1
+
+page:
+  size: A5
+  margin: 16mm
+  margin-top: 18mm
+  header: 6mm
+  footer: 6mm
+  header-text: running-title
+  folio: "{page}"
+  start-master: chapter
+
+cover:
+  master: cover
+
+toc:
+  depth: 2
+  title: 目录
+
+masters:
+  - name: cover
+    header: 0
+    footer: 0
+  - name: chapter
+    header: 0
+    footer: 6mm
+    folio: "{page}"
+
+table:
+  header-rule-width: 0.6pt
+  outer-rule-width: 0.8pt
+
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.7
+      align: justify
+      color: "#1a1a1a"
+
+  - selector:
+      element: paragraph
+    declarations:
+      first-indent: 2em
+      space-before: 0
+      space-after: 0
+
+  # Chapter titles: centred, generous space above.
+  - selector:
+      element: heading
+    declarations:
+      font-size: 17pt
+      line-height: 1.6
+      align: center
+      space-before: 0
+      space-after: 1.1em
+      keep-with-next: true
+      # Chapters always open a page. The selector cannot see the heading level,
+      # so this template uses one level only (see docs/first-release.md).
+      page-break-before: true
+
+  # Table cells are ragged, not justified: a two-character cell must not be
+  # stretched to the column width.
+  - selector:
+      element: paragraph
+      within: cell
+    declarations:
+      first-indent: 0
+      align: left
+
+  - selector:
+      element: toc
+    declarations:
+      font-size: 9pt
+      line-height: 2
+      first-indent: 0
+
+  # Table cells are ragged, not justified: a two-character cell must not be
+  # stretched to the column width.
+  - selector:
+      element: paragraph
+      within: cell
+    declarations:
+      first-indent: 0
+      align: left
+
+  - selector:
+      element: tocTitle
+    declarations:
+      font-size: 15pt
+      align: center
+      space-after: 1.4em
+
+  - selector:
+      element: coverTitle
+    declarations:
+      font-size: 26pt
+      line-height: 1.5
+      align: center
+      space-before: 40mm
+      space-after: 3mm
+
+  - selector:
+      element: coverSubtitle
+    declarations:
+      font-size: 12pt
+      align: center
+      space-after: 26mm
+
+  - selector:
+      element: coverAuthor
+    declarations:
+      font-size: 11pt
+      align: center
+      space-after: 2mm
+
+  - selector:
+      element: coverDate
+    declarations:
+      font-size: 9.5pt
+      align: center
+
+  - selector:
+      element: footnote
+    declarations:
+      font-size: 8pt
+      line-height: 1.5
+      first-indent: 0

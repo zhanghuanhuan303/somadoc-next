@@ -15,7 +15,7 @@ use crate::units::{LengthSpec, LineHeightSpec, Rational};
 use crate::StyleHash;
 use crate::TemplateHash;
 
-pub(crate) const STYLE_SCHEMA: &str = "soma.styles/3";
+pub(crate) const STYLE_SCHEMA: &str = "soma.styles/4";
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -113,6 +113,16 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
         Some(toc) => {
             write!(out, "{{\"depth\":{},\"title\":", toc.depth)?;
             write_opt_string(out, toc.title.as_deref())?;
+            out.write_char('}')?;
+        }
+        None => out.write_str("null")?,
+    }
+
+    out.write_str(",\"cover\":")?;
+    match &template.cover {
+        Some(cover) => {
+            out.write_str("{\"master\":")?;
+            write_opt_string(out, cover.master.as_deref())?;
             out.write_char('}')?;
         }
         None => out.write_str("null")?,
@@ -300,6 +310,16 @@ fn write_style(out: &mut impl Write, styled: &StyledDoc) -> fmt::Result {
         Some(toc) => {
             write!(out, "{{\"depth\":{},\"title\":", toc.depth)?;
             write_opt_string(out, toc.title.as_deref())?;
+            out.write_char('}')?;
+        }
+        None => out.write_str("null")?,
+    }
+
+    out.write_str(",\"cover\":")?;
+    match styled.cover() {
+        Some(cover) => {
+            out.write_str("{\"master\":")?;
+            write_opt_string(out, cover.master.as_deref())?;
             out.write_char('}')?;
         }
         None => out.write_str("null")?,

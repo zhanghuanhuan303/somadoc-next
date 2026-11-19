@@ -301,7 +301,10 @@ fn break_with_stats(
         return Err(BreakError::UnsupportedWindow(config.window()));
     }
     config.params().validate().map_err(BreakError::Params)?;
-    if paragraph.style.align != Align::Justify {
+    // Left is accepted: the boxes are placed without justification, while the
+    // breakpoints still come from the same cost model. Centering and
+    // right-alignment are applied to the finished lines by `soma-layout`.
+    if matches!(paragraph.style.align, Align::Center | Align::Right) {
         return Err(BreakError::UnsupportedAlign(paragraph.style.align));
     }
     paragraph.validate()?;
@@ -1218,11 +1221,14 @@ fn build_result(
         };
         // A single atom has no internal boundary to stretch or shrink.
         // Keep the signed adjustment only when it can actually be distributed.
-        let adjustment = if end.saturating_sub(*start) <= 1 {
-            0
-        } else {
-            eval.adjustment
-        };
+        // Left-aligned text is never adjusted: the breakpoints still come from
+        // the justified cost model, but the boxes keep their natural widths.
+        let adjustment =
+            if end.saturating_sub(*start) <= 1 || shaped.paragraph.style.align == Align::Left {
+                0
+            } else {
+                eval.adjustment
+            };
         let trim_left = Width(eval.trim_left);
         let trim_right = Width(eval.trim_right);
         let boxes = build_boxes(

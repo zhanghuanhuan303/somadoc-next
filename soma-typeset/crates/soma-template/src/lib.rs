@@ -29,7 +29,7 @@ pub use style::{
     resolve, ComputedStyle, ResolvedMaster, ResolvedPage, StyleTable, StyledDoc, TableRules,
 };
 pub use template::{
-    parse_template, Declaration, FontSlant, FontWeight, FootnoteNumbering, FootnoteSpec,
+    parse_template, CoverSpec, Declaration, FontSlant, FontWeight, FootnoteNumbering, FootnoteSpec,
     MasterSpec, PageSize, PageSpec, Property, PropertyValue, RuleStyle, Selector, StyleRule,
     TableSpec, Template, TocSpec, ELEMENTS, SCHEMA,
 };
