@@ -310,13 +310,31 @@ mod tests {
     }
 
     #[test]
-    fn embedded_table_has_two_faces_and_a_unit() {
+    fn embedded_table_has_regular_and_bold_faces() {
         let table = table();
         assert_eq!(table.unit(), UNIT);
-        assert_eq!(table.face_count(), 2);
+        assert_eq!(table.face_count(), 4);
         assert_eq!(table.face(0).unwrap().family, 0);
         assert_eq!(table.face(1).unwrap().family, 1);
-        assert!(table.face(2).is_none());
+        assert!(!table.face(0).unwrap().is_bold());
+        assert!(table.face(2).unwrap().is_bold());
+        assert!(table.face(3).unwrap().is_bold());
+        assert_eq!(table.face(2).unwrap().family, 0);
+        assert_eq!(table.face(3).unwrap().family, 1);
+        assert!(table.face(4).is_none());
+    }
+
+    #[test]
+    fn bold_latin_differs_from_regular() {
+        let table = table();
+        let regular = table.face(0).unwrap();
+        let bold = table.face(2).unwrap();
+        assert!(bold.advance_at('W' as u32) >= regular.advance_at('W' as u32));
+        assert_ne!(
+            bold.advance("Soma typeset"),
+            regular.advance("Soma typeset"),
+            "the bold face must have its own advances"
+        );
     }
 
     #[test]

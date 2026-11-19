@@ -12,7 +12,7 @@
 
 use soma_core::{LineMetrics, Metrics, StyleId, Width};
 use soma_metrics::MetricsTable;
-use soma_template::{ComputedStyle, StyledDoc};
+use soma_template::{ComputedStyle, FontWeight, StyledDoc};
 
 /// Em size used by the kernel: one em is 4096 units.
 const EM: i64 = 4096;
@@ -93,7 +93,12 @@ impl<'a> StyledMetrics<'a> {
 
     fn face_of(&self, computed: &ComputedStyle) -> Option<&soma_metrics::Face> {
         let index = face_index(computed);
-        self.table.face(index).or_else(|| self.table.face(0))
+        // Faces are laid out as regular(serif, sans), bold(serif, sans).
+        // Fall back to the same family when the bold face is missing.
+        self.table
+            .face(index)
+            .or_else(|| self.table.face(index % 2))
+            .or_else(|| self.table.face(0))
     }
 }
 
@@ -139,14 +144,15 @@ impl Metrics for StyledMetrics<'_> {
 /// first. Matching is ASCII case-insensitive and allocation-free.
 fn face_index(computed: &ComputedStyle) -> usize {
     let family = computed.family.as_deref().unwrap_or("");
-    if contains_ignore_ascii_case(family, "sans")
+    let sans = contains_ignore_ascii_case(family, "sans")
         || contains_ignore_ascii_case(family, "mono")
         || contains_ignore_ascii_case(family, "hei")
-        || contains_ignore_ascii_case(family, "gothic")
-    {
-        1
+        || contains_ignore_ascii_case(family, "gothic");
+    let base = if sans { 1 } else { 0 };
+    if computed.weight == FontWeight::Bold {
+        base + 2
     } else {
-        0
+        base
     }
 }
 

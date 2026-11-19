@@ -125,3 +125,57 @@ fn layout_with_real_metrics_is_deterministic() {
     assert_eq!(first.metrics_hash, table.hash());
     assert!(!first.pages[0].blocks.is_empty());
 }
+
+#[test]
+fn bold_inline_text_uses_the_bold_face() {
+    use common::{paragraph_with, text};
+    use soma_doc::inline::Container;
+    use soma_doc::Inline;
+
+    const BOLD: &str = r#"
+name: bold
+page:
+  size: A4
+  margin: 20mm
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+      align: justify
+  - selector:
+      element: strong
+    declarations:
+      weight: bold
+"#;
+    let strong = Inline::Strong(Container::new(NodeMeta::synthesized(), vec![text("Wide")]));
+    let doc = document(vec![paragraph_with(vec![text("A"), strong])]);
+    let strong_node = match &doc.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph.inlines[1].meta().id,
+        other => panic!("expected a paragraph, got {other:?}"),
+    };
+    let styled = styled(&doc, BOLD);
+    let table = MetricsTable::embedded();
+    let metrics = StyledMetrics::new(&table, &styled);
+    let regular = table.face(0).expect("serif regular");
+    let bold = table.face(2).expect("serif bold");
+    let size = styled
+        .style(styled.style_of(strong_node).expect("strong style"))
+        .expect("computed style")
+        .font_size
+        .0;
+
+    assert_eq!(
+        metrics
+            .advance("Wide", styled.style_of(strong_node).unwrap())
+            .0,
+        scale(bold.advance("Wide"), size)
+    );
+    assert_ne!(
+        metrics
+            .advance("Wide", styled.style_of(strong_node).unwrap())
+            .0,
+        scale(regular.advance("Wide"), size)
+    );
+}

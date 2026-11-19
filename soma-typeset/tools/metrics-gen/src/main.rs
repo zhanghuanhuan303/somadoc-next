@@ -9,7 +9,9 @@
 //! ```text
 //! metrics-gen --out data/noto-cjk.smt \
 //!   --face serif:normal:/path/NotoSerifCJK-Regular.ttc#2 \
-//!   --face sans:normal:/path/NotoSansCJK-Regular.ttc#2
+//!   --face sans:normal:/path/NotoSansCJK-Regular.ttc#2 \
+//!   --face serif:bold:/path/NotoSerifCJK-Bold.ttc#2 \
+//!   --face sans:bold:/path/NotoSansCJK-Bold.ttc#2
 //! ```
 
 use std::collections::BTreeMap;
