@@ -107,6 +107,12 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
 - One command (ADR-0029): `soma render --input doc.tex --template book.yaml
   --format html|svg|json` runs the whole pipeline; `soma check` prints layout
   facts and the canonical hash. See [`docs/cli.md`](docs/cli.md).
+- First-release artifact (`examples/book`, ADR-0031): `scripts/book.sh` renders a
+  nine-page book from `examples/book/book.tex` + `book.yaml` — generated cover,
+  contents page, chapter openings without running heads, a formula, a three-line
+  table, and a footnote. Alignment (`left`/`center`/`right`) is a layout pass, so
+  titles and cover lines can be centred. The build has 0 overflow pages and 0
+  degraded lines; `docs/first-release.md` lists the remaining design gaps.
 - Blind-test tooling: kit generation, key unmapping, Wilson interval, Fleiss'
   kappa, and a committable Markdown report (`soma-eval blind --out`). A
   **simulated** dry run proves the chain (`docs/blind-dry-run.md`); the human
@@ -166,6 +172,8 @@ crates/
 tools/dry-run-panel/ # simulated blind-test panel generator (not human data)
 tools/
   metrics-gen/ # offline OTF/TTC -> soma.metrics/1 (numbers only)
+examples/
+  book/        # first-release book: book.tex + book.yaml (scripts/book.sh)
 corpus/
   zh/          # self-authored evaluation corpus (five genres)
   README.md    # provenance and corpus rules
@@ -184,9 +192,9 @@ scripts/
   kp-verify.sh # K-P closure: gates + bench budget + length policy
 docs/
   architecture-v2.md  # frozen architecture
-  adr/                # accepted decisions (ADR-0001 … 0030)
+  adr/                # accepted decisions (ADR-0001 … 0031)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
-  debt.md             # global not-done register (D01–D74, N1–N6)
+  debt.md             # global not-done register (D01–D77, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
   e1-q-report.md      # E1–Q′ delivery report
   engine.md           # soma.engine/1: shape, defaults, errors, usage

@@ -1,7 +1,7 @@
 # 模板规范（`soma-template`）
 
-状态：**A2 已落地，E4 扩展，表格规则、单元上下文、目录与章节起始母版已加**
-（schema `soma.template/6` / `soma.styles/3`）。
+状态：**A2 已落地，E4 扩展，表格规则、单元上下文、目录、章节起始母版与封面已加**
+（schema `soma.template/7` / `soma.styles/4`）。
 代码是权威，本文解释 DSL、单位与级联规则。
 
 参考：`docs/architecture-v2.md` §7、ADR-0003（纯 YAML）、ADR-0009（语义/呈现边界）、
@@ -120,6 +120,10 @@ styles:                    # 必填，非空序列
 - `page.start-master: <name>` 指定**章节起始页**用的母版（名字或 `default`）；
   页以一个 `Section` 标记后的第一个内容块、或一个一级标题开头时用它，正文版心不变。
   章节页通常就是「去掉页眉」的那一套。
+- `cover:` 生成封面页；`master` 指定封面用的母版（通常是「无页眉无页脚」那套）。
+  内容来自文档元数据 `meta.cover`，缺失时回退到 `meta.title`/`authors`/`date`；
+  四行分别用 `element: coverTitle`、`coverSubtitle`、`coverAuthor`、`coverDate`。
+  封面是**一个原子块**：放不下就是溢出页，不会溢到第二页。
 - `toc:` 打开自动目录：`depth`（1–3，默认 2）决定收录到几级标题，
   `title` 是目录标题（留空则没有标题）。条目样式用 `element: toc`，
   标题样式用 `element: tocTitle`，默认继承正文。
@@ -168,7 +172,7 @@ DocIR 的 `Section.page_template: <name>` 选择母版；换母版会强制新�
 | `hanging-punctuation` | `true` / `false` | 行尾标点悬挂进右边距 |
 | `hanging-cap` | length | 悬挂上限（默认 `0.5em`） |
 | `baseline-grid` | length | 行高与间距量化到网格；`0` 关闭 |
-| `align` | `justify` | **model v1 只实现 justify**；其他值在 resolve 时报错 |
+| `align` | `justify` / `left` / `center` / `right` | `justify` 两端对齐；`left` 只按自然宽度摆放；`center`/`right` 在断行后整行平移（ADR-0031） |
 | `family` | 文本 | 字体族 token，由渲染器解析 |
 | `color` | `#rrggbb` / `rrggbb` | 打包成 `0xRRGGBB` |
 | `weight` | `normal` / `bold` | |
@@ -202,8 +206,8 @@ pub struct StyledDoc {
 
 | Hash | 覆盖 |
 |---|---|
-| `template_hash()` | `soma.template/6` canonical JSON：名称、版本、页面（含母版、起始母版）、脚注、目录、表格线宽、全部规则与声明 |
-| `style_hash()` | `soma.styles/3` canonical JSON：模板 hash + 解析后的页面/样式/目录设置/节点映射 |
+| `template_hash()` | `soma.template/7` canonical JSON：名称、版本、页面（含母版、起始母版）、脚注、目录、封面、表格线宽、全部规则与声明 |
+| `style_hash()` | `soma.styles/4` canonical JSON：模板 hash + 解析后的页面/样式/目录与封面设置/节点映射 |
 
 两者都是 FNV-1a 64，与 `paramHash` / `docHash` 同一原语。
 

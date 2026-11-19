@@ -2,11 +2,11 @@
 
 Status: **frozen on 2026-11-20** with `docs/architecture-v2.md`.
 ADR-0010 amends §15.1 (one extra crate) and fixes shapes that
-architecture v2 left open; ADR-0012…0030 extend the implemented system
+architecture v2 left open; ADR-0012…0031 extend the implemented system
 (table metrics, line-level pagination, typography, page masters, engine
 configuration, table continuation, table rules and context selectors,
 frontends, display and inline math, contents pages, the CLI, math fences and
-matrices)
+matrices, alignment, generated covers)
 without changing the layer contract.
 
 These ADRs record the decisions that shape the next phase. They are aligned
@@ -46,6 +46,7 @@ only).
 | [0028](0028-toc-and-section-start.md) | Template-driven table of contents (fixed-point page numbers) and a section-start master | Accepted |
 | [0029](0029-cli.md) | `soma` CLI: one source + one template to HTML/SVG/canonical JSON | Accepted |
 | [0030](0030-math-completion.md) | Math completion: stretched fences, matrices/aligned, math metrics face, text-style constants | Accepted |
+| [0031](0031-alignment-and-cover.md) | Alignment as a layout pass (`left` in the kernel, `center`/`right` shifted), generated cover page | Accepted |
 
 ## Rules
 

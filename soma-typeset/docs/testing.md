@@ -29,8 +29,8 @@ refactor that keeps the public behavior should not break a test.
 The K1 contract tests currently live in:
 
 - `crates/soma-core/tests/k1_contract.rs` — parameter preset, validation, hash.
-- `crates/soma-core/tests/k1_breaker.rs` — Justify support, non-Justify
-  rejection, final-line penalty zero.
+- `crates/soma-core/tests/k1_breaker.rs` — Justify and Left support, Center and
+  Right rejection, final-line penalty zero.
 
 The first K1 slice is green:
 
@@ -38,8 +38,9 @@ The first K1 slice is green:
   covered by `k1_contract.rs`.
 - `BreakConfig` now holds a `ParamSet`; layout validates it and carries the
   parameter hash/versions.
-- The production breaker rejects non-Justify alignment with
-  `BreakError::UnsupportedAlign`; `k1_breaker.rs` covers it.
+- The production breaker accepts Justify and Left and rejects Center/Right with
+  `BreakError::UnsupportedAlign`; the layout shifts centred lines after breaking
+  (ADR-0031), so `k1_breaker.rs` covers both sides of the contract.
 - The cost model uses the frozen normalized `line`, `badness`,
   `break_penalty`, and `short_last` terms; `brute_force_matches_dp` and
   `tie_break_prefers_the_longer_last_line` lock the reference behavior.
@@ -91,7 +92,7 @@ Cumulative public test files:
 | File | Tests | Covers |
 |---|---|---|
 | `k1_contract.rs` | 5 | preset, validation, override, hash |
-| `k1_breaker.rs` | 4 | Justify only, all non-justify variants, final-line penalty zero |
+| `k1_breaker.rs` | 4 | Justify and Left accepted, Center/Right rejected, final-line penalty zero |
 | `k1_fixtures.rs` | 10 | public-seam fixtures |
 | `k2_boundary.rs` | 5 | boundary role, deviation, trace |
 | `k3_styles.rs` | 6 | glyph metrics, line boxes, height cost |
@@ -127,12 +128,14 @@ Cumulative public test files:
 | `corpus.rs` (eval) | 9 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
 | `a5_md.rs` | 11 | Markdown subset, inlines, spans, validity |
 | `html.rs` (html) | 9 | HTML subset shapes, table grid, degradation, recovery, pipeline |
-| `latex.rs` (latex) | 9 | LaTeX subset shapes, math source, table grid, metadata, recovery, pipeline |
+| `latex.rs` (latex) | 10 | LaTeX subset shapes, math source, table grid, metadata, subtitle to cover, recovery, pipeline |
 | `math.rs` (soma-math) | 26 | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, spacing, styles, errors |
 | `e11_math.rs` (layout) | 8 | centring, baseline inside the box, flow, canonical `math` field |
 | `e12_inline_math.rs` (layout) | 11 | marker atoms, line-box growth, text style, placeholder, canonical `inlineMath` |
 | `e13_toc.rs` (layout) | 9 | TOC depth, page numbers, row shape, forced page, section-start master |
-| `cli.rs` (soma-cli) | 12 | render md/tex to html/svg/json, template geometry, TOC template, `--out`, check, error paths |
+| `e14_alignment.rs` (layout) | 6 | left/center/right placement, first-indent interaction, justify unchanged |
+| `e15_cover.rs` (layout) | 7 | cover metadata, master, centring, fallbacks, unknown master error |
+| `cli.rs` (soma-cli) | 13 | render md/tex to html/svg/json, template geometry, TOC template, example book, `--out`, check, error paths |
 | `blind_pipeline.rs` (eval) | 3 | dry-run fixture through key + statistics + decision |
 | `k7_object_metrics.rs` | 4 | object hooks vs text paths, default-hook equivalence |
 | `math.rs` (svg) | 4 | exact formula coordinates |
@@ -155,7 +158,7 @@ Cumulative public test files:
 | core unit | 24 | IR, units, breaker, result, presets |
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 
-Total: **470 tests**.
+Total: **485 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.
