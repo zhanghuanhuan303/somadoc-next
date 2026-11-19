@@ -1,0 +1,14 @@
+[package]
+name = "soma-layout"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Layout box tree, paragraph boxes over the frozen inline kernel, pagination"
+
+[dependencies]
+soma-core = { path = "../soma-core" }
+soma-doc = { path = "../soma-doc" }
+soma-rules = { path = "../soma-rules" }
+soma-template = { path = "../soma-template" }
