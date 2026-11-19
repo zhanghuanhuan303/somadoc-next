@@ -15,7 +15,7 @@ Regenerate:
 python3 tools/dry-run-panel/panel.py
 cargo run -p soma-eval -- blind \
   corpus/blind/dry-run/simulated-preferences.csv \
-  --key corpus/blind/kit/key.csv \
+  --key corpus/blind/dry-run/kit-key.csv \
   --out corpus/blind/dry-run/report.md
 ```
 

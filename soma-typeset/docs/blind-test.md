@@ -53,7 +53,7 @@ paragraph,evaluator,choice
 Run:
 
 ```sh
-cargo run -p soma-eval --release -- blind preferences.csv --key key.csv \
+cargo run -p soma-eval --release -- blind preferences.csv --key corpus/blind/dry-run/kit-key.csv \
   --out corpus/blind/report.md
 ```
 

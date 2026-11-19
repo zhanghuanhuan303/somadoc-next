@@ -7,7 +7,7 @@
 use soma_eval::{apply_key, blind_report, parse_key, parse_observations, BlindDecision};
 
 const PREFERENCES: &str = include_str!("../../../corpus/blind/dry-run/simulated-preferences.csv");
-const KEY: &str = include_str!("../../../corpus/blind/kit/key.csv");
+const KEY: &str = include_str!("../../../corpus/blind/dry-run/kit-key.csv");
 
 #[test]
 fn the_dry_run_fixture_runs_through_the_whole_pipeline() {

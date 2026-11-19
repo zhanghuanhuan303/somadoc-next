@@ -18,7 +18,7 @@ python3 tools/dry-run-panel/panel.py   # see corpus/blind/dry-run/README.md
 # 3. Analyse it.
 cargo run -p soma-eval -- blind \
   corpus/blind/dry-run/simulated-preferences.csv \
-  --key corpus/blind/kit/key.csv \
+  --key corpus/blind/dry-run/kit-key.csv \
   --out corpus/blind/dry-run/report.md
 ```
 
