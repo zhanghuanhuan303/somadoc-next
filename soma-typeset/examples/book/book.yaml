@@ -24,6 +24,9 @@ toc:
   figures: 图目录
   tables: 表目录
 
+index:
+  title: 索引
+
 numbering:
   headings: chinese-chapter
   depth: 2
@@ -95,6 +98,40 @@ styles:
     declarations:
       first-indent: 0
       align: left
+
+  - selector:
+      element: figureCaption
+    declarations:
+      font-size: 9pt
+      line-height: 1.4
+      align: center
+      first-indent: 0
+      space-before: 0.3em
+      space-after: 1em
+
+  - selector:
+      element: tableCaption
+    declarations:
+      font-size: 9pt
+      line-height: 1.4
+      align: center
+      first-indent: 0
+      space-before: 1em
+      space-after: 0.3em
+
+  - selector:
+      element: indexEntry
+    declarations:
+      font-size: 9pt
+      line-height: 1.8
+      first-indent: 0
+
+  - selector:
+      element: indexTitle
+    declarations:
+      font-size: 15pt
+      align: center
+      space-after: 1.4em
 
   - selector:
       element: toc
