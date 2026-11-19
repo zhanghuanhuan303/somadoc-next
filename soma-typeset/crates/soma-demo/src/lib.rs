@@ -6,8 +6,10 @@
 
 use soma_core::{
     break_paragraph, break_paragraph_greedy, BreakConfig, GreedyMode, LayoutResult, Paragraph,
-    ParagraphStyle, StyleId, SyntheticMetrics, Width,
+    ParagraphStyle, StyleId, Width,
 };
+use soma_layout::TableMetrics;
+use soma_metrics::MetricsTable;
 use soma_rules::{justified_style, paragraph_from_text};
 
 pub const SAMPLE_TEXT: &str =
@@ -28,7 +30,8 @@ pub fn render_html(text: &str, width: Width) -> Result<String, String> {
 pub fn render_html_with_style(text: &str, style: ParagraphStyle) -> Result<String, String> {
     let paragraph =
         paragraph_from_text(text, style, StyleId(0)).map_err(|error| error.to_string())?;
-    let metrics = SyntheticMetrics::default();
+    let table = MetricsTable::embedded();
+    let metrics = TableMetrics::new(&table, 0, Width::EM);
     let config = BreakConfig::default();
     let optimal =
         break_paragraph(&paragraph, &metrics, &config).map_err(|error| error.to_string())?;

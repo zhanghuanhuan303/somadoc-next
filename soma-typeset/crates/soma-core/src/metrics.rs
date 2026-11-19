@@ -52,6 +52,20 @@ pub trait Metrics: Sync {
 
     fn line_metrics(&self, style: StyleId) -> LineMetrics;
 
+    /// Version of the metrics source. `0` means "not a versioned table"
+    /// (the synthetic test adapter). Table-backed implementations return the
+    /// format version they were built for.
+    fn version(&self) -> u16 {
+        0
+    }
+
+    /// Content hash of the metrics source. `0` for adapters without one. The
+    /// page result carries this value so a table swap is visible in canonical
+    /// bytes even when the version does not change.
+    fn hash(&self) -> u64 {
+        0
+    }
+
     /// Per-glyph metrics used by the line box. The default derives them from
     /// `advance` and `line_metrics`; hosts with richer font data override it.
     fn glyph_metrics(&self, text: &str, style: StyleId) -> GlyphMetrics {

@@ -38,6 +38,20 @@ pub struct ComputedStyle {
     pub indent_right: Width,
     pub space_before: Width,
     pub space_after: Width,
+    /// Stretchable part of the space before a block (vertical glue).
+    pub space_before_plus: Width,
+    pub space_before_minus: Width,
+    pub space_after_plus: Width,
+    pub space_after_minus: Width,
+    /// Minimum lines of a paragraph that must stay together at the bottom of a
+    /// page (orphans) and at the top of the next page (widows).
+    pub widow_lines: u8,
+    pub orphan_lines: u8,
+    /// Allow closing punctuation to hang into the right margin.
+    pub hanging_punctuation: bool,
+    pub hanging_cap: Width,
+    /// Snap line boxes to a baseline grid. Zero disables the grid.
+    pub baseline_grid: Width,
     pub align: Align,
     pub family: Option<String>,
     /// Packed `0xRRGGBB`.
@@ -62,6 +76,15 @@ impl ComputedStyle {
             indent_right: Width::ZERO,
             space_before: Width::ZERO,
             space_after: Width::ZERO,
+            space_before_plus: Width::ZERO,
+            space_before_minus: Width::ZERO,
+            space_after_plus: Width::ZERO,
+            space_after_minus: Width::ZERO,
+            widow_lines: 2,
+            orphan_lines: 2,
+            hanging_punctuation: false,
+            hanging_cap: Width::from_em_frac(1, 2),
+            baseline_grid: Width::ZERO,
             align: Align::Justify,
             family: None,
             color: None,
@@ -84,6 +107,11 @@ impl ComputedStyle {
             weight: parent.weight,
             slant: parent.slant,
             small_caps: parent.small_caps,
+            widow_lines: parent.widow_lines,
+            orphan_lines: parent.orphan_lines,
+            hanging_punctuation: parent.hanging_punctuation,
+            hanging_cap: parent.hanging_cap,
+            baseline_grid: parent.baseline_grid,
             ..Self::base()
         }
     }
@@ -130,6 +158,10 @@ pub struct ResolvedPage {
     pub margin_bottom: Width,
     pub margin_left: Width,
     pub margin_right: Width,
+    /// Header band height, drawn inside the top margin.
+    pub header_height: Width,
+    /// Footer band height, drawn inside the bottom margin.
+    pub footer_height: Width,
 }
 
 impl ResolvedPage {
@@ -152,6 +184,8 @@ pub struct StyledDoc {
     table: StyleTable,
     page: ResolvedPage,
     footnote: crate::template::FootnoteNumbering,
+    header_text: Option<String>,
+    folio: Option<String>,
     template_hash: crate::TemplateHash,
 }
 
@@ -181,6 +215,16 @@ impl StyledDoc {
 
     pub fn footnote_numbering(&self) -> crate::template::FootnoteNumbering {
         self.footnote
+    }
+
+    /// Literal header text, or `running-title` when the template says so.
+    pub fn header_text(&self) -> Option<&str> {
+        self.header_text.as_deref()
+    }
+
+    /// Folio template with `{page}` and `{pages}` placeholders.
+    pub fn folio(&self) -> Option<&str> {
+        self.folio.as_deref()
     }
 
     pub fn template_hash(&self) -> crate::TemplateHash {
@@ -245,13 +289,34 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         margin_bottom: template.page.margin_bottom.resolve(root.font_size, body_pt),
         margin_left: template.page.margin_left.resolve(root.font_size, body_pt),
         margin_right: template.page.margin_right.resolve(root.font_size, body_pt),
+        header_height: template.page.header.resolve(root.font_size, body_pt),
+        footer_height: template.page.footer.resolve(root.font_size, body_pt),
     };
+
+    if page.header_height.0 > page.margin_top.0 {
+        return Err(TemplateError::new(
+            1,
+            1,
+            "page",
+            "header height must fit inside the top margin",
+        ));
+    }
+    if page.footer_height.0 > page.margin_bottom.0 {
+        return Err(TemplateError::new(
+            1,
+            1,
+            "page",
+            "footer height must fit inside the bottom margin",
+        ));
+    }
 
     Ok(StyledDoc {
         node_style: resolver.node_style,
         table: resolver.table,
         page,
         footnote: template.footnote.numbering,
+        header_text: template.page.header_text.clone(),
+        folio: template.page.folio.clone(),
         template_hash: template.template_hash(),
     })
 }
@@ -424,7 +489,7 @@ impl Resolver<'_> {
 
 /// Fixed application order: `font-size` first, then `line-height`, then the
 /// remaining properties. This makes the result independent of YAML key order.
-const PROPERTY_ORDER: [Property; 16] = [
+const PROPERTY_ORDER: [Property; 25] = [
     Property::FontSize,
     Property::LineHeight,
     Property::FirstIndent,
@@ -432,6 +497,15 @@ const PROPERTY_ORDER: [Property; 16] = [
     Property::IndentRight,
     Property::SpaceBefore,
     Property::SpaceAfter,
+    Property::SpaceBeforePlus,
+    Property::SpaceBeforeMinus,
+    Property::SpaceAfterPlus,
+    Property::SpaceAfterMinus,
+    Property::WidowLines,
+    Property::OrphanLines,
+    Property::BaselineGrid,
+    Property::HangingCap,
+    Property::HangingPunctuation,
     Property::Align,
     Property::Family,
     Property::Color,
@@ -463,6 +537,29 @@ fn apply(style: &mut ComputedStyle, property: Property, value: &PropertyValue, b
         }
         (Property::SpaceAfter, PropertyValue::Length(length)) => {
             style.space_after = length.resolve(font_size, body_pt);
+        }
+        (Property::SpaceBeforePlus, PropertyValue::Length(length)) => {
+            style.space_before_plus = length.resolve(font_size, body_pt);
+        }
+        (Property::SpaceBeforeMinus, PropertyValue::Length(length)) => {
+            style.space_before_minus = length.resolve(font_size, body_pt);
+        }
+        (Property::SpaceAfterPlus, PropertyValue::Length(length)) => {
+            style.space_after_plus = length.resolve(font_size, body_pt);
+        }
+        (Property::SpaceAfterMinus, PropertyValue::Length(length)) => {
+            style.space_after_minus = length.resolve(font_size, body_pt);
+        }
+        (Property::WidowLines, PropertyValue::Count(count)) => style.widow_lines = *count,
+        (Property::OrphanLines, PropertyValue::Count(count)) => style.orphan_lines = *count,
+        (Property::HangingPunctuation, PropertyValue::Bool(flag)) => {
+            style.hanging_punctuation = *flag;
+        }
+        (Property::HangingCap, PropertyValue::Length(length)) => {
+            style.hanging_cap = length.resolve(font_size, body_pt);
+        }
+        (Property::BaselineGrid, PropertyValue::Length(length)) => {
+            style.baseline_grid = length.resolve(font_size, body_pt);
         }
         (Property::LineHeight, PropertyValue::LineHeight(spec)) => {
             style.line_height = spec.resolve(style.font_size, body_pt);

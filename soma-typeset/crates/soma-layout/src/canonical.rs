@@ -9,7 +9,7 @@ use core::fmt::{self, Write};
 
 use crate::PagedLayout;
 
-pub(crate) const SCHEMA: &str = "soma.pages/1";
+pub(crate) const SCHEMA: &str = "soma.pages/3";
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -53,8 +53,12 @@ fn write_layout(out: &mut impl Write, layout: &PagedLayout) -> fmt::Result {
     out.write_str(layout.pagination.as_str())?;
     write!(
         out,
-        "\",\"engineHash\":{},\"rulesVersion\":{},\"metricsVersion\":{}",
-        layout.engine_hash, layout.rules_version, layout.metrics_version
+        "\",\"engineHash\":{},\"rulesVersion\":{},\"metricsVersion\":{},\"metricsHash\":{},\"verticalHash\":{}",
+        layout.engine_hash,
+        layout.rules_version,
+        layout.metrics_version,
+        layout.metrics_hash,
+        layout.vertical_hash
     )?;
 
     let page = layout.page;
@@ -87,6 +91,20 @@ fn write_layout(out: &mut impl Write, layout: &PagedLayout) -> fmt::Result {
             }
             write_block(out, block)?;
         }
+        out.write_str("],\"header\":[")?;
+        for (block_index, block) in page.header.iter().enumerate() {
+            if block_index > 0 {
+                out.write_char(',')?;
+            }
+            write_block(out, block)?;
+        }
+        out.write_str("],\"footer\":[")?;
+        for (block_index, block) in page.footer.iter().enumerate() {
+            if block_index > 0 {
+                out.write_char(',')?;
+            }
+            write_block(out, block)?;
+        }
         out.write_str("],\"footnotes\":[")?;
         for (block_index, block) in page.footnotes.iter().enumerate() {
             if block_index > 0 {
@@ -103,13 +121,15 @@ fn write_layout(out: &mut impl Write, layout: &PagedLayout) -> fmt::Result {
 fn write_block(out: &mut impl Write, block: &crate::PlacedBlock) -> fmt::Result {
     write!(
         out,
-        "{{\"node\":{},\"kind\":\"{}\",\"x\":{},\"y\":{},\"width\":{},\"height\":{},\"stage\":\"{}\"",
+        "{{\"node\":{},\"kind\":\"{}\",\"x\":{},\"y\":{},\"width\":{},\"height\":{},\"lineOffset\":{},\"linesTotal\":{},\"stage\":\"{}\"",
         block.node.0,
         block.kind.as_str(),
         block.x.0,
         block.y.0,
         block.width.0,
         block.height.0,
+        block.line_offset,
+        block.lines_total,
         block.stage.as_str()
     )?;
 
@@ -118,7 +138,11 @@ fn write_block(out: &mut impl Write, block: &crate::PlacedBlock) -> fmt::Result 
         if index > 0 {
             out.write_char(',')?;
         }
-        write!(out, "{{\"atom\":{},\"number\":{}}}", mark.atom, mark.number)?;
+        write!(
+            out,
+            "{{\"atom\":{},\"number\":{},\"line\":{}}}",
+            mark.atom, mark.number, mark.line
+        )?;
     }
     out.write_str("],\"lines\":[")?;
 
@@ -126,7 +150,11 @@ fn write_block(out: &mut impl Write, block: &crate::PlacedBlock) -> fmt::Result 
         if index > 0 {
             out.write_char(',')?;
         }
-        write!(out, "{{\"y\":{},\"line\":", placed.y.0)?;
+        write!(
+            out,
+            "{{\"y\":{},\"hang\":{},\"line\":",
+            placed.y.0, placed.hang
+        )?;
         placed.line.write_canonical(out)?;
         out.write_char('}')?;
     }

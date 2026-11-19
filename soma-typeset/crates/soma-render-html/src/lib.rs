@@ -48,6 +48,12 @@ pub fn render(layout: &PagedLayout, styles: &StyleTable, text: &dyn TextSource) 
         for block in &page.blocks {
             render_block(&mut html, layout, styles, text, block, 0, 0);
         }
+        for block in &page.header {
+            render_block(&mut html, layout, styles, text, block, 0, 0);
+        }
+        for block in &page.footer {
+            render_block(&mut html, layout, styles, text, block, 0, 0);
+        }
 
         let footnote_top = layout.page.content_height().0 - page.footnote_height.0;
         for block in &page.footnotes {
@@ -144,7 +150,9 @@ fn render_block(
                 _ => String::new(),
             };
             html.push_str(&format!(
-                "<span class=\"atom\" style=\"left:{};top:{};{}\">{}{}</span>\n",
+                "<span class=\"atom\" data-node=\"{}\" data-atom=\"{}\" style=\"left:{};top:{};{}\">{}{}</span>\n",
+                block.node.0,
+                atom.atom,
                 em(atom.x),
                 em(placed.y),
                 font,

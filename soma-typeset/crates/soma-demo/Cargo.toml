@@ -9,4 +9,6 @@ description = "Static HTML demo renderer that consumes soma-typeset LayoutResult
 
 [dependencies]
 soma-core = { path = "../soma-core" }
+soma-layout = { path = "../soma-layout" }
+soma-metrics = { path = "../soma-metrics" }
 soma-rules = { path = "../soma-rules" }

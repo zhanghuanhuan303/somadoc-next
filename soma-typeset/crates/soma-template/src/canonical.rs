@@ -15,7 +15,7 @@ use crate::units::{LengthSpec, LineHeightSpec, Rational};
 use crate::StyleHash;
 use crate::TemplateHash;
 
-pub(crate) const STYLE_SCHEMA: &str = "soma.styles/1";
+pub(crate) const STYLE_SCHEMA: &str = "soma.styles/2";
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -92,6 +92,14 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
     write_length(out, template.page.margin_left)?;
     out.write_str(",\"marginRight\":")?;
     write_length(out, template.page.margin_right)?;
+    out.write_str(",\"header\":")?;
+    write_length(out, template.page.header)?;
+    out.write_str(",\"footer\":")?;
+    write_length(out, template.page.footer)?;
+    out.write_str(",\"headerText\":")?;
+    write_opt_string(out, template.page.header_text.as_deref())?;
+    out.write_str(",\"folio\":")?;
+    write_opt_string(out, template.page.folio.as_deref())?;
     out.write_char('}')?;
 
     out.write_str(",\"footnote\":{\"numbering\":\"")?;
@@ -158,6 +166,7 @@ fn write_declaration(out: &mut impl Write, declaration: &Declaration) -> fmt::Re
             out.write_str("\"}")?;
         }
         PropertyValue::Bool(flag) => write!(out, "{{\"type\":\"bool\",\"value\":{flag}}}")?,
+        PropertyValue::Count(count) => write!(out, "{{\"type\":\"count\",\"value\":{count}}}")?,
         PropertyValue::Weight(weight) => {
             out.write_str("{\"type\":\"weight\",\"value\":\"")?;
             out.write_str(weight_str(*weight))?;
@@ -205,6 +214,13 @@ fn write_style(out: &mut impl Write, styled: &StyledDoc) -> fmt::Result {
     write!(out, ",\"marginBottom\":{}", page.margin_bottom.0)?;
     write!(out, ",\"marginLeft\":{}", page.margin_left.0)?;
     write!(out, ",\"marginRight\":{}}}", page.margin_right.0)?;
+    write!(out, ",\"headerHeight\":{}", page.header_height.0)?;
+    write!(out, ",\"footerHeight\":{}", page.footer_height.0)?;
+
+    out.write_str(",\"headerText\":")?;
+    write_opt_string(out, styled.header_text())?;
+    out.write_str(",\"folio\":")?;
+    write_opt_string(out, styled.folio())?;
 
     out.write_str(",\"footnote\":{\"numbering\":\"")?;
     out.write_str(styled.footnote_numbering().as_str())?;
@@ -237,6 +253,15 @@ fn write_computed_style(out: &mut impl Write, style: &ComputedStyle) -> fmt::Res
     write!(out, ",\"indentRight\":{}", style.indent_right.0)?;
     write!(out, ",\"spaceBefore\":{}", style.space_before.0)?;
     write!(out, ",\"spaceAfter\":{}", style.space_after.0)?;
+    write!(out, ",\"spaceBeforePlus\":{}", style.space_before_plus.0)?;
+    write!(out, ",\"spaceBeforeMinus\":{}", style.space_before_minus.0)?;
+    write!(out, ",\"spaceAfterPlus\":{}", style.space_after_plus.0)?;
+    write!(out, ",\"spaceAfterMinus\":{}", style.space_after_minus.0)?;
+    write!(out, ",\"widowLines\":{}", style.widow_lines)?;
+    write!(out, ",\"orphanLines\":{}", style.orphan_lines)?;
+    write!(out, ",\"hangingPunctuation\":{}", style.hanging_punctuation)?;
+    write!(out, ",\"hangingCap\":{}", style.hanging_cap.0)?;
+    write!(out, ",\"baselineGrid\":{}", style.baseline_grid.0)?;
     out.write_str(",\"align\":\"")?;
     out.write_str(align_str(style.align))?;
     out.write_str("\",\"family\":")?;

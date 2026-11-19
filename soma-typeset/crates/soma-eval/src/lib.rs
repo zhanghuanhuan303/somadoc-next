@@ -12,6 +12,8 @@
 
 use std::time::Instant;
 
+pub mod score;
+
 use soma_core::{
     break_paragraph, break_paragraph_traced, BreakConfig, BreakerKind, FallbackStage, Metrics,
     Paragraph, ParamSet, Permille, StyleId, SyntheticMetrics, Weight, Width,

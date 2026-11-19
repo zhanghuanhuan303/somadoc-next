@@ -14,7 +14,7 @@ use crate::units::{LengthSpec, LineHeightSpec, Rational, Unit};
 use crate::yaml::{Key, Value, ValueKind};
 use crate::TemplateError;
 
-pub const SCHEMA: &str = "soma.template/1";
+pub const SCHEMA: &str = "soma.template/2";
 
 /// Element names a selector may target. Derived from DocIR node kinds; a typo is
 /// an error instead of silently matching nothing.
@@ -103,13 +103,21 @@ impl Template {
 
 /// Page geometry. Sizes and margins are lengths; they resolve against the root
 /// font size like every other physical length.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PageSpec {
     pub size: PageSize,
     pub margin_top: LengthSpec,
     pub margin_bottom: LengthSpec,
     pub margin_left: LengthSpec,
     pub margin_right: LengthSpec,
+    /// Height of the running header band, drawn inside the top margin.
+    pub header: LengthSpec,
+    /// Height of the footer band, drawn below the content box.
+    pub footer: LengthSpec,
+    /// `running-title` (default) or a literal string.
+    pub header_text: Option<String>,
+    /// Folio template: `{page}` and `{pages}` are substituted.
+    pub folio: Option<String>,
 }
 
 /// Named page size or an explicit pair of lengths.
@@ -237,6 +245,15 @@ pub enum Property {
     IndentRight,
     SpaceBefore,
     SpaceAfter,
+    SpaceBeforePlus,
+    SpaceBeforeMinus,
+    SpaceAfterPlus,
+    SpaceAfterMinus,
+    WidowLines,
+    OrphanLines,
+    HangingPunctuation,
+    HangingCap,
+    BaselineGrid,
     Align,
     Family,
     Color,
@@ -258,6 +275,15 @@ impl Property {
             Self::IndentRight => "indent-right",
             Self::SpaceBefore => "space-before",
             Self::SpaceAfter => "space-after",
+            Self::SpaceBeforePlus => "space-before-plus",
+            Self::SpaceBeforeMinus => "space-before-minus",
+            Self::SpaceAfterPlus => "space-after-plus",
+            Self::SpaceAfterMinus => "space-after-minus",
+            Self::WidowLines => "widow-lines",
+            Self::OrphanLines => "orphan-lines",
+            Self::HangingPunctuation => "hanging-punctuation",
+            Self::HangingCap => "hanging-cap",
+            Self::BaselineGrid => "baseline-grid",
             Self::Align => "align",
             Self::Family => "family",
             Self::Color => "color",
@@ -279,6 +305,15 @@ impl Property {
             "indent-right" => Self::IndentRight,
             "space-before" => Self::SpaceBefore,
             "space-after" => Self::SpaceAfter,
+            "space-before-plus" => Self::SpaceBeforePlus,
+            "space-before-minus" => Self::SpaceBeforeMinus,
+            "space-after-plus" => Self::SpaceAfterPlus,
+            "space-after-minus" => Self::SpaceAfterMinus,
+            "widow-lines" => Self::WidowLines,
+            "orphan-lines" => Self::OrphanLines,
+            "hanging-punctuation" => Self::HangingPunctuation,
+            "hanging-cap" => Self::HangingCap,
+            "baseline-grid" => Self::BaselineGrid,
             "align" => Self::Align,
             "family" => Self::Family,
             "color" => Self::Color,
@@ -300,6 +335,8 @@ pub enum PropertyValue {
     LineHeight(LineHeightSpec),
     Align(Align),
     Bool(bool),
+    /// Small non-negative integer (`widow-lines`, `orphan-lines`).
+    Count(u8),
     Weight(FontWeight),
     Slant(FontSlant),
     Color(u32),
@@ -435,6 +472,10 @@ fn parse_page(value: &Value, path: &str) -> Result<PageSpec, TemplateError> {
         "margin-bottom",
         "margin-left",
         "margin-right",
+        "header",
+        "footer",
+        "header-text",
+        "folio",
     ])?;
 
     let size_text = fields.require_str("size")?;
@@ -487,12 +528,30 @@ fn parse_page(value: &Value, path: &str) -> Result<PageSpec, TemplateError> {
         .or(shared)
         .unwrap_or(default_margin);
 
+    let zero = LengthSpec::new(Rational::new(0, 1).expect("non-zero denominator"), Unit::Mm);
+    let header = fields
+        .optional("header")
+        .map(|value| parse_length(value, "page"))
+        .transpose()?
+        .unwrap_or(zero);
+    let footer = fields
+        .optional("footer")
+        .map(|value| parse_length(value, "page"))
+        .transpose()?
+        .unwrap_or(zero);
+    let header_text = fields.optional_str("header-text")?;
+    let folio = fields.optional_str("folio")?;
+
     Ok(PageSpec {
         size,
         margin_top,
         margin_bottom,
         margin_left,
         margin_right,
+        header,
+        footer,
+        header_text,
+        folio,
     })
 }
 
@@ -595,7 +654,13 @@ fn parse_declaration(
         | Property::IndentLeft
         | Property::IndentRight
         | Property::SpaceBefore
-        | Property::SpaceAfter => {
+        | Property::SpaceAfter
+        | Property::SpaceBeforePlus
+        | Property::SpaceBeforeMinus
+        | Property::SpaceAfterPlus
+        | Property::SpaceAfterMinus
+        | Property::HangingCap
+        | Property::BaselineGrid => {
             let length = LengthSpec::parse(&text).ok_or_else(|| error("invalid length value"))?;
             PropertyValue::Length(length)
         }
@@ -638,13 +703,23 @@ fn parse_declaration(
         Property::Underline
         | Property::SmallCaps
         | Property::KeepWithNext
-        | Property::PageBreakBefore => {
+        | Property::PageBreakBefore
+        | Property::HangingPunctuation => {
             let flag = match text.as_str() {
                 "true" | "yes" => true,
                 "false" | "no" => false,
                 _ => return Err(error("expected true or false")),
             };
             PropertyValue::Bool(flag)
+        }
+        Property::WidowLines | Property::OrphanLines => {
+            let count = text
+                .parse::<u8>()
+                .map_err(|_| error("expected a non-negative integer"))?;
+            if count > 9 {
+                return Err(error("expected a count between 0 and 9"));
+            }
+            PropertyValue::Count(count)
         }
     };
 

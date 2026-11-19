@@ -19,20 +19,24 @@
 extern crate alloc;
 
 pub mod canonical;
+pub mod metrics;
+mod pagination;
 
-use alloc::string::String;
+pub use metrics::{StyledMetrics, TableMetrics};
+
+use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
 use soma_core::{
-    break_paragraph, BreakConfig, Cost, FallbackStage, Line, Metrics, ParagraphStyle, StyleId,
-    Width,
+    break_paragraph, BreakConfig, Cost, FallbackStage, Line, Metrics, Paragraph, ParagraphStyle,
+    PunctClass, StyleId, Width,
 };
 use soma_doc::{Block, Document, Inline, NodeId};
 use soma_rules::{paragraph_from_spans, paragraph_from_text, InlineSpan, RuleError, SpanKind};
 use soma_template::{ComputedStyle, ResolvedPage, StyledDoc};
 
-pub const SCHEMA: &str = "soma.pages/1";
+pub const SCHEMA: &str = "soma.pages/3";
 
 /// Placeholder atom for a footnote marker. Renderers replace the marked atom
 /// with [`Mark::number`].
@@ -77,6 +81,10 @@ pub struct VerticalParams {
     pub badness_scale: i64,
     /// Cost of a page that must hold one block taller than the content area.
     pub overflow_penalty: i64,
+    /// Cost of breaking a paragraph after its first line (a one-line page foot).
+    pub club_penalty: i64,
+    /// Cost of breaking a paragraph before its last line (a one-line page head).
+    pub widow_penalty: i64,
 }
 
 impl VerticalParams {
@@ -85,7 +93,28 @@ impl VerticalParams {
             page_weight: 0,
             badness_scale: 100,
             overflow_penalty: 1_000_000,
+            club_penalty: 10_000,
+            widow_penalty: 10_000,
         }
+    }
+
+    /// Hash of the vertical cost model. The page result carries it so two runs
+    /// with different pagination knobs cannot share canonical bytes by accident.
+    pub fn hash(&self) -> u64 {
+        let mut state: u64 = 0xcbf2_9ce4_8422_2325;
+        for value in [
+            self.page_weight,
+            self.badness_scale,
+            self.overflow_penalty,
+            self.club_penalty,
+            self.widow_penalty,
+        ] {
+            for byte in value.to_le_bytes() {
+                state ^= byte as u64;
+                state = state.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        state
     }
 }
 
@@ -130,12 +159,17 @@ pub struct Mark {
     pub atom: u32,
     /// Visible number, after the template's numbering policy.
     pub number: u32,
+    /// Line index inside the block, so a split paragraph keeps its marker on
+    /// the page that holds the line.
+    pub line: u32,
 }
 
 /// One line inside a placed block. `y` is relative to the block top.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlacedLine {
     pub y: Width,
+    /// Extra width the last atom hangs past the target (hanging punctuation).
+    pub hang: i32,
     pub line: Line,
 }
 
@@ -153,6 +187,11 @@ pub struct PlacedBlock {
     pub height: Width,
     pub lines: Vec<PlacedLine>,
     pub marks: Vec<Mark>,
+    /// Index of the first line in this page slice. Non-zero means the block is
+    /// continued from the previous page.
+    pub line_offset: u32,
+    /// Total number of lines in the unsplit block.
+    pub lines_total: u32,
     pub stage: FallbackStage,
 }
 
@@ -162,6 +201,10 @@ pub struct Page {
     pub number: u32,
     pub blocks: Vec<PlacedBlock>,
     pub footnotes: Vec<PlacedBlock>,
+    /// Running header, positioned above the content box (negative `y`).
+    pub header: Vec<PlacedBlock>,
+    /// Footer and folio, positioned below the content box.
+    pub footer: Vec<PlacedBlock>,
     pub used_height: Width,
     pub footnote_height: Width,
     /// True when a single box was taller than the content area.
@@ -178,6 +221,10 @@ pub struct PagedLayout {
     pub engine_hash: u64,
     pub rules_version: u16,
     pub metrics_version: u16,
+    /// Content hash of the metrics source. `0` for adapters without one.
+    pub metrics_hash: u64,
+    /// Hash of the vertical cost model used for this pagination.
+    pub vertical_hash: u64,
     /// Footnote reflow passes actually used (1 = no iteration).
     pub footnote_passes: u32,
     /// Summed vertical cost of the chosen pagination. Comparable only between
@@ -228,6 +275,10 @@ impl TextIndex {
 
     fn finish(&mut self) {
         self.entries.sort_by_key(|(node, _)| *node);
+    }
+
+    fn max_node(&self) -> u32 {
+        self.entries.last().map(|(node, _)| node.0).unwrap_or(0)
     }
 }
 
@@ -318,101 +369,153 @@ pub fn layout_with(
         content_width,
         text: TextIndex::default(),
         notes: NoteMap::build(doc),
+        headings: Vec::new(),
     };
     let items = builder.flow(&doc.blocks, ROOT_STYLE)?;
     builder.compile_notes(doc)?;
-    builder.text.finish();
 
     let page_height = page.content_height();
+    let (vertical_items, segments) = pagination::build_stream(&items, vertical);
     let mut passes = 1u32;
 
-    let (mut page_items, mut kind) = match strategy {
-        PaginationStrategy::VerticalKp => {
-            match vertical_place(&items, page_height, &builder.notes, vertical) {
-                Some(pages) => (pages, PaginationKind::VerticalKp),
-                None => {
-                    // No feasible break sequence: fall back to the deterministic
-                    // greedy pass and record it.
-                    let mut reserved: Vec<Width> = Vec::new();
-                    let mut placed = greedy_place(&items, page_height, &reserved);
-                    for _ in 0..8 {
-                        let heights = footnote_heights(&placed, &items, &builder.notes);
-                        if heights == reserved {
-                            break;
-                        }
-                        reserved = heights;
-                        placed = greedy_place(&items, page_height, &reserved);
-                        passes += 1;
-                    }
-                    (placed, PaginationKind::Greedy)
-                }
-            }
-        }
-        PaginationStrategy::Greedy => {
-            let mut reserved: Vec<Width> = Vec::new();
-            let mut placed = greedy_place(&items, page_height, &reserved);
-            for _ in 0..8 {
-                let heights = footnote_heights(&placed, &items, &builder.notes);
-                if heights == reserved {
-                    break;
-                }
-                reserved = heights;
-                placed = greedy_place(&items, page_height, &reserved);
-                passes += 1;
-            }
-            (placed, PaginationKind::Greedy)
-        }
+    let (ends, kind) = match strategy {
+        PaginationStrategy::VerticalKp => match pagination::place_kp(
+            &vertical_items,
+            &segments,
+            page_height,
+            &builder.notes,
+            vertical,
+        ) {
+            Some(ends) => (ends, PaginationKind::VerticalKp),
+            None => (
+                pagination::greedy_with_notes(
+                    &vertical_items,
+                    &segments,
+                    page_height,
+                    &builder.notes,
+                    &mut passes,
+                ),
+                PaginationKind::Greedy,
+            ),
+        },
+        PaginationStrategy::Greedy => (
+            pagination::greedy_with_notes(
+                &vertical_items,
+                &segments,
+                page_height,
+                &builder.notes,
+                &mut passes,
+            ),
+            PaginationKind::Greedy,
+        ),
     };
 
-    // Drop page groups that contain nothing (a leading forced break).
-    page_items.retain(|group| !group.is_empty());
-    if page_items.is_empty() {
-        page_items.push(Vec::new());
-    }
-    if page_items.len() == 1
-        && kind == PaginationKind::Greedy
-        && strategy == PaginationStrategy::VerticalKp
-    {
-        // Fallback already recorded; nothing more to do.
-        kind = PaginationKind::Greedy;
-    }
+    let pagination_cost = pagination::score_pages(
+        &ends,
+        &vertical_items,
+        &builder.notes,
+        page_height,
+        vertical,
+    );
 
-    let pagination_cost = score_pages(&page_items, &items, &builder.notes, page_height, vertical);
+    let mut pages = Vec::with_capacity(ends.len().max(1));
+    let mut previous = 0usize;
+    let total_pages = ends.len().max(1) as u32;
+    let mut next_node = builder.text.max_node() + 1;
+    for (index, &end) in ends.iter().enumerate() {
+        let footnote_height =
+            pagination::page_note_height(previous, end, &vertical_items, &builder.notes);
+        let (blocks, used) = pagination::assemble_page_blocks(
+            &items,
+            &vertical_items,
+            previous,
+            end,
+            page_height,
+            footnote_height,
+        );
+        let overflow = vertical_items[previous..end]
+            .iter()
+            .any(|item| item.height.0 > page_height.0);
+        let footnotes =
+            pagination::assemble_footnotes(previous, end, &vertical_items, &builder.notes);
 
-    let mut pages = Vec::with_capacity(page_items.len());
-    for (index, item_indices) in page_items.iter().enumerate() {
-        let mut blocks: Vec<PlacedBlock> = Vec::new();
-        let mut used = Width::ZERO;
-        let mut overflow = false;
-
-        for &item_index in item_indices {
-            let item = &items[item_index];
-            if !blocks.is_empty() {
-                used = used + item.before;
-            }
-            for block in &item.blocks {
-                let mut placed = block.clone();
-                placed.y = placed.y + used;
-                blocks.push(placed);
-            }
-            used = used + item.height + item.after;
-            if item.height > page_height {
-                overflow = true;
+        let mut header = Vec::new();
+        let mut footer = Vec::new();
+        if page.header_height.0 > 0 {
+            let source = styled.header_text().unwrap_or("running-title");
+            let text = if source == "running-title" {
+                let item_index = vertical_items
+                    .get(previous)
+                    .map(|item| item.item)
+                    .unwrap_or(0);
+                builder
+                    .headings
+                    .iter()
+                    .rev()
+                    .find(|(position, _, _)| *position <= item_index)
+                    .map(|(_, _, title)| title.clone())
+                    .unwrap_or_default()
+            } else {
+                String::from(source)
+            };
+            if let Some(block) = margin_block(
+                &mut builder,
+                NodeId(next_node),
+                &text,
+                ROOT_STYLE,
+                content_width,
+                page.header_height,
+                Width(-page.header_height.0),
+            ) {
+                header.push(block);
+                next_node += 1;
             }
         }
-
-        let footnotes = assemble_footnotes(&page_items[index], &items, &builder.notes);
-        let footnote_height = page_note_height(&page_items[index], &items, &builder.notes);
+        if page.footer_height.0 > 0 {
+            if let Some(format) = styled.folio() {
+                let text = format
+                    .replace("{page}", &(index as u32 + 1).to_string())
+                    .replace("{pages}", &total_pages.to_string());
+                if let Some(block) = margin_block(
+                    &mut builder,
+                    NodeId(next_node),
+                    &text,
+                    ROOT_STYLE,
+                    content_width,
+                    page.footer_height,
+                    page_height,
+                ) {
+                    footer.push(block);
+                    next_node += 1;
+                }
+            }
+        }
 
         pages.push(Page {
             number: index as u32 + 1,
             blocks,
             footnotes,
+            header,
+            footer,
             used_height: used,
             footnote_height,
             overflow,
         });
+        previous = end;
     }
+    if pages.is_empty() {
+        pages.push(Page {
+            number: 1,
+            blocks: Vec::new(),
+            footnotes: Vec::new(),
+            header: Vec::new(),
+            footer: Vec::new(),
+            used_height: Width::ZERO,
+            footnote_height: Width::ZERO,
+            overflow: false,
+        });
+    }
+    builder.text.finish();
 
     let mut numbering = Numbering::new(styled.footnote_numbering());
     numbering.assign(&mut pages);
@@ -425,6 +528,8 @@ pub fn layout_with(
         engine_hash: engine.param_hash().0,
         rules_version: engine.rules_version(),
         metrics_version: engine.metrics_version(),
+        metrics_hash: metrics.hash(),
+        vertical_hash: vertical.hash(),
         footnote_passes: passes,
         pagination_cost,
     })
@@ -440,15 +545,53 @@ struct OwnedSpan {
     kind: SpanKind,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Glue {
+    width: Width,
+    plus: Width,
+    minus: Width,
+}
+
+impl Glue {
+    const ZERO: Self = Self {
+        width: Width::ZERO,
+        plus: Width::ZERO,
+        minus: Width::ZERO,
+    };
+}
+
+/// One line of a splittable block, or the single part of an atomic block.
+struct Part {
+    height: Width,
+    /// Footnotes whose marker sits on this line.
+    notes: Vec<usize>,
+}
+
 struct FlowItem {
     blocks: Vec<PlacedBlock>,
     height: Width,
-    before: Width,
-    after: Width,
+    before: Glue,
+    after: Glue,
     keep_with_next: bool,
     page_break_before: bool,
     forced_break: bool,
     footnotes: Vec<usize>,
+    /// Empty for atomic blocks; one entry per line for splittable blocks.
+    parts: Vec<Part>,
+}
+
+/// One vertical item handed to the page breaker.
+struct VItem {
+    item: usize,
+    part: usize,
+    height: Width,
+    before: Glue,
+    after: Glue,
+    notes: Vec<usize>,
+    /// Charged when the page breaks after this item.
+    penalty: i64,
+    /// `false` when `keep-with-next` forbids a break here.
+    can_break: bool,
 }
 
 struct NoteMap {
@@ -485,6 +628,8 @@ struct Builder<'a> {
     content_width: Width,
     text: TextIndex,
     notes: NoteMap,
+    /// `(flow item index, node, plain text)` for headings, in document order.
+    headings: Vec<(usize, NodeId, String)>,
 }
 
 impl Builder<'_> {
@@ -497,6 +642,22 @@ impl Builder<'_> {
             .style(style)
             .cloned()
             .unwrap_or_else(ComputedStyle::base)
+    }
+
+    fn before_glue(&self, computed: &ComputedStyle) -> Glue {
+        Glue {
+            width: computed.space_before,
+            plus: computed.space_before_plus,
+            minus: computed.space_before_minus,
+        }
+    }
+
+    fn after_glue(&self, computed: &ComputedStyle) -> Glue {
+        Glue {
+            width: computed.space_after,
+            plus: computed.space_after_plus,
+            minus: computed.space_after_minus,
+        }
     }
 
     fn flow(&mut self, blocks: &[Block], fallback: StyleId) -> Result<Vec<FlowItem>, LayoutError> {
@@ -523,10 +684,13 @@ impl Builder<'_> {
                 }
                 Block::Heading(node) => {
                     let style = self.style(node.meta.id, fallback);
+                    let index = items.len();
                     if let Some(item) =
                         self.paragraph_item(node.meta.id, BoxKind::Heading, &node.inlines, style)?
                     {
                         items.push(item);
+                        self.headings
+                            .push((index, node.meta.id, inline_text(&node.inlines)));
                     }
                 }
                 Block::List(node) => {
@@ -580,7 +744,7 @@ impl Builder<'_> {
                     let column_width = Width(self.content_width.0 / columns as i32);
                     for row in &node.rows {
                         let row_style = self.style(row.meta.id, style);
-                        let row_space = self.computed(row_style).space_before;
+                        let row_computed = self.computed(row_style);
                         let mut row_blocks = Vec::new();
                         let mut row_height = Width::ZERO;
                         for (cell_index, cell) in row.cells.iter().enumerate() {
@@ -603,12 +767,13 @@ impl Builder<'_> {
                         items.push(FlowItem {
                             blocks: row_blocks,
                             height: row_height,
-                            before: row_space,
-                            after: Width::ZERO,
+                            before: self.before_glue(&row_computed),
+                            after: Glue::ZERO,
                             keep_with_next: false,
                             page_break_before: false,
                             forced_break: false,
                             footnotes: Vec::new(),
+                            parts: Vec::new(),
                         });
                     }
                 }
@@ -630,34 +795,41 @@ impl Builder<'_> {
                             height,
                             lines: Vec::new(),
                             marks: Vec::new(),
+                            line_offset: 0,
+                            lines_total: 0,
                             stage: FallbackStage::Normal,
                         }],
                         height,
-                        before: computed.space_before,
-                        after: computed.space_after,
+                        before: self.before_glue(&computed),
+                        after: self.after_glue(&computed),
                         keep_with_next: false,
                         page_break_before: false,
                         forced_break: false,
                         footnotes: Vec::new(),
+                        parts: Vec::new(),
                     });
                 }
                 Block::PageBreak(_) => items.push(FlowItem {
                     blocks: Vec::new(),
                     height: Width::ZERO,
-                    before: Width::ZERO,
-                    after: Width::ZERO,
+                    before: Glue::ZERO,
+                    after: Glue::ZERO,
                     keep_with_next: false,
                     page_break_before: false,
                     forced_break: true,
                     footnotes: Vec::new(),
+                    parts: Vec::new(),
                 }),
                 Block::Section(node) => {
                     let style = self.style(node.meta.id, fallback);
                     if let Some(title) = &node.title {
+                        let index = items.len();
                         if let Some(item) =
                             self.paragraph_item(node.meta.id, BoxKind::Heading, title, style)?
                         {
                             items.push(item);
+                            self.headings
+                                .push((index, node.meta.id, inline_text(title)));
                         }
                     }
                 }
@@ -700,7 +872,14 @@ impl Builder<'_> {
 
         let mut spans: Vec<OwnedSpan> = Vec::new();
         let mut footnotes: Vec<usize> = Vec::new();
-        self.collect(inlines, style_id, &mut spans, &mut footnotes);
+        let mut marker_notes: Vec<Option<usize>> = Vec::new();
+        self.collect(
+            inlines,
+            style_id,
+            &mut spans,
+            &mut footnotes,
+            &mut marker_notes,
+        );
 
         let borrowed: Vec<InlineSpan<'_>> = spans
             .iter()
@@ -715,11 +894,13 @@ impl Builder<'_> {
             Ok(paragraph) => paragraph,
             Err(RuleError::EmptyText) => return Ok(None),
         };
+        let mut paragraph = paragraph;
+        scale_trim(&mut paragraph, |style| self.computed(style).font_size.0);
 
         let result = break_paragraph(&paragraph, self.metrics, self.engine)
             .map_err(|_| LayoutError::new(Some(node), "line breaking failed"))?;
 
-        let marks = marker_positions(&paragraph.atoms);
+        let marks = marker_positions(&paragraph.atoms, &result.lines);
         self.text.insert(
             node,
             paragraph
@@ -729,24 +910,52 @@ impl Builder<'_> {
                 .collect(),
         );
 
+        let grid = computed.baseline_grid;
         let mut placed_lines = Vec::with_capacity(result.lines.len());
+        let mut parts = Vec::with_capacity(result.lines.len());
         let mut y = Width::ZERO;
         for line in &result.lines {
-            placed_lines.push(PlacedLine {
-                y,
-                line: line.clone(),
+            let mut line = line.clone();
+            let hang = if computed.hanging_punctuation {
+                hanging_amount(&paragraph, &line, computed.hanging_cap)
+            } else {
+                0
+            };
+            if hang > 0 {
+                let sign = if line.adjustment < 0 { -1 } else { 1 };
+                line.adjustment -= sign * hang;
+                if let Some(last) = line.boxes.last_mut() {
+                    last.x = Width(last.x.0 + hang);
+                }
+            }
+            let advance = snap_to_grid(line.height, grid);
+            placed_lines.push(PlacedLine { y, hang, line });
+            parts.push(Part {
+                height: advance,
+                notes: Vec::new(),
             });
-            y = y + line.height;
+            y = y + advance;
         }
+        for (mark, note) in marks.iter().zip(marker_notes.iter()) {
+            if let Some(note) = *note {
+                if let Some(part) = parts.get_mut(mark.line as usize) {
+                    if !part.notes.contains(&note) {
+                        part.notes.push(note);
+                    }
+                }
+            }
+        }
+        let lines_total = placed_lines.len() as u32;
 
         Ok(Some(FlowItem {
             height: y,
-            before: computed.space_before,
-            after: computed.space_after,
+            before: self.before_glue(&computed),
+            after: self.after_glue(&computed),
             keep_with_next: computed.keep_with_next,
             page_break_before: computed.page_break_before,
             forced_break: false,
             footnotes,
+            parts,
             blocks: vec![PlacedBlock {
                 node,
                 kind,
@@ -757,6 +966,8 @@ impl Builder<'_> {
                 height: y,
                 lines: placed_lines,
                 marks,
+                line_offset: 0,
+                lines_total,
                 stage: result.fallback_stage,
             }],
         }))
@@ -768,6 +979,7 @@ impl Builder<'_> {
         fallback: StyleId,
         out: &mut Vec<OwnedSpan>,
         footnotes: &mut Vec<usize>,
+        marker_notes: &mut Vec<Option<usize>>,
     ) {
         for inline in inlines {
             let style = self.style(inline.meta().id, fallback);
@@ -788,8 +1000,12 @@ impl Builder<'_> {
                 | Inline::Strikethrough(node)
                 | Inline::SmallCaps(node)
                 | Inline::Superscript(node)
-                | Inline::Subscript(node) => self.collect(&node.children, style, out, footnotes),
-                Inline::Link(node) => self.collect(&node.children, style, out, footnotes),
+                | Inline::Subscript(node) => {
+                    self.collect(&node.children, style, out, footnotes, marker_notes)
+                }
+                Inline::Link(node) => {
+                    self.collect(&node.children, style, out, footnotes, marker_notes)
+                }
                 Inline::Image(node) => out.push(OwnedSpan {
                     text: node
                         .source
@@ -805,11 +1021,13 @@ impl Builder<'_> {
                     kind: SpanKind::Object,
                 }),
                 Inline::FootnoteRef(node) => {
-                    if let Some(index) = self.notes.find(&node.target) {
+                    let index = self.notes.find(&node.target);
+                    if let Some(index) = index {
                         if !footnotes.contains(&index) {
                             footnotes.push(index);
                         }
                     }
+                    marker_notes.push(index);
                     out.push(OwnedSpan {
                         text: String::from(FOOTNOTE_MARKER),
                         style,
@@ -883,6 +1101,7 @@ impl Builder<'_> {
             for line in &result.lines {
                 lines.push(PlacedLine {
                     y,
+                    hang: 0,
                     line: line.clone(),
                 });
                 y = y + line.height;
@@ -896,12 +1115,13 @@ impl Builder<'_> {
 
         Ok(Some(FlowItem {
             height: y,
-            before: computed.space_before,
-            after: computed.space_after,
+            before: self.before_glue(&computed),
+            after: self.after_glue(&computed),
             keep_with_next: computed.keep_with_next,
             page_break_before: computed.page_break_before,
             forced_break: false,
             footnotes: Vec::new(),
+            parts: Vec::new(),
             blocks: vec![PlacedBlock {
                 node,
                 kind: BoxKind::Code,
@@ -912,6 +1132,8 @@ impl Builder<'_> {
                 height: y,
                 lines,
                 marks: Vec::new(),
+                line_offset: 0,
+                lines_total: 0,
                 stage,
             }],
         }))
@@ -950,6 +1172,7 @@ impl Builder<'_> {
         for line in &result.lines {
             lines.push(PlacedLine {
                 y,
+                hang: 0,
                 line: line.clone(),
             });
             y = y + line.height;
@@ -957,12 +1180,13 @@ impl Builder<'_> {
 
         Ok(FlowItem {
             height: y,
-            before: computed.space_before,
-            after: computed.space_after,
+            before: self.before_glue(&computed),
+            after: self.after_glue(&computed),
             keep_with_next: computed.keep_with_next,
             page_break_before: computed.page_break_before,
             forced_break: false,
             footnotes: Vec::new(),
+            parts: Vec::new(),
             blocks: vec![PlacedBlock {
                 node,
                 kind,
@@ -973,6 +1197,8 @@ impl Builder<'_> {
                 height: y,
                 lines,
                 marks: Vec::new(),
+                line_offset: 0,
+                lines_total: 0,
                 stage: result.fallback_stage,
             }],
         })
@@ -994,12 +1220,13 @@ impl Builder<'_> {
         };
         Ok(FlowItem {
             height,
-            before: computed.space_before,
-            after: computed.space_after,
+            before: self.before_glue(&computed),
+            after: self.after_glue(&computed),
             keep_with_next: computed.keep_with_next,
             page_break_before: computed.page_break_before,
             forced_break: false,
             footnotes: Vec::new(),
+            parts: Vec::new(),
             blocks: vec![PlacedBlock {
                 node,
                 kind: BoxKind::Figure,
@@ -1010,6 +1237,8 @@ impl Builder<'_> {
                 height,
                 lines: Vec::new(),
                 marks: Vec::new(),
+                line_offset: 0,
+                lines_total: 0,
                 stage: FallbackStage::Normal,
             }],
         })
@@ -1039,24 +1268,153 @@ impl Builder<'_> {
 }
 
 /// Atoms that render as a footnote number rather than their text.
-fn marker_positions(atoms: &[soma_core::Atom]) -> Vec<Mark> {
+fn marker_positions(atoms: &[soma_core::Atom], lines: &[Line]) -> Vec<Mark> {
     let mut marks = Vec::new();
     let mut marker = [0u8; 4];
     let text = FOOTNOTE_MARKER.encode_utf8(&mut marker);
     for (index, atom) in atoms.iter().enumerate() {
         if atom.text.as_str() == &*text {
+            let line = lines
+                .iter()
+                .position(|line| index >= line.start as usize && index < line.end as usize)
+                .unwrap_or(0);
             marks.push(Mark {
                 atom: index as u32,
                 number: 0,
+                line: line as u32,
             });
         }
     }
     marks
 }
 
+/// Plain text of an inline sequence, used for running headers.
+fn inline_text(inlines: &[Inline]) -> String {
+    let mut out = String::new();
+    for inline in inlines {
+        match inline {
+            Inline::Text(node) => out.push_str(&node.value),
+            Inline::Code(node) => out.push_str(&node.value),
+            Inline::Math(node) => out.push_str(&node.source),
+            Inline::Ruby(node) => out.push_str(&node.base),
+            Inline::Image(node) => {
+                if let Some(alt) = &node.source.alt {
+                    out.push_str(alt);
+                }
+            }
+            Inline::Raw(node) => out.push_str(&node.content.fallback),
+            Inline::LineBreak(_) | Inline::FootnoteRef(_) => {}
+            other => out.push_str(&inline_text(other.children())),
+        }
+    }
+    out
+}
+
+/// Build a header/footer line: one centered line, outside the content box.
+///
+/// The band lives in the page margin, so it never competes with the content
+/// height and cannot change pagination.
+fn margin_block(
+    builder: &mut Builder,
+    node: NodeId,
+    text: &str,
+    style: StyleId,
+    content_width: Width,
+    band_height: Width,
+    y: Width,
+) -> Option<PlacedBlock> {
+    if text.is_empty() {
+        return None;
+    }
+    let paragraph_style = ParagraphStyle {
+        width: Width::from_em(1000),
+        first_indent: Width::ZERO,
+        line_height: band_height,
+        align: soma_core::Align::Justify,
+    };
+    let paragraph = paragraph_from_text(text, paragraph_style, style).ok()?;
+    builder.text.insert(
+        node,
+        paragraph
+            .atoms
+            .iter()
+            .map(|atom| (atom.text.clone(), atom.style))
+            .collect(),
+    );
+    let result = break_paragraph(&paragraph, builder.metrics, builder.engine).ok()?;
+    let stage = result.fallback_stage;
+    let line = result.lines.into_iter().next()?;
+    let natural = line.natural_width;
+    let x = Width((content_width.0 - natural.0).max(0) / 2);
+
+    Some(PlacedBlock {
+        node,
+        kind: BoxKind::Paragraph,
+        style,
+        x,
+        y,
+        width: natural,
+        height: band_height,
+        lines: vec![PlacedLine {
+            y: Width::ZERO,
+            hang: 0,
+            line,
+        }],
+        marks: Vec::new(),
+        line_offset: 0,
+        lines_total: 1,
+        stage,
+    })
+}
+
+/// Round a line advance up to a whole number of baseline-grid steps.
+fn snap_to_grid(height: Width, grid: Width) -> Width {
+    if grid.0 <= 0 || height.0 <= 0 {
+        return height;
+    }
+    let steps = (height.0 + grid.0 - 1) / grid.0;
+    Width(steps.max(1) * grid.0)
+}
+
+/// Scale the rules layer's base-em trim caps to each atom's own font size.
+fn scale_trim(paragraph: &mut Paragraph, size_of: impl Fn(StyleId) -> i32) {
+    for atom in &mut paragraph.atoms {
+        let size = size_of(atom.style);
+        if size <= 0 || size == 4096 {
+            continue;
+        }
+        atom.compress_left = Width(scale_units(atom.compress_left.0, size));
+        atom.compress_right = Width(scale_units(atom.compress_right.0, size));
+    }
+}
+
+fn scale_units(value: i32, size: i32) -> i32 {
+    (value as i64 * size as i64 / 4096) as i32
+}
+
+/// How far the final punctuation may hang into the margin. Hanging relaxes
+/// justification in either direction: it reduces compression on a tight line
+/// and stretch on a loose one.
+fn hanging_amount(paragraph: &Paragraph, line: &Line, cap: Width) -> i32 {
+    if line.adjustment == 0 || cap.0 <= 0 {
+        return 0;
+    }
+    let Some(last) = line.end.checked_sub(1) else {
+        return 0;
+    };
+    let Some(atom) = paragraph.atoms.get(last as usize) else {
+        return 0;
+    };
+    match atom.class {
+        PunctClass::Close | PunctClass::Middle => line.adjustment.abs().min(cap.0),
+        PunctClass::Open | PunctClass::None => 0,
+    }
+}
+
 fn empty_line(line_height: Width, y: Width) -> PlacedLine {
     PlacedLine {
         y,
+        hang: 0,
         line: Line {
             start: 0,
             end: 0,
@@ -1086,307 +1444,6 @@ fn empty_line(line_height: Width, y: Width) -> PlacedLine {
 // Pagination
 // ---------------------------------------------------------------------------
 
-fn greedy_place(items: &[FlowItem], page_height: Width, reserved: &[Width]) -> Vec<Vec<usize>> {
-    let mut pages: Vec<Vec<usize>> = Vec::new();
-    let mut current: Vec<usize> = Vec::new();
-    let mut used = Width::ZERO;
-
-    for (index, item) in items.iter().enumerate() {
-        if item.forced_break {
-            if !current.is_empty() {
-                pages.push(core::mem::take(&mut current));
-            }
-            used = Width::ZERO;
-            continue;
-        }
-
-        let page_index = pages.len();
-        let limit =
-            page_height.saturating_sub(reserved.get(page_index).copied().unwrap_or(Width::ZERO));
-
-        let spacing = if current.is_empty() {
-            Width::ZERO
-        } else {
-            item.before
-        };
-        let needed = spacing + item.height + item.after;
-
-        if (item.page_break_before || (!current.is_empty() && used + needed > limit))
-            && !current.is_empty()
-        {
-            pages.push(core::mem::take(&mut current));
-            used = Width::ZERO;
-        }
-
-        let spacing = if current.is_empty() {
-            Width::ZERO
-        } else {
-            item.before
-        };
-        used = used + spacing + item.height + item.after;
-        current.push(index);
-    }
-
-    if !current.is_empty() {
-        pages.push(current);
-    }
-
-    fix_keep_with_next(items, &mut pages);
-    if pages.is_empty() {
-        pages.push(Vec::new());
-    }
-    pages
-}
-
-/// Footnote area height for one page group.
-fn page_note_height(page_items: &[usize], items: &[FlowItem], notes: &NoteMap) -> Width {
-    let mut seen: Vec<usize> = Vec::new();
-    for &item_index in page_items {
-        for note in &items[item_index].footnotes {
-            if !seen.contains(note) {
-                seen.push(*note);
-            }
-        }
-    }
-    let mut height = Width::ZERO;
-    for note in seen {
-        if let Some(blocks) = notes.blocks.get(note) {
-            for block in blocks {
-                height = height + block.height;
-            }
-        }
-    }
-    height
-}
-
-/// TeX-style page badness: cubic in the leftover fraction, in permille.
-fn page_badness(used: Width, page_height: Width, overflow: bool, params: VerticalParams) -> i64 {
-    if overflow {
-        return params.overflow_penalty;
-    }
-    let free = page_height.0 - used.0;
-    if free <= 0 || page_height.0 <= 0 {
-        return 0;
-    }
-    let milli = free as i64 * 1000 / page_height.0 as i64;
-    params.badness_scale * milli * milli * milli / 1_000_000
-}
-
-fn relax(best: &mut [(i64, u32, usize)], from: usize, to: usize, page_cost: i64) {
-    let base = best[from];
-    let candidate = (base.0 + page_cost, base.1 + 1, from);
-    if candidate < best[to] {
-        best[to] = candidate;
-    }
-}
-
-/// Vertical Knuth-Plass over flow items: choose page breaks minimizing summed
-/// page badness. The last page is free (like a paragraph's last line). Hard
-/// constraints: forced breaks, `page_break_before`, `keep-with-next`, and a
-/// single overfull block must own its page.
-fn vertical_place(
-    items: &[FlowItem],
-    page_height: Width,
-    notes: &NoteMap,
-    params: VerticalParams,
-) -> Option<Vec<Vec<usize>>> {
-    let n = items.len();
-    if n == 0 {
-        return Some(Vec::new());
-    }
-    const INF: i64 = i64::MAX / 4;
-    let mut best: Vec<(i64, u32, usize)> = vec![(INF, u32::MAX, 0); n + 1];
-    best[0] = (0, 0, 0);
-
-    for i in 0..n {
-        if best[i].0 == INF {
-            continue;
-        }
-        if items[i].forced_break {
-            relax(&mut best, i, i + 1, 0);
-            continue;
-        }
-
-        let mut used = Width::ZERO;
-        let mut notes_seen: Vec<usize> = Vec::new();
-        let mut j = i;
-        while j < n {
-            let item = &items[j];
-            if item.forced_break {
-                break;
-            }
-            if j > i && item.page_break_before {
-                break;
-            }
-
-            let gap = if j == i { Width::ZERO } else { item.before };
-            used = used + gap + item.height + item.after;
-            for note in &item.footnotes {
-                if !notes_seen.contains(note) {
-                    notes_seen.push(*note);
-                }
-            }
-            let total = used + note_height_of(&notes_seen, notes);
-            let overflow = total.0 > page_height.0;
-            let single = j == i;
-
-            if overflow && !single {
-                break;
-            }
-            if overflow && single {
-                let end = j + 1;
-                let last = end == n;
-                let mut cost = params.page_weight;
-                if !last {
-                    cost += page_badness(total, page_height, true, params);
-                }
-                relax(&mut best, i, end, cost);
-                break;
-            }
-
-            let end = j + 1;
-            let last = end == n;
-            let can_break = last
-                || items[end].forced_break
-                || (!items[j].keep_with_next && !items[end].page_break_before);
-            if can_break {
-                let mut cost = params.page_weight;
-                if !last {
-                    cost += page_badness(total, page_height, false, params);
-                }
-                relax(&mut best, i, end, cost);
-            }
-            j += 1;
-        }
-    }
-
-    if best[n].0 == INF {
-        return None;
-    }
-
-    let mut groups: Vec<Vec<usize>> = Vec::new();
-    let mut at = n;
-    while at > 0 {
-        let prev = best[at].2;
-        let group: Vec<usize> = (prev..at)
-            .filter(|index| !items[*index].forced_break)
-            .collect();
-        if !group.is_empty() {
-            groups.push(group);
-        }
-        at = prev;
-    }
-    groups.reverse();
-    Some(groups)
-}
-
-fn note_height_of(notes_seen: &[usize], notes: &NoteMap) -> Width {
-    let mut height = Width::ZERO;
-    for note in notes_seen {
-        if let Some(blocks) = notes.blocks.get(*note) {
-            for block in blocks {
-                height = height + block.height;
-            }
-        }
-    }
-    height
-}
-
-/// Cost of a finished pagination under the vertical model. Used for reporting
-/// and for the optimality test against the greedy path.
-fn score_pages(
-    groups: &[Vec<usize>],
-    items: &[FlowItem],
-    notes: &NoteMap,
-    page_height: Width,
-    params: VerticalParams,
-) -> i64 {
-    let last = groups.len().saturating_sub(1);
-    let mut total = 0i64;
-    for (index, group) in groups.iter().enumerate() {
-        let mut used = Width::ZERO;
-        for (offset, &item_index) in group.iter().enumerate() {
-            let item = &items[item_index];
-            if offset > 0 {
-                used = used + item.before;
-            }
-            used = used + item.height + item.after;
-        }
-        let height = used + page_note_height(group, items, notes);
-        let overflow = group
-            .iter()
-            .any(|&item_index| items[item_index].height.0 > page_height.0);
-        let mut cost = params.page_weight;
-        if index != last {
-            cost += page_badness(height, page_height, overflow, params);
-        }
-        total += cost;
-    }
-    total
-}
-
-/// A `keep-with-next` block must not be the last block on a page.
-fn fix_keep_with_next(items: &[FlowItem], pages: &mut [Vec<usize>]) {
-    for index in 0..pages.len().saturating_sub(1) {
-        while let Some(&last) = pages[index].last() {
-            if !items[last].keep_with_next || pages[index].len() < 2 {
-                break;
-            }
-            pages[index].pop();
-            pages[index + 1].insert(0, last);
-        }
-    }
-}
-
-fn page_note_indices(page_items: &[usize], items: &[FlowItem]) -> Vec<usize> {
-    let mut seen: Vec<usize> = Vec::new();
-    for &item_index in page_items {
-        for note in &items[item_index].footnotes {
-            if !seen.contains(note) {
-                seen.push(*note);
-            }
-        }
-    }
-    seen
-}
-
-fn footnote_heights(page_items: &[Vec<usize>], items: &[FlowItem], notes: &NoteMap) -> Vec<Width> {
-    page_items
-        .iter()
-        .map(|page| {
-            let mut height = Width::ZERO;
-            for note in page_note_indices(page, items) {
-                if let Some(blocks) = notes.blocks.get(note) {
-                    for block in blocks {
-                        height = height + block.height;
-                    }
-                }
-            }
-            height
-        })
-        .collect()
-}
-
-fn assemble_footnotes(
-    page_items: &[usize],
-    items: &[FlowItem],
-    notes: &NoteMap,
-) -> Vec<PlacedBlock> {
-    let mut out = Vec::new();
-    let mut y = Width::ZERO;
-    for note in page_note_indices(page_items, items) {
-        if let Some(blocks) = notes.blocks.get(note) {
-            for block in blocks {
-                let mut placed = block.clone();
-                placed.y = y;
-                y = y + placed.height;
-                out.push(placed);
-            }
-        }
-    }
-    out
-}
-
 /// Footnote numbering policy from the template.
 struct Numbering {
     policy: soma_template::FootnoteNumbering,
@@ -1409,6 +1466,37 @@ impl Numbering {
                     self.next += 1;
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod unit {
+    use super::*;
+    use soma_rules::justified_style;
+
+    #[test]
+    fn trim_caps_scale_with_the_atom_font_size() {
+        let style = justified_style(Width::from_em(20));
+        let mut paragraph = paragraph_from_text("（字）。", style, StyleId(1)).expect("paragraph");
+        let open = paragraph.atoms[0].compress_left.0;
+        let close = paragraph.atoms[2].compress_right.0;
+        assert!(open > 0 && close > 0);
+
+        scale_trim(&mut paragraph, |_| 8192);
+        assert_eq!(paragraph.atoms[0].compress_left.0, open * 2);
+        assert_eq!(paragraph.atoms[2].compress_right.0, close * 2);
+    }
+
+    #[test]
+    fn trim_is_unchanged_at_the_body_size() {
+        let style = justified_style(Width::from_em(20));
+        let mut paragraph = paragraph_from_text("（字）。", style, StyleId(1)).expect("paragraph");
+        let before = paragraph.atoms.clone();
+        scale_trim(&mut paragraph, |_| 4096);
+        for (atom, old) in paragraph.atoms.iter().zip(before.iter()) {
+            assert_eq!(atom.compress_left, old.compress_left);
+            assert_eq!(atom.compress_right, old.compress_right);
         }
     }
 }

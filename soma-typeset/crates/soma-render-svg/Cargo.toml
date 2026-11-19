@@ -1,0 +1,19 @@
+[package]
+name = "soma-render-svg"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Debug/visual SVG renderer over PagedLayout (no font embedding)"
+
+[dependencies]
+soma-core = { path = "../soma-core" }
+soma-layout = { path = "../soma-layout" }
+soma-template = { path = "../soma-template" }
+
+[dev-dependencies]
+soma-doc = { path = "../soma-doc" }
+soma-md = { path = "../soma-md" }
+soma-metrics = { path = "../soma-metrics" }
+soma-render-html = { path = "../soma-render-html" }

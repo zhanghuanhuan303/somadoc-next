@@ -28,6 +28,7 @@ fn main() -> ExitCode {
         Some("sweep-weight") => sweep_weight_command(&args[1..]),
         Some("blind") => blind_command(&args[1..]),
         Some("inspect") => inspect_command(&args[1..]),
+        Some("score") => score_command(&args[1..]),
         Some("help") | Some("--help") | None => {
             print_help();
             ExitCode::SUCCESS
@@ -47,6 +48,7 @@ fn print_help() {
     println!("  sweep-weight --param NAME [--values a,b,c] [--atoms N]");
     println!("  blind <preferences.csv>");
     println!("  inspect [--kind pure-cjk|mixed|punct-dense] [--atoms N]");
+    println!("  score [--paragraphs N]   (Q' effect scorecard, CSV)");
     println!();
     println!("weight names: line, break_penalty, compress_amount, compress_count,");
     println!("              boundary_deviation, short_last_scale");
@@ -382,4 +384,27 @@ fn parse_list<T: std::str::FromStr>(value: &str) -> Vec<T> {
 fn fail(message: &str) -> ExitCode {
     eprintln!("{message}");
     ExitCode::FAILURE
+}
+
+fn score_command(args: &[String]) -> ExitCode {
+    let paragraphs = match option(args, "--paragraphs") {
+        Some(value) => match value.parse::<usize>() {
+            Ok(value) => value,
+            Err(_) => {
+                eprintln!("--paragraphs must be a number");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => 40,
+    };
+    match soma_eval::score::scorecard(paragraphs) {
+        Some(card) => {
+            print!("{}", card.csv());
+            ExitCode::SUCCESS
+        }
+        None => {
+            eprintln!("scorecard failed to lay out the corpus");
+            ExitCode::FAILURE
+        }
+    }
 }

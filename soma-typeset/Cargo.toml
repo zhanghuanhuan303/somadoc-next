@@ -3,11 +3,13 @@ resolver = "2"
 members = [
     "crates/soma-core",
     "crates/soma-doc",
+    "crates/soma-metrics",
     "crates/soma-template",
     "crates/soma-rules",
     "crates/soma-layout",
     "crates/soma-md",
     "crates/soma-render-html",
+    "crates/soma-render-svg",
     "crates/soma-eval",
     "crates/soma-demo",
     "crates/soma-wasm",

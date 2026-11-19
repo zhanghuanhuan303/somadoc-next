@@ -4,7 +4,7 @@
 //! The same binary runs natively and under `wasm32-wasip1`. The hash gate
 //! compares the two byte streams; no floating point or platform API is used.
 
-use soma_core::{break_paragraph, BreakConfig, StyleId, SyntheticMetrics, Width};
+use soma_core::{break_paragraph, BreakConfig, StyleId, Width};
 use soma_doc::block::{Heading, Paragraph};
 use soma_doc::inline::{Container, FootnoteRef};
 use soma_doc::meta::{DocumentMeta, TemplateRef};
@@ -13,8 +13,9 @@ use soma_doc::{
     Block, Document, FootnoteDef, Inline, SourceId, SourceInfo, SourceKind, SourceSpan,
 };
 use soma_doc::{SourceMap, Text};
-use soma_layout::layout;
+use soma_layout::{layout, StyledMetrics, TableMetrics};
 use soma_md::parse_markdown;
+use soma_metrics::MetricsTable;
 use soma_rules::{justified_style, paragraph_from_lines};
 use soma_template::{parse_template, resolve};
 
@@ -77,12 +78,10 @@ pub fn fixture_layout_json() -> String {
     let style = justified_style(Width::from_em_frac(13, 2));
     let paragraph =
         paragraph_from_lines(LINES, style, StyleId(0)).expect("built-in wasm fixture must compile");
-    let result = break_paragraph(
-        &paragraph,
-        &SyntheticMetrics::default(),
-        &BreakConfig::default(),
-    )
-    .expect("built-in wasm fixture must break");
+    let table = MetricsTable::embedded();
+    let metrics = TableMetrics::new(&table, 0, Width::EM);
+    let result = break_paragraph(&paragraph, &metrics, &BreakConfig::default())
+        .expect("built-in wasm fixture must break");
     result.canonical_json()
 }
 
@@ -122,13 +121,10 @@ pub fn fixture_pages_json() -> String {
     let document = parse_markdown(MARKDOWN);
     let template = parse_template(TEMPLATE).expect("built-in template must parse");
     let styled = resolve(&document, &template).expect("built-in styles must resolve");
-    let pages = layout(
-        &document,
-        &styled,
-        &SyntheticMetrics::default(),
-        &BreakConfig::default(),
-    )
-    .expect("built-in pipeline must lay out");
+    let table = MetricsTable::embedded();
+    let metrics = StyledMetrics::new(&table, &styled);
+    let pages = layout(&document, &styled, &metrics, &BreakConfig::default())
+        .expect("built-in pipeline must lay out");
     pages.canonical_json()
 }
 
@@ -155,6 +151,7 @@ mod tests {
         assert!(first.contains("\"schema\":\"soma.layout/6\""));
         assert!(first.contains("\"forcedEnd\":true"));
         assert!(first.contains("\"footnoteDef\""));
-        assert!(first.contains("\"schema\":\"soma.pages/1\""));
+        assert!(first.contains("\"schema\":\"soma.pages/3\""));
+        assert!(first.contains("\"metricsHash\":"));
     }
 }

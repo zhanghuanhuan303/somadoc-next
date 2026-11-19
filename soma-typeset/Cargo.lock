@@ -11,6 +11,8 @@ name = "soma-demo"
 version = "0.1.0"
 dependencies = [
  "soma-core",
+ "soma-layout",
+ "soma-metrics",
  "soma-rules",
 ]
 
@@ -23,7 +25,11 @@ name = "soma-eval"
 version = "0.1.0"
 dependencies = [
  "soma-core",
+ "soma-doc",
+ "soma-layout",
+ "soma-metrics",
  "soma-rules",
+ "soma-template",
 ]
 
 [[package]]
@@ -32,6 +38,7 @@ version = "0.1.0"
 dependencies = [
  "soma-core",
  "soma-doc",
+ "soma-metrics",
  "soma-rules",
  "soma-template",
 ]
@@ -48,12 +55,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "soma-metrics"
+version = "0.1.0"
+
+[[package]]
 name = "soma-render-html"
 version = "0.1.0"
 dependencies = [
  "soma-core",
  "soma-doc",
  "soma-layout",
+ "soma-template",
+]
+
+[[package]]
+name = "soma-render-svg"
+version = "0.1.0"
+dependencies = [
+ "soma-core",
+ "soma-doc",
+ "soma-layout",
+ "soma-md",
+ "soma-metrics",
+ "soma-render-html",
  "soma-template",
 ]
 
@@ -80,6 +104,7 @@ dependencies = [
  "soma-doc",
  "soma-layout",
  "soma-md",
+ "soma-metrics",
  "soma-rules",
  "soma-template",
 ]

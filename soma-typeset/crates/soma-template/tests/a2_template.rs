@@ -77,7 +77,7 @@ fn canonical_json_is_stable_and_namespaced() {
     let json = template.canonical_json();
 
     assert!(
-        json.starts_with("{\"schema\":\"soma.template/1\""),
+        json.starts_with("{\"schema\":\"soma.template/2\""),
         "{json}"
     );
     assert!(json.contains("\"size\":\"A4\""));

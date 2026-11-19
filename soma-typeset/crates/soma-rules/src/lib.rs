@@ -126,6 +126,11 @@ pub const RULES: &[RuleInfo] = &[
         source: "W3C clreq §6.3.2.1/§6.3.2.3; ratio Tbd",
     },
     RuleInfo {
+        id: "trim.pair",
+        status: RuleStatus::ParamOnly,
+        source: "W3C clreq §6.3.2.2 (adjacent punctuation); ratio Tbd",
+    },
+    RuleInfo {
         id: "hard_break.forced",
         status: RuleStatus::Verified,
         source: "author intent via Breakability::Forced",
@@ -142,6 +147,10 @@ pub const OPEN_TRIM_LEFT: Width = Width::from_em_frac(1, 4);
 pub const CLOSE_TRIM_RIGHT: Width = Width::from_em_frac(1, 2);
 pub const MIDDLE_TRIM_LEFT: Width = Width::from_em_frac(1, 2);
 pub const MIDDLE_TRIM_RIGHT: Width = Width::from_em_frac(1, 2);
+
+/// Extra left-side compression for a punctuation mark that directly follows
+/// another punctuation mark (`。」`, `），`, `？！」`).
+pub const PAIR_TRIM: Width = Width::from_em_frac(1, 4);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuleError {
@@ -363,6 +372,9 @@ impl Builder {
                     while index < chars.len() && is_latin_run_char(chars[index]) {
                         value.push(chars[index]);
                         index += 1;
+                        if matches!(chars[index - 1], '-' | '/') {
+                            break;
+                        }
                     }
                     self.push_atom(value, AtomKind::LatinRun, PunctClass::None, style_id);
                 }
@@ -434,7 +446,14 @@ fn push_atom(
     style: StyleId,
     join: Join,
 ) {
-    let (compress_left, compress_right) = trim_caps(class);
+    let (mut compress_left, compress_right) = trim_caps(class);
+    if class != PunctClass::None {
+        if let Some(previous) = atoms.last() {
+            if previous.class != PunctClass::None {
+                compress_left = compress_left.saturating_add(PAIR_TRIM);
+            }
+        }
+    }
     let atom = Atom {
         text,
         kind,
@@ -472,10 +491,13 @@ fn trim_caps(class: PunctClass) -> (Width, Width) {
 }
 
 fn normal_boundary(previous: &Atom, next: &Atom) -> Boundary {
-    let forbidden = previous.class == PunctClass::Open
-        || next.class == PunctClass::Close
-        || next.class == PunctClass::Middle
-        || (is_word_like(previous.kind) && is_word_like(next.kind));
+    let break_opportunity = is_break_opportunity(previous);
+    let forbidden = !break_opportunity
+        && (previous.class == PunctClass::Open
+            || next.class == PunctClass::Close
+            || next.class == PunctClass::Middle
+            || next.text == "/"
+            || (is_word_like(previous.kind) && is_word_like(next.kind)));
 
     // A forbidden boundary is still internal when the line does not break
     // there. Do not add a CJK/Latin gap before a comma or after an opening
@@ -564,6 +586,16 @@ fn char_kind(c: char) -> CharKind {
 
 fn is_latin_run_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '\''
+}
+
+/// True when a break after this atom is a natural mixed-script opportunity:
+/// after a hyphen, a slash, a middle dot, or a zero-width space.
+fn is_break_opportunity(atom: &Atom) -> bool {
+    atom.text
+        .chars()
+        .last()
+        .map(|c| matches!(c, '-' | '/' | '\u{00b7}' | '\u{200b}'))
+        .unwrap_or(false)
 }
 
 fn is_word_like(kind: AtomKind) -> bool {
@@ -710,8 +742,70 @@ mod tests {
         assert_eq!(paragraph.atoms[1].compress_right, Width::ZERO);
         assert_eq!(paragraph.atoms[2].compress_left, Width::ZERO);
         assert_eq!(paragraph.atoms[2].compress_right, CLOSE_TRIM_RIGHT);
-        assert_eq!(paragraph.atoms[3].compress_left, MIDDLE_TRIM_LEFT);
+        assert_eq!(
+            paragraph.atoms[3].compress_left,
+            MIDDLE_TRIM_LEFT.saturating_add(PAIR_TRIM)
+        );
         assert_eq!(paragraph.atoms[3].compress_right, MIDDLE_TRIM_RIGHT);
+    }
+
+    #[test]
+    fn adjacent_punctuation_gets_extra_compression() {
+        let paragraph = compile("（（字）。");
+
+        assert_eq!(
+            paragraph.atoms[1].compress_left,
+            OPEN_TRIM_LEFT.saturating_add(PAIR_TRIM)
+        );
+        assert_eq!(
+            paragraph.atoms[4].compress_left,
+            MIDDLE_TRIM_LEFT.saturating_add(PAIR_TRIM)
+        );
+        assert_eq!(paragraph.atoms[2].compress_left, Width::ZERO);
+    }
+
+    #[test]
+    fn latin_runs_break_after_hyphens_and_slashes() {
+        let paragraph = compile("well-known path/to/file");
+        let texts: Vec<&str> = paragraph
+            .atoms
+            .iter()
+            .map(|atom| atom.text.as_str())
+            .collect();
+
+        let hyphen = texts
+            .iter()
+            .position(|text| *text == "well-")
+            .expect("hyphen");
+        assert_eq!(
+            paragraph.boundaries[hyphen].breakable,
+            Breakability::Allowed,
+            "a break after a hyphen must be allowed"
+        );
+        let slash = texts.iter().position(|text| *text == "/").expect("slash");
+        assert_eq!(
+            paragraph.boundaries[slash].breakable,
+            Breakability::Allowed,
+            "a break after a slash must be allowed"
+        );
+        assert_eq!(
+            paragraph.boundaries[slash - 1].breakable,
+            Breakability::Forbidden,
+            "a line must not start with a slash"
+        );
+        let plain = texts
+            .iter()
+            .position(|text| *text == "known")
+            .expect("word");
+        assert_eq!(
+            paragraph.boundaries[plain].breakable,
+            Breakability::Allowed,
+            "the boundary after a word is the following space"
+        );
+        assert!(
+            texts.contains(&"known"),
+            "the word after a hyphen is still one atom"
+        );
     }
 
     #[test]
