@@ -70,59 +70,7 @@ pub enum PaginationStrategy {
     Greedy,
 }
 
-/// Vertical cost model. These are pagination-model constants, not engine knobs:
-/// they do not enter `paramHash`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct VerticalParams {
-    /// Weight applied for a page whose fill leaves no freedom. `0` keeps the
-    /// page count neutral; the DP then optimises badness only.
-    pub page_weight: i64,
-    /// Scale for `badness = scale * leftover_permille^3 / 1e6`.
-    pub badness_scale: i64,
-    /// Cost of a page that must hold one block taller than the content area.
-    pub overflow_penalty: i64,
-    /// Cost of breaking a paragraph after its first line (a one-line page foot).
-    pub club_penalty: i64,
-    /// Cost of breaking a paragraph before its last line (a one-line page head).
-    pub widow_penalty: i64,
-}
-
-impl VerticalParams {
-    pub const fn default_v1() -> Self {
-        Self {
-            page_weight: 0,
-            badness_scale: 100,
-            overflow_penalty: 1_000_000,
-            club_penalty: 10_000,
-            widow_penalty: 10_000,
-        }
-    }
-
-    /// Hash of the vertical cost model. The page result carries it so two runs
-    /// with different pagination knobs cannot share canonical bytes by accident.
-    pub fn hash(&self) -> u64 {
-        let mut state: u64 = 0xcbf2_9ce4_8422_2325;
-        for value in [
-            self.page_weight,
-            self.badness_scale,
-            self.overflow_penalty,
-            self.club_penalty,
-            self.widow_penalty,
-        ] {
-            for byte in value.to_le_bytes() {
-                state ^= byte as u64;
-                state = state.wrapping_mul(0x0000_0100_0000_01b3);
-            }
-        }
-        state
-    }
-}
-
-impl Default for VerticalParams {
-    fn default() -> Self {
-        Self::default_v1()
-    }
-}
+pub use soma_core::VerticalParams;
 
 /// What one placed box represents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

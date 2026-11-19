@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/soma-core",
     "crates/soma-doc",
+    "crates/soma-engine",
     "crates/soma-metrics",
     "crates/soma-template",
     "crates/soma-rules",

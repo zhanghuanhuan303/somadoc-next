@@ -21,6 +21,17 @@ name = "soma-doc"
 version = "0.1.0"
 
 [[package]]
+name = "soma-engine"
+version = "0.1.0"
+dependencies = [
+ "soma-core",
+ "soma-doc",
+ "soma-layout",
+ "soma-metrics",
+ "soma-template",
+]
+
+[[package]]
 name = "soma-eval"
 version = "0.1.0"
 dependencies = [
@@ -102,6 +113,7 @@ version = "0.1.0"
 dependencies = [
  "soma-core",
  "soma-doc",
+ "soma-engine",
  "soma-layout",
  "soma-md",
  "soma-metrics",

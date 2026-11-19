@@ -13,7 +13,8 @@ use soma_doc::{
     Block, Document, FootnoteDef, Inline, SourceId, SourceInfo, SourceKind, SourceSpan,
 };
 use soma_doc::{SourceMap, Text};
-use soma_layout::{layout, StyledMetrics, TableMetrics};
+use soma_engine::EngineConfig;
+use soma_layout::{layout_with, PaginationStrategy, StyledMetrics, TableMetrics};
 use soma_md::parse_markdown;
 use soma_metrics::MetricsTable;
 use soma_rules::{justified_style, paragraph_from_lines};
@@ -116,6 +117,26 @@ styles:
       font-size: 8pt
 "#;
 
+/// Fixed engine configuration for the pipeline fixture. Every value matches
+/// `default-v1`, so the canonical bytes stay identical to the hand-built path.
+const ENGINE: &str = r#"
+schema: soma.engine/1
+preset: default-v1
+window: paragraph
+max_kp_atoms: null
+fallback:
+  allow_emergency: true
+  allow_forbidden: true
+  allow_overfull: true
+  emergency_stretch: 3em
+vertical:
+  page_weight: 0
+  badness_scale: 100
+  overflow_penalty: 1000000
+  club_penalty: 10000
+  widow_penalty: 10000
+"#;
+
 /// Canonical page JSON for the fixed Markdown fixture.
 pub fn fixture_pages_json() -> String {
     let document = parse_markdown(MARKDOWN);
@@ -123,8 +144,16 @@ pub fn fixture_pages_json() -> String {
     let styled = resolve(&document, &template).expect("built-in styles must resolve");
     let table = MetricsTable::embedded();
     let metrics = StyledMetrics::new(&table, &styled);
-    let pages = layout(&document, &styled, &metrics, &BreakConfig::default())
-        .expect("built-in pipeline must lay out");
+    let engine = EngineConfig::parse(ENGINE).expect("built-in engine config must parse");
+    let pages = layout_with(
+        &document,
+        &styled,
+        &metrics,
+        &engine.break_config(),
+        PaginationStrategy::VerticalKp,
+        engine.vertical(),
+    )
+    .expect("built-in pipeline must lay out");
     pages.canonical_json()
 }
 

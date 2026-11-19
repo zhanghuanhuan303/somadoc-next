@@ -14,4 +14,5 @@ soma-md = { path = "../soma-md" }
 soma-metrics = { path = "../soma-metrics" }
 soma-template = { path = "../soma-template" }
 soma-doc = { path = "../soma-doc" }
+soma-engine = { path = "../soma-engine" }
 soma-rules = { path = "../soma-rules" }
