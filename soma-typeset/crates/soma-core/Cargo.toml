@@ -1,0 +1,10 @@
+[package]
+name = "soma-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Runtime-independent typesetting core: IR, metrics, line breaking, canonical layout result"
+
+[dependencies]
