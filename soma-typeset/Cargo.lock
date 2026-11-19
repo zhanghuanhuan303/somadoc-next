@@ -3,6 +3,23 @@
 version = 4
 
 [[package]]
+name = "soma-cli"
+version = "0.1.0"
+dependencies = [
+ "soma-core",
+ "soma-doc",
+ "soma-engine",
+ "soma-html",
+ "soma-latex",
+ "soma-layout",
+ "soma-md",
+ "soma-metrics",
+ "soma-render-html",
+ "soma-render-svg",
+ "soma-template",
+]
+
+[[package]]
 name = "soma-core"
 version = "0.1.0"
 

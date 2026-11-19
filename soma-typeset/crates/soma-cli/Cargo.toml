@@ -1,0 +1,23 @@
+[package]
+name = "soma-cli"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Command-line entry point: source document + template -> HTML/SVG/canonical JSON."
+
+[[bin]]
+name = "soma"
+path = "src/main.rs"
+
+[dependencies]
+soma-core = { path = "../soma-core" }
+soma-doc = { path = "../soma-doc" }
+soma-engine = { path = "../soma-engine" }
+soma-html = { path = "../soma-html" }
+soma-latex = { path = "../soma-latex" }
+soma-layout = { path = "../soma-layout" }
+soma-md = { path = "../soma-md" }
+soma-metrics = { path = "../soma-metrics" }
+soma-render-html = { path = "../soma-render-html" }
+soma-render-svg = { path = "../soma-render-svg" }
+soma-template = { path = "../soma-template" }

@@ -16,6 +16,7 @@ members = [
     "crates/soma-render-svg",
     "crates/soma-eval",
     "crates/soma-demo",
+    "crates/soma-cli",
     "crates/soma-wasm",
 ]
 
