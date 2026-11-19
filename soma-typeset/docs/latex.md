@@ -1,6 +1,6 @@
 # LaTeX 前端（`soma-latex`）
 
-状态：**v1 已落地**（输出 `soma.doc/1`）。代码是权威；本文说明支持的子集与限制。
+状态：**v1 已落地**（输出 `soma.doc/2`）。代码是权威；本文说明支持的子集与限制。
 
 参考：ADR-0004（语法前端）、ADR-0009（语义/呈现边界）、ADR-0025（本前端）。
 
@@ -35,6 +35,7 @@ let document = parse_latex(r"\section{标题}
 | `\texttt` / `\verb|...|` | `Inline::Code` |
 | `\href{url}{text}` / `\url{url}` | `Link` |
 | `\footnote{...}` | `FootnoteRef` + 文档末尾的 `FootnoteDef`（编号从 1） |
+| `\index{...}` | `Inline::Index`（索引词条标记，不占宽度；空词条丢弃） |
 | `$...$` / `\(...\)` | `Inline::Math`（源码原样） |
 | `\[...\]` / `$$...$$` / `equation` | `MathBlock`（源码原样） |
 | `itemize` / `enumerate` | `List` |
@@ -52,7 +53,7 @@ let document = parse_latex(r"\section{标题}
 - 未知命令：有 `{...}` 参数时保留参数文本；无参数时丢弃。
 - 未知环境：保留其中的块。
 - 未闭合的组/环境：读到末尾并把剩余内容作为文本保留。
-- `\label`/`\index`/`\cite`/`\ref`/`\pageref`：丢弃（交叉引用尚未建模）。
+- `\label`/`\cite`/`\ref`/`\pageref`：丢弃（交叉引用尚未建模）；`\index` 生成索引标记。
 - 符号转义：`\% \& \_ \# \$ \{ \}`；`\,`/`\;`/`\:`/`\ ` 变成空格；`\!` 丢弃。
 - `\ldots`/`\dots` → `…`，`\LaTeX`/`\TeX` 保留名称。
 

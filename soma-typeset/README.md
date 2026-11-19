@@ -57,13 +57,13 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
 - A minimal CJK/Latin rule compiler: CJK atoms, Latin runs, spaces as glue,
   punctuation classes, basic 避头尾 (forbidden line-start/line-end) rules,
   edge trim caps, and `paragraph_from_lines` for hard-broken source lines.
-- A1 DocIR (`soma-doc`, schema `soma.doc/1`): 13 block and 16 inline kinds with
+- A1 DocIR (`soma-doc`, schema `soma.doc/2`): 13 block and 17 inline kinds with
   `NodeId`/`SourceSpan`/`Attrs`, footnotes, figures, tables, math source, raw
   payload preservation, structural validation, canonical JSON, and two hashes
   (`docHash` for exact reproduction, `contentHash` for content identity). The
   crate has **zero dependencies** and no floats; Gate A enforces that.
 - A3–A6 pipeline: `soma-layout` builds paragraph boxes over the frozen kernel and
-  paginates with **line-level vertical K-P** by default (`soma.pages/8`):
+  paginates with **line-level vertical K-P** by default (`soma.pages/9`):
   paragraphs split across pages, widows/orphans are penalties, vertical glue can
   stretch, footnotes are charged to the marker's line, and page masters add a
   running header, footer, and folio. Figure boxes, table cell boxes,
@@ -109,14 +109,21 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   numbers and `图 {n}`/`表 {n}` caption numbers at layout time; they never enter
   DocIR. `page.front-matter: continuous|roman|hidden` prints the cover and
   contents in roman numerals (or none) and restarts the body at 1.
+- Long-document output (ADR-0033): figure/table captions have their own
+  elements (`figureCaption`/`tableCaption`); contents rows wrap and keep the
+  page number on the last line; the page result carries an `outline` (one
+  bookmark per heading with physical and printed page) and an `index` report.
+  `\index{term}` in LaTeX or `[[index:term]]` in Markdown, plus `index: {title}`
+  in the template, produces a sorted index with merged page lists.
 - One command (ADR-0029): `soma render --input doc.tex --template book.yaml
   --format html|svg|json` runs the whole pipeline; `soma check` prints layout
   facts and the canonical hash. See [`docs/cli.md`](docs/cli.md).
-- First-release artifact (`examples/book`, ADR-0031/ADR-0032): `scripts/book.sh`
-  renders a ten-page book from `examples/book/book.tex` + `book.yaml` — generated
+- First-release artifact (`examples/book`, ADR-0031/ADR-0032/ADR-0033): `scripts/book.sh`
+  renders an eleven-page book from `examples/book/book.tex` + `book.yaml` — generated
   cover, roman-numbered front matter, contents with leaders plus figure/table
   lists, numbered chapters and sections, a figure with a caption, a formula, a
-  three-line table with a caption, and a footnote. Alignment
+  three-line table with a caption, a footnote, and a seven-entry index; the JSON
+  result also lists nine bookmarks. Alignment
   (`left`/`center`/`right`) is a layout pass, so titles and cover lines can be
   centred. The build has 0 overflow pages and 0 degraded lines;
   `docs/first-release.md` lists the remaining design gaps.
@@ -124,8 +131,8 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   kappa, and a committable Markdown report (`soma-eval blind --out`). A
   **simulated** dry run proves the chain (`docs/blind-dry-run.md`); the human
   panel (D01) is still open.
-- A2 template layer (`soma-template`, schemas `soma.template/8` and
-  `soma.styles/6`): a documented YAML subset with line/column errors, exact units
+- A2 template layer (`soma-template`, schemas `soma.template/9` and
+  `soma.styles/7`): a documented YAML subset with line/column errors, exact units
   (decimal → rational → 1/4096 em, truncation toward zero), a selector cascade
   with inheritance and heading levels, a 25-property whitelist, `templateHash`,
   and `StyledDoc` as lifetime-free data with `styleHash`. Templates cannot write
@@ -199,7 +206,7 @@ scripts/
   kp-verify.sh # K-P closure: gates + bench budget + length policy
 docs/
   architecture-v2.md  # frozen architecture
-  adr/                # accepted decisions (ADR-0001 … 0032)
+  adr/                # accepted decisions (ADR-0001 … 0033)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
   debt.md             # global not-done register (D01–D77, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
@@ -259,7 +266,7 @@ cargo run -p soma-eval --release -- blind preferences.csv
 scripts/gates.sh
 ```
 
-The gate runs format, clippy, 508 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 527 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-template`,
 `soma-layout`, `soma-md`, `soma-render-html`, and `soma-render-svg`, a
 native/`wasm32-wasip1` canonical-byte comparison (DocIR + inline layout + pages),

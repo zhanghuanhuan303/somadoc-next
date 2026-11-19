@@ -1,12 +1,13 @@
 # 模板规范（`soma-template`）
 
-状态：**A2 已落地，E4 扩展，表格规则、单元上下文、目录、章节起始母版、封面、自动编号与前置页已加**
-（schema `soma.template/8` / `soma.styles/6`）。
+状态：**A2 已落地，E4 扩展，表格规则、单元上下文、目录、章节起始母版、封面、自动编号、前置页、题注样式与索引已加**
+（schema `soma.template/9` / `soma.styles/7`）。
 代码是权威，本文解释 DSL、单位与级联规则。
 
 参考：`docs/architecture-v2.md` §7、ADR-0003（纯 YAML）、ADR-0009（语义/呈现边界）、
 ADR-0010 §3（`StyledDoc` 为纯数据）、ADR-0014（标点/网格）、ADR-0015（页面母版）、
-ADR-0019（表格规则与 `within`）、ADR-0031（封面与对齐）、ADR-0032（编号、前置页、目录扩展）。
+ADR-0019（表格规则与 `within`）、ADR-0031（封面与对齐）、ADR-0032（编号、前置页、目录扩展）、
+ADR-0033（题注、可换行目录、书签与索引）。
 
 ---
 
@@ -77,6 +78,8 @@ page:
   folio: "第 {page} 页 / 共 {pages} 页"
   start-master: chapter    # 章节起始页用的母版，可选
   front-matter: continuous # continuous | roman | hidden
+index:
+  title: 索引               # 可选；省略或留空 = 无标题
 numbering:
   headings: none           # none | chinese-chapter | arabic-dotted
   depth: 2                 # 1–3，编号到几级
@@ -140,6 +143,14 @@ styles:                    # 必填，非空序列
   `figures` / `tables` 各给一个列表标题值：（省略 = 不生成该列表；
   空字符串 `""` = 生成无标题列表）。列表条目使用题注文本（含编号）和题注所在页的
   打印页码，排在章节条目之后。
+
+索引（`index:`）：出现该段才生成索引；条目来自文档里的 `\index{...}`（LaTeX）或
+`[[index:term]]`（Markdown）。词条按 Unicode 码位排序，重复词条合并页码，
+索引另起一页，样式用 `element: indexEntry` / `indexTitle`。词条内的标记在表格单元
+与脚注定义中不收集（见 D81）。
+
+题注（`figureCaption` / `tableCaption`）：图题在图下方，表题在表上方并
+`keep-with-next`；题注内的强调继承题注字号，不回到正文字号。
 
 编号（`numbering:`）：
 
@@ -239,8 +250,8 @@ pub struct StyledDoc {
 
 | Hash | 覆盖 |
 |---|---|
-| `template_hash()` | `soma.template/8` canonical JSON：名称、版本、页面（含母版、起始母版、前置页编号）、脚注、目录（含引导点与图/表目录）、封面、编号、表格线宽、全部规则与声明 |
-| `style_hash()` | `soma.styles/6` canonical JSON：模板 hash + 解析后的页面/样式/目录与封面设置/节点映射 |
+| `template_hash()` | `soma.template/9` canonical JSON：名称、版本、页面（含母版、起始母版、前置页编号）、脚注、目录（含引导点与图/表目录）、索引、封面、编号、表格线宽、全部规则与声明 |
+| `style_hash()` | `soma.styles/7` canonical JSON：模板 hash + 解析后的页面/样式/目录/索引/封面设置/节点映射 |
 
 两者都是 FNV-1a 64，与 `paramHash` / `docHash` 同一原语。
 

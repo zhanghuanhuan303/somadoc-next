@@ -1,6 +1,6 @@
 # HTML 前端（`soma-html`）
 
-状态：**v1 已落地**（schema 不变：输出 `soma.doc/1`）。
+状态：**v1 已落地**（schema 不变：输出 `soma.doc/2`）。
 代码是权威；本文说明支持的语义、降级方式和限制。
 
 参考：`docs/architecture-v2.md` §3、ADR-0004（语法前端）、ADR-0009（语义/呈现边界）、

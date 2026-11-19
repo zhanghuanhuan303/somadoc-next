@@ -100,11 +100,11 @@ Cumulative public test files:
 | `k5_forced.rs` | 7 | forced breaks and segments |
 | `k6_reporting.rs` | 7 | breaker/stage/length flags |
 | `k6_fallback.rs` | 4 | emergency and forbidden rescue |
-| `a1_canonical.rs` | 8 | DocIR canonical bytes, escaping, hash modes |
+| `a1_canonical.rs` | 10 | DocIR canonical bytes, escaping, hash modes, index markers |
 | `a1_model.rs` | 9 | node coverage, renumbering, text projection |
 | `a1_raw.rs` | 4 | raw payload preservation |
 | `a1_validate.rs` | 26 | every DocIR invariant has a failing case (incl. table grid) |
-| `a2_template.rs` | 19 | YAML subset, validation, positions, hash, `within`, `table:`, `masters:`, `toc:`, `start-master`, `level`, `numbering:`, front matter, lists |
+| `a2_template.rs` | 20 | YAML subset, validation, positions, hash, `within`, `table:`, `masters:`, `toc:`, `start-master`, `level`, `numbering:`, front matter, lists |
 | `a2_units.rs` | 7 | exact conversion, truncation, strict grammar |
 | `a2_resolve.rs` | 12 | cascade, inheritance, page geometry, style hash, heading levels |
 | `a2_cell_context.rs` | 1 | `within: cell` overrides body rules and sets cell padding |
@@ -126,17 +126,20 @@ Cumulative public test files:
 | `effect.rs` (eval) | 7 | Gate Q′ structural claims on the scorecard |
 | `engine.rs` | 15 | `soma.engine/1`: parse, reject, canonical hash, layout equivalence |
 | `corpus.rs` (eval) | 9 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
-| `a5_md.rs` | 11 | Markdown subset, inlines, spans, validity |
+| `a5_md.rs` | 12 | Markdown subset, inlines, spans, index extension, validity |
 | `html.rs` (html) | 9 | HTML subset shapes, table grid, degradation, recovery, pipeline |
-| `latex.rs` (latex) | 13 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, recovery, pipeline |
+| `latex.rs` (latex) | 15 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, recovery, pipeline |
 | `math.rs` (soma-math) | 26 | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, spacing, styles, errors |
 | `e11_math.rs` (layout) | 8 | centring, baseline inside the box, flow, canonical `math` field |
 | `e12_inline_math.rs` (layout) | 11 | marker atoms, line-box growth, text style, placeholder, canonical `inlineMath` |
-| `e13_toc.rs` (layout) | 12 | TOC depth, page numbers, row shape, leaders, forced page, figure/table lists, section-start master |
+| `e13_toc.rs` (layout) | 13 | TOC depth, page numbers, row shape, leaders, wrapped rows, forced page, figure/table lists, section-start master |
 | `e14_alignment.rs` (layout) | 6 | left/center/right placement, first-indent interaction, justify unchanged |
 | `e15_cover.rs` (layout) | 7 | cover metadata, master, centring, fallbacks, unknown master error |
 | `e16_numbering.rs` (layout) | 8 | chinese-chapter, arabic-dotted, depth, figure/table counters, numbered TOC entries |
 | `e17_front_matter.rs` (layout) | 5 | continuous/roman/hidden labels, `{pages}` = body pages, no folio on hidden pages |
+| `e18_captions.rs` (layout) | 4 | figure/table caption elements, indent reset, emphasis keeps the caption base |
+| `e19_outline.rs` (layout) | 3 | one bookmark per heading, printed labels, empty document |
+| `e20_index.rs` (layout) | 5 | sorted unique terms, page lists, own page, entry styles, empty index |
 | `cli.rs` (soma-cli) | 13 | render md/tex to html/svg/json, template geometry, TOC template, example book, `--out`, check, error paths |
 | `blind_pipeline.rs` (eval) | 3 | dry-run fixture through key + statistics + decision |
 | `k7_object_metrics.rs` | 4 | object hooks vs text paths, default-hook equivalence |
@@ -160,7 +163,7 @@ Cumulative public test files:
 | core unit | 24 | IR, units, breaker, result, presets |
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 
-Total: **508 tests**.
+Total: **527 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.
@@ -180,7 +183,7 @@ The script runs:
 3. `cargo test --workspace`
 4. `cargo check -p soma-core -p soma-doc -p soma-template -p soma-layout -p soma-md -p soma-render-html --target wasm32-unknown-unknown`
 5. native vs `wasm32-wasip1` canonical-byte comparison (`scripts/wasm-hash.sh`);
-   the fixture now contains both `soma.doc/1` and `soma.layout/6` output
+   the fixture now contains both `soma.doc/2` and `soma.layout/6` output
 6. a demo smoke render (`soma-demo` → temporary HTML, check `data-algorithm`)
 7. `cargo tree -p soma-core` dependency-boundary check
 8. clean-room reference check: active files must not mention the deleted prior project
