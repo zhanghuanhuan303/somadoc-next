@@ -77,6 +77,10 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   punctuation compresses, closing punctuation can hang, and a baseline grid is
   available per template. `soma-render-svg` is a second renderer used by Gate R;
   `soma-eval score` prints the effect scorecard.
+- Engine configuration: `soma-engine` parses `soma.engine/1` (preset, window,
+  atom window, fallback switches, vertical cost model) into the same
+  `BreakConfig`/`VerticalParams` the hand-built path uses. See
+  [`docs/engine.md`](docs/engine.md) and ADR-0016.
 - A2 template layer (`soma-template`, schemas `soma.template/2` and
   `soma.styles/2`): a documented YAML subset with line/column errors, exact units
   (decimal → rational → 1/4096 em, truncation toward zero), a selector cascade
@@ -114,6 +118,7 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
 crates/
   soma-core/   # frozen inline kernel: units, ParaIR, metrics, breaker, result
   soma-doc/    # DocIR: nodes, source spans, validation, canonical JSON, hashes
+  soma-engine/ # soma.engine/1: preset, window, fallback, vertical knobs
   soma-metrics/ # soma.metrics/1 table parser + embedded Noto CJK metrics
   soma-template/ # pure-YAML template: parse, exact units, cascade, StyledDoc
   soma-layout/ # paragraph boxes, line-level pagination, page masters
@@ -140,11 +145,12 @@ scripts/
   kp-verify.sh # K-P closure: gates + bench budget + length policy
 docs/
   architecture-v2.md  # frozen architecture
-  adr/                # accepted decisions (ADR-0001 … 0015)
-  roadmap-v2.md       # A1–A6 + E1–Q′ schedule, work packages, gates
-  debt.md             # global not-done register (D01–D64, N1–N6)
+  adr/                # accepted decisions (ADR-0001 … 0016)
+  roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
+  debt.md             # global not-done register (D01–D66, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
   e1-q-report.md      # E1–Q′ delivery report
+  engine.md           # soma.engine/1: shape, defaults, errors, usage
   docir.md            # DocIR contract: nodes, canonical JSON, validation
   template.md         # template DSL: YAML subset, units, cascade, hashes
   a1-report.md        # A1 milestone report (Gate A1 checklist)
@@ -197,9 +203,9 @@ cargo run -p soma-eval --release -- blind preferences.csv
 scripts/gates.sh
 ```
 
-The gate runs format, clippy, 299 tests, a `wasm32-unknown-unknown` check for
-`soma-core`, `soma-doc`, `soma-metrics`, `soma-template`, `soma-layout`,
-`soma-md`, `soma-render-html`, and `soma-render-svg`, a
+The gate runs format, clippy, 315 tests, a `wasm32-unknown-unknown` check for
+`soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-template`,
+`soma-layout`, `soma-md`, `soma-render-html`, and `soma-render-svg`, a
 native/`wasm32-wasip1` canonical-byte comparison (DocIR + inline layout + pages),
 a demo smoke render, the `soma-core` dependency-boundary check, Gate A, Gate C,
 Gate V/R (SVG visual lock + cross-renderer atom parity), and Gate Q′ (effect

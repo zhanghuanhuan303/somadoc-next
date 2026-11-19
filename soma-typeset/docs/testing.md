@@ -116,6 +116,7 @@ Cumulative public test files:
 | `e5_grid.rs` | 3 | baseline grid alignment, unchanged text, wider grid leading |
 | `gate_r.rs` (svg) | 4 | Gate V/R: SVG golden, coordinates = layout, HTML/SVG atom parity |
 | `effect.rs` (eval) | 7 | Gate Q′ structural claims on the scorecard |
+| `engine.rs` | 15 | `soma.engine/1`: parse, reject, canonical hash, layout equivalence |
 | `a5_md.rs` | 11 | Markdown subset, inlines, spans, validity |
 | `a5_render.rs` | 6 | absolute positions, escaping, no re-breaking |
 | `capabilities.rs` (md) | 7 | Gate C matrix, degradation promise, docs parity |
@@ -129,10 +130,11 @@ Cumulative public test files:
 | `vertical_slice.rs` (rules) | 6 | end-to-end rules + trim + hard break |
 | `soma-rules` unit | 15 | segmentation, punctuation, pair trim, hyphen breaks, rule inventory |
 | `soma-metrics` unit | 8 | table round-trip, CJK/Latin widths, fallback, hash, truncation |
+| `soma-core` vertical unit | 1 | vertical cost model hash |
 | core unit | 23 | IR, units, breaker, result |
 | layout unit | 2 | trim scaling at body and non-body sizes |
 
-Total: **299 tests**.
+Total: **315 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, bold faces, tracking fallback, and calibrated trim ratios.

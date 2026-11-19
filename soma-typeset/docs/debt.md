@@ -46,7 +46,7 @@
 | D26 | 脚注 / 图 / 表 / 公式适配 | **脚注整块移页 + 编号、图占位框、表格单元盒已做（A6）**；Math 适配器、表格行线/colspan 仍未做 | 复杂表格与公式质量受限 | 后续 | 否 |
 | D27 | ~~全管线 native/wasm 哈希~~ | **已关闭（A6）**：fixture 含 DocIR + 行内 + 页面，8,979 bytes 一致 | — | ✅ 已关闭 | 否 |
 | D28 | ~~Gate A / C / R~~ | **已关闭**：Gate A、Gate C、Gate V（SVG 字节锁）、Gate R（SVG 坐标 = 布局坐标；HTML/SVG 覆盖同一 atom 集）全部接入 `gates.sh` | — | ✅ 已关闭 | 否 |
-| D29 | `EngineConfig` YAML | 只有 Rust 结构（`ParamSet` + `BreakConfig`）；架构 §9 的 `soma.engine/1` 未实现 | 用户改不了引擎旋钮 | A3 | 否 |
+| D29 | ~~`EngineConfig` YAML~~ | **已关闭（ADR-0016）**：`soma.engine/1` 固定形状解析、校验、canonical + hash；`soma-engine` 只依赖 `soma-core` | 只有 `paragraph` 窗口（D66） | ✅ 已关闭 | 否 |
 | D30 | ~~层哈希~~ | **已关闭（A3）**：`paramHash` + `docHash`/`contentHash` + `templateHash`/`styleHash` + 页面结果里的 `engineHash` | — | ✅ 已关闭 | 否 |
 | D31 | DocIR 没有 reader | canonical JSON 是 write-only；只有 writer 与 golden 测试 | 不能回读、不能做 round-trip fuzz，调试只能看输出 | 未排期（真需要的场景：跨进程传递 DocIR） | 否 |
 | D32 | canonical writer 两份实现 | `soma-core::result` 与 `soma-doc::canonical` 各有一个手写 writer | 改格式要改两处；容易出现风格漂移 | 第三个消费者出现时抽公共 crate | 否 |
@@ -69,12 +69,14 @@
 | D48 | ~~垂直 K-P 未实现~~ | **已关闭**：垂直 K-P 为默认分页，末页免费、脚注参与 DP、强制断点与 keep-with-next 为硬约束；贪心保留为显式策略与回退 | — | ✅ 已关闭 | 否 |
 | D49 | ~~段落不跨页~~ | **已关闭（E2）**：垂直流原子降到行；段落跨页、`line_offset`/`lines_total` 行守恒、widow/orphan 硬可测 | — | ✅ 已关闭 | 否 |
 | D58 | ~~垂直方向没有可拉伸胶水~~ | **已关闭（E2）**：`space-before/after-plus/minus`；页面空白按行高归一化；拉伸量真实分配到块坐标 | — | ✅ 已关闭 | 否 |
-| D59 | 垂直代价参数不在 EngineConfig 里 | `VerticalParams` 是布局层常量；结果里有 `verticalHash`，但用户改不了 | 不能按文档调分页松紧 | 与 D29 一起做 | 否 |
+| D59 | ~~垂直代价参数不在 EngineConfig 里~~ | **已关闭（ADR-0016）**：`vertical:` 段覆盖 `VerticalParams`；`verticalHash` 进页面结果 | — | ✅ 已关闭 | 否 |
 | D60 | 无 tracking 兼底 | E6 只做了 `-`/`/` 断点；未做字间 letter-spacing 兼底 | 长 run 仍可能压缩越界 | 未排期（需与内核 emergency 模型一起评估） | 否 |
 | D61 | bold 用 regular advance | 度量表只发行 Regular 面；Latin bold 宽度有轻微偏差，CJK bold 等宽所以无影响 | 强调文本的换行点可能偏差 | 需要 Bold 面时生成第二张表 | 否 |
 | D62 | 页面母版只有一套 | 无首页/封面变体、无按节切换母版；`Section.page_template` 仍未消费 | 书籍版式不完整 | 未排期（需模板 schema 再加一层选择器） | 否 |
 | D63 | 度量表是声明子集 | 覆盖 Latin/标点/假名/CJK 基本区与扩展 A；扩展 B+ 与少数字形回退到 1em | 生僻字宽度不准 | 需要时重新生成表 | 否 |
 | D64 | 页眉页脚只排一行 | running title 过长时溢出而不是换行/缩略 | 超长标题可能压到页边 | 未排期（需要字串截断策略） | 否 |
+| D65 | 引擎配置用固定形状解析器 | 不复用模板的 YAML 子集：无序列、无锚点、长度只支持整数 `em` | 配置 DSL 与模板 DSL 是两套错误面 | 有真实需求时再抽公共 YAML crate | 否 |
+| D66 | 引擎只支持 `paragraph` 窗口 | `window: page`/`chapter` 在配置层被拒绝；内核本来也报 `UnsupportedWindow` | 页级/章级搜索未实现 | 未排期（需要页级 DP 上下文） | 否 |
 | D50 | ~~无页面母版 / 页眉页脚 / 页码~~ | **已关闭（E4）**：页眉（running-title 或字面量）、页脚、`{page}`/`{pages}` 页码；两遍无重排 | 首页/封面变体未做（D62） | ✅ 已关闭 | 否 |
 | D51 | 盒子树是扁平的 | 没有嵌套 `VBox`/`HBox`；表格单元按列偏移摆放，无行线、无 colspan 网格、无表头重复 | 复杂表格与嵌套布局受限 | 未排期 | 否 |
 | D52 | 公式是文本占位 | `MathBlock` 渲染 `source`，没有 Math 适配器 | 公式不美观 | 未排期 | 否 |
@@ -116,4 +118,5 @@
 | E5 | **已完成**：基线网格（`baseline-grid`，opt-in） |
 | E6 | **已完成**：D09 的断点部分、D28 的 Gate V/R |
 | Q′ | **已完成**：`soma-eval score` 效果记分卡与 `scripts/gate-q.sh` |
+| E7 | **已完成**：D29、D59（`soma.engine/1`，ADR-0016）；新增 D65、D66 |
 | 未排期 | D01、D03、D04、D05、D10、D11、D12、D13、D60、N1–N6 |
