@@ -11,6 +11,7 @@ members = [
     "crates/soma-md",
     "crates/soma-html",
     "crates/soma-latex",
+    "crates/soma-math",
     "crates/soma-render-html",
     "crates/soma-render-svg",
     "crates/soma-eval",

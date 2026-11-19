@@ -72,9 +72,17 @@ version = "0.1.0"
 dependencies = [
  "soma-core",
  "soma-doc",
+ "soma-math",
  "soma-metrics",
  "soma-rules",
  "soma-template",
+]
+
+[[package]]
+name = "soma-math"
+version = "0.1.0"
+dependencies = [
+ "soma-core",
 ]
 
 [[package]]

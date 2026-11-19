@@ -30,6 +30,8 @@ pub fn render(layout: &PagedLayout, styles: &StyleTable, text: &dyn TextSource) 
 .page{position:relative;background:#fff;margin:1em auto;box-shadow:0 0 4px #bbb;overflow:hidden;}\
 .block{position:absolute;white-space:pre;}\
 .atom{position:absolute;white-space:pre;}\
+.math{position:absolute;white-space:pre;}\
+.math-rule{position:absolute;}\
 .figure{position:absolute;background:#eee;border:1px solid #ccc;}\
 .rule{position:absolute;border-top:1px solid #333;}\
 .table-rule{position:absolute;background:#333;}\
@@ -124,6 +126,10 @@ fn render_block(
             ));
             return;
         }
+        BoxKind::Math if block.math.is_some() => {
+            render_math(html, style, block, left, top);
+            return;
+        }
         _ => {}
     }
 
@@ -179,6 +185,57 @@ fn render_block(
     }
 
     html.push_str("</div>\n");
+}
+
+/// Draw a display formula as absolutely positioned spans and rules.
+///
+/// Item `y` is measured from the formula baseline. CSS has no baseline
+/// positioning, so the span top is approximated as `baseline - 7/8 em` of the
+/// item size: the metric faces sit at about 0.875 em ascent, and the browser
+/// then places its own baseline inside that line box. SVG output is exact.
+fn render_math(
+    html: &mut String,
+    style: Option<&ComputedStyle>,
+    block: &PlacedBlock,
+    left: i32,
+    top: i32,
+) {
+    let Some(math) = block.math.as_ref() else {
+        return;
+    };
+    let baseline = top + math.baseline.0;
+    let paint = style
+        .and_then(|style| style.color)
+        .map(|color| format!("#{color:06x}"))
+        .unwrap_or_else(|| String::from("#000"));
+
+    for item in &math.items {
+        let x = left + item.x.0;
+        let y = baseline + item.y.0 - ascent_proxy(item.size);
+        html.push_str(&format!(
+            "<span class=\"math\" style=\"left:{};top:{};font-size:{};color:{};\">{}</span>\n",
+            em(Width(x)),
+            em(Width(y)),
+            em(item.size),
+            paint,
+            escape(&item.text)
+        ));
+    }
+    for rule in &math.rules {
+        html.push_str(&format!(
+            "<div class=\"math-rule\" style=\"left:{};top:{};width:{};height:{};background:{};\"></div>\n",
+            em(Width(left + rule.x.0)),
+            em(Width(baseline + rule.y.0)),
+            em(rule.width),
+            em(rule.thickness),
+            paint
+        ));
+    }
+}
+
+/// Line-box top for a font size: `7/8 em`, the ascent the metric faces use.
+fn ascent_proxy(size: Width) -> i32 {
+    size.0 / 8 * 7
 }
 
 fn style_attributes(style: Option<&ComputedStyle>, base: Width) -> String {

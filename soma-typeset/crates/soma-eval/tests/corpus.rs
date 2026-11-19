@@ -151,7 +151,16 @@ fn the_math_fixture_keeps_one_box_per_formula() {
         .flat_map(|page| page.blocks.iter())
         .filter(|block| block.kind == BoxKind::Math)
         .count();
-    assert_eq!(formulas, 4, "one object box per formula");
+    assert_eq!(formulas, 6, "one box per formula");
+
+    // The real formulas must have produced math boxes, not text placeholders.
+    let with_math = layout
+        .pages
+        .iter()
+        .flat_map(|page| page.blocks.iter())
+        .filter(|block| block.math.is_some())
+        .count();
+    assert_eq!(with_math, 6, "every fixture formula lays out as math");
 }
 
 #[test]

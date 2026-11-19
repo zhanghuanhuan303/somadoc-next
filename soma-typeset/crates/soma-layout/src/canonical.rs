@@ -9,7 +9,7 @@ use core::fmt::{self, Write};
 
 use crate::PagedLayout;
 
-pub(crate) const SCHEMA: &str = "soma.pages/4";
+pub(crate) const SCHEMA: &str = "soma.pages/5";
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -159,5 +159,64 @@ fn write_block(out: &mut impl Write, block: &crate::PlacedBlock) -> fmt::Result 
         out.write_char('}')?;
     }
 
+    out.write_str("],\"math\":")?;
+    write_math(out, block.math.as_ref())?;
+    out.write_char('}')
+}
+
+/// `null` or the display-formula geometry. Item and rule `y` are relative to
+/// `baseline`, which is measured from the block top.
+fn write_math(out: &mut impl Write, math: Option<&crate::MathBox>) -> fmt::Result {
+    let Some(math) = math else {
+        return out.write_str("null");
+    };
+    write!(
+        out,
+        "{{\"width\":{},\"height\":{},\"baseline\":{},\"items\":[",
+        math.width.0, math.height.0, math.baseline.0
+    )?;
+    for (index, item) in math.items.iter().enumerate() {
+        if index > 0 {
+            out.write_char(',')?;
+        }
+        out.write_str("{\"text\":")?;
+        write_string(out, &item.text)?;
+        write!(
+            out,
+            ",\"x\":{},\"y\":{},\"size\":{}}}",
+            item.x.0, item.y.0, item.size.0
+        )?;
+    }
+    out.write_str("],\"rules\":[")?;
+    for (index, rule) in math.rules.iter().enumerate() {
+        if index > 0 {
+            out.write_char(',')?;
+        }
+        write!(
+            out,
+            "{{\"x\":{},\"y\":{},\"width\":{},\"thickness\":{}}}",
+            rule.x.0, rule.y.0, rule.width.0, rule.thickness.0
+        )?;
+    }
     out.write_str("]}")
+}
+
+/// JSON string with the escapes the canonical form needs. Formula text is a
+/// short symbol run, so the allocation-free loop is enough.
+fn write_string(out: &mut impl Write, text: &str) -> fmt::Result {
+    out.write_char('"')?;
+    for character in text.chars() {
+        match character {
+            '"' => out.write_str("\\\"")?,
+            '\\' => out.write_str("\\\\")?,
+            '\n' => out.write_str("\\n")?,
+            '\r' => out.write_str("\\r")?,
+            '\t' => out.write_str("\\t")?,
+            character if (character as u32) < 0x20 => {
+                write!(out, "\\u{:04x}", character as u32)?;
+            }
+            character => out.write_char(character)?,
+        }
+    }
+    out.write_char('"')
 }

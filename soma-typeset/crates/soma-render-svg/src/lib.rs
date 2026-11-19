@@ -104,6 +104,10 @@ fn render_block_at(
             ));
             return;
         }
+        BoxKind::Math if block.math.is_some() => {
+            render_math(out, layout, style, page, block, extra_y);
+            return;
+        }
         _ => {}
     }
 
@@ -138,6 +142,48 @@ fn render_block_at(
                 escape(&drawn)
             ));
         }
+    }
+}
+
+/// Draw a display formula. Item `y` is relative to the formula baseline, which
+/// SVG text positioning uses directly, so the output is exact.
+fn render_math(
+    out: &mut String,
+    layout: &PagedLayout,
+    style: Option<&ComputedStyle>,
+    page: u32,
+    block: &PlacedBlock,
+    extra_y: i32,
+) {
+    let Some(math) = block.math.as_ref() else {
+        return;
+    };
+    let left = layout.page.margin_left.0 + block.x.0;
+    let baseline = layout.page.margin_top.0 + block.y.0 + extra_y + math.baseline.0;
+    let paint = color(style.and_then(|style| style.color));
+
+    for item in &math.items {
+        out.push_str(&format!(
+            "<text data-page=\"{page}\" data-node=\"{}\" data-math=\"{}\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>\n",
+            block.node.0,
+            escape(&item.text),
+            em(Width(left + item.x.0)),
+            em(Width(baseline + item.y.0)),
+            em(item.size),
+            paint,
+            escape(&item.text)
+        ));
+    }
+    for rule in &math.rules {
+        out.push_str(&format!(
+            "<rect data-page=\"{page}\" data-node=\"{}\" data-rule=\"1\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>\n",
+            block.node.0,
+            em(Width(left + rule.x.0)),
+            em(Width(baseline + rule.y.0)),
+            em(rule.width),
+            em(rule.thickness),
+            paint
+        ));
     }
 }
 

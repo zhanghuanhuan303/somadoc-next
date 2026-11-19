@@ -272,14 +272,16 @@ pub fn math_document() -> Document {
     document.push_block(Block::Paragraph(Paragraph::new(
         NodeMeta::synthesized(),
         vec![text(
-            "下面是一组公式占位。真正的数学排版由适配器提供，核心只负责宽高与基线。",
+            "下面是一组行间公式。数学盒子由 soma-math 排成整数坐标的符号、分数线与根号横线，布局只消费它的宽高与基线。",
         )],
     )));
     for source in [
         "E = mc^2",
-        "\\int_0^1 x^2 dx = 1/3",
-        "\\sum_{i=1}^n i = n(n+1)/2",
+        "\\int_0^1 x^2\\,dx = \\frac{1}{3}",
+        "\\sum_{i=1}^n i = \\frac{n(n+1)}{2}",
         "\\frac{a+b}{c+d} = \\frac{1}{2}",
+        "\\sqrt{x^2 + y^2} \\le \\sqrt{x^2} + \\sqrt{y^2}",
+        "\\lim_{x \\to 0} \\frac{\\sin x}{x} = 1",
     ] {
         document.push_block(Block::MathBlock(MathBlock::new(
             NodeMeta::synthesized(),

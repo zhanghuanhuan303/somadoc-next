@@ -3,6 +3,7 @@
 mod common;
 
 use common::{document, engine, metrics, paragraph, paragraph_with, styled, text, TIGHT};
+use soma_core::Width;
 use soma_doc::block::{
     Cell, CodeBlock, Column, Figure, MathBlock, Paragraph, RawBlock, Row, Table, ThematicBreak,
 };
@@ -30,7 +31,7 @@ fn code_block_keeps_source_lines() {
 }
 
 #[test]
-fn math_block_is_one_object() {
+fn math_block_becomes_a_display_box() {
     let doc = document(vec![Block::MathBlock(MathBlock::new(
         NodeMeta::synthesized(),
         "a^2 + b^2 = c^2",
@@ -40,8 +41,41 @@ fn math_block_is_one_object() {
     let block = &layout.pages[0].blocks[0];
 
     assert_eq!(block.kind, BoxKind::Math);
-    assert_eq!(layout.text.atom_text(block.node, 0), "a^2 + b^2 = c^2");
-    assert_eq!(block.lines.len(), 1);
+    let math = block.math.as_ref().expect("display math box");
+    assert_eq!(math.width, block.width);
+    assert!(math.items.iter().any(|item| item.text == "a"));
+    assert!(
+        math.items.len() > 3,
+        "symbols plus scripts: {:?}",
+        math.items.len()
+    );
+    assert!(
+        math.items.iter().any(|item| item.size.0 < Width::EM.0),
+        "superscripts are set smaller than the base size"
+    );
+    assert!(
+        block.lines.is_empty(),
+        "a display formula carries no text lines"
+    );
+    assert!(block.x.0 > 0, "a narrow formula is centred: {}", block.x.0);
+    assert!(block.height.0 > 0);
+}
+
+#[test]
+fn malformed_math_falls_back_to_a_text_placeholder() {
+    let source = "\\frac{1}";
+    let doc = document(vec![Block::MathBlock(MathBlock::new(
+        NodeMeta::synthesized(),
+        source,
+    ))]);
+    let styled = styled(&doc, TIGHT);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+
+    assert_eq!(block.kind, BoxKind::Math);
+    assert!(block.math.is_none(), "no math box for a broken formula");
+    assert_eq!(layout.text.atom_text(block.node, 0), source);
+    assert_eq!(block.lines.len(), 1, "the placeholder is one text line");
 }
 
 #[test]

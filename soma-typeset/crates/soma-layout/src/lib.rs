@@ -19,6 +19,7 @@
 extern crate alloc;
 
 pub mod canonical;
+pub mod math;
 pub mod metrics;
 mod pagination;
 
@@ -36,7 +37,7 @@ use soma_doc::{Block, Document, Inline, NodeId};
 use soma_rules::{paragraph_from_spans, paragraph_from_text, InlineSpan, RuleError, SpanKind};
 use soma_template::{ComputedStyle, ResolvedPage, StyledDoc};
 
-pub const SCHEMA: &str = "soma.pages/4";
+pub const SCHEMA: &str = "soma.pages/5";
 
 /// Placeholder atom for a footnote marker. Renderers replace the marked atom
 /// with [`Mark::number`].
@@ -138,12 +139,27 @@ pub struct PlacedBlock {
     pub height: Width,
     pub lines: Vec<PlacedLine>,
     pub marks: Vec<Mark>,
+    /// Display math content (only for `BoxKind::Math`).
+    pub math: Option<MathBox>,
     /// Index of the first line in this page slice. Non-zero means the block is
     /// continued from the previous page.
     pub line_offset: u32,
     /// Total number of lines in the unsplit block.
     pub lines_total: u32,
     pub stage: FallbackStage,
+}
+
+/// A laid-out display formula, positioned from the block top.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MathBox {
+    pub width: Width,
+    /// Total height (`baseline` above the top, `depth` below).
+    pub height: Width,
+    /// Distance from the block top to the formula baseline. Item and rule `y`
+    /// values are relative to this baseline, matching `soma_math`.
+    pub baseline: Width,
+    pub items: Vec<soma_math::MathItem>,
+    pub rules: Vec<soma_math::MathRule>,
 }
 
 /// One page.
@@ -645,6 +661,7 @@ fn table_rule(
         marks: Vec::new(),
         line_offset: 0,
         lines_total: 0,
+        math: None,
         stage: FallbackStage::Normal,
     }
 }
@@ -806,12 +823,17 @@ impl Builder<'_> {
                 }
                 Block::MathBlock(node) => {
                     let style = self.style(node.meta.id, fallback);
-                    items.push(self.object_item(
-                        node.meta.id,
-                        BoxKind::Math,
-                        &node.source,
-                        style,
-                    )?);
+                    match self.math_item(node.meta.id, &node.source, style) {
+                        Some(item) => items.push(item),
+                        // Malformed formulas keep the text placeholder: a math
+                        // error must not fail the page.
+                        None => items.push(self.object_item(
+                            node.meta.id,
+                            BoxKind::Math,
+                            &node.source,
+                            style,
+                        )?),
+                    }
                 }
                 Block::Figure(node) => {
                     let style = self.style(node.meta.id, fallback);
@@ -1219,6 +1241,7 @@ impl Builder<'_> {
                             marks: Vec::new(),
                             line_offset: 0,
                             lines_total: 0,
+                            math: None,
                             stage: FallbackStage::Normal,
                         }],
                         height,
@@ -1423,6 +1446,7 @@ impl Builder<'_> {
                 line_offset: 0,
                 lines_total,
                 stage: result.fallback_stage,
+                math: None,
             }],
         }))
     }
@@ -1591,6 +1615,7 @@ impl Builder<'_> {
                 line_offset: 0,
                 lines_total: 0,
                 stage,
+                math: None,
             }],
         }))
     }
@@ -1658,6 +1683,52 @@ impl Builder<'_> {
                 line_offset: 0,
                 lines_total: 0,
                 stage: result.fallback_stage,
+                math: None,
+            }],
+        })
+    }
+
+    /// Place a display formula centred in the content box.
+    ///
+    /// Returns `None` when the source does not parse, so the caller can fall
+    /// back to a text placeholder.
+    fn math_item(&mut self, node: NodeId, source: &str, style_id: StyleId) -> Option<FlowItem> {
+        let computed = self.computed(style_id);
+        let layout = math::display(source, &computed, self.metrics, style_id)?;
+        let box_width = layout.width;
+        let height = layout.total_height();
+        let x = Width((self.content_width.0 - box_width.0).max(0) / 2);
+        Some(FlowItem {
+            height,
+            before: self.before_glue(&computed),
+            after: self.after_glue(&computed),
+            keep_with_next: computed.keep_with_next,
+            page_break_before: computed.page_break_before,
+            forced_break: false,
+            footnotes: Vec::new(),
+            parts: Vec::new(),
+            master: self.current_master,
+            table: None,
+            blocks: vec![PlacedBlock {
+                node,
+                kind: BoxKind::Math,
+                style: style_id,
+                x,
+                y: Width::ZERO,
+                width: box_width,
+                height,
+                lines: Vec::new(),
+                marks: Vec::new(),
+                line_offset: 0,
+                lines_total: 0,
+                stage: FallbackStage::Normal,
+                math: Some(MathBox {
+                    width: box_width,
+                    height,
+                    baseline: layout.height,
+                    items: layout.items,
+                    rules: layout.rules,
+                }),
             }],
         })
     }
@@ -1699,6 +1770,7 @@ impl Builder<'_> {
                 marks: Vec::new(),
                 line_offset: 0,
                 lines_total: 0,
+                math: None,
                 stage: FallbackStage::Normal,
             }],
         })
@@ -1824,6 +1896,7 @@ fn margin_block(
         line_offset: 0,
         lines_total: 1,
         stage,
+        math: None,
     })
 }
 
