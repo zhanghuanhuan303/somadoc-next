@@ -42,6 +42,8 @@ let document = parse_latex(r"\section{标题}
 | `center` / `flushleft` / `flushright` | 透明容器 |
 | `verbatim` | `CodeBlock` |
 | `tabular`（`\\` 分行、`&` 分列、`\hline`/`\toprule`/`\midrule`/`\bottomrule`、`\multicolumn`） | `Table` |
+| `table` / `table*`（内部 `\caption{...}`） | `Table.caption` |
+| `figure` / `figure*`（`\includegraphics[opts]{path}` + `\caption{...}`） | `Figure`（`ImageRef`，无 intrinsic 时按 3:2 占位）；无路径时丢弃 |
 | `\newpage` / `\clearpage` | `PageBreak` |
 | `\title` / `\author`（`\and` 分隔）/ `\date`（`YYYY-MM-DD`） | `DocumentMeta` |
 
@@ -60,10 +62,12 @@ let document = parse_latex(r"\section{标题}
 - 行补齐为空单元格，span 夹到网格内。
 - `\midrule` 或“行后的 `\hline`”之前的行标为表头；表头必须是前缀。
 - 单元格内容 v1 是纯文本（不解析 `\textbf` 等）；`---`/`--` 转成破折号。
+- `table`/`figure` 环境里的 `\caption` 会从正文中移除并挂到第一个 `Table`（或新建的
+  `Figure`）上；题注本身按行内语法解析，其中的脚注照常进入文档。
 
 ## 5. 限制（见 `docs/debt.md` D70）
 
-- 无宏、计数器、交叉引用、参考文献、`\includegraphics`。
+- 无宏、计数器、交叉引用、参考文献。`\includegraphics` 只得到路径，不读取图片尺寸。
 - 行间公式的源码原样进入 `MathBlock.source`，随后由 `soma-math` 排成数学盒（ADR-0026）；
   行内公式同样交给 `soma-math`，作为对象 atom 参与断行（ADR-0027）。
 - 无 `\item[label]`、无 `description` 环境、无 `\multicolumn` 以外的列格式。

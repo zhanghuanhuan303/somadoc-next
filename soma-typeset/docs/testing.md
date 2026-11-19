@@ -104,9 +104,9 @@ Cumulative public test files:
 | `a1_model.rs` | 9 | node coverage, renumbering, text projection |
 | `a1_raw.rs` | 4 | raw payload preservation |
 | `a1_validate.rs` | 26 | every DocIR invariant has a failing case (incl. table grid) |
-| `a2_template.rs` | 16 | YAML subset, validation, positions, hash, `within`, `table:`, `masters:`, `toc:`, `start-master` |
+| `a2_template.rs` | 19 | YAML subset, validation, positions, hash, `within`, `table:`, `masters:`, `toc:`, `start-master`, `level`, `numbering:`, front matter, lists |
 | `a2_units.rs` | 7 | exact conversion, truncation, strict grammar |
-| `a2_resolve.rs` | 11 | cascade, inheritance, page geometry, style hash |
+| `a2_resolve.rs` | 12 | cascade, inheritance, page geometry, style hash, heading levels |
 | `a2_cell_context.rs` | 1 | `within: cell` overrides body rules and sets cell padding |
 | `a3_layout.rs` | 7 | paragraph boxes match the kernel, text index, stacking |
 | `a4_pagination.rs` | 13 | vertical K-P optimality, page breaks, keep-with-next, splitting, overflow |
@@ -128,13 +128,15 @@ Cumulative public test files:
 | `corpus.rs` (eval) | 9 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
 | `a5_md.rs` | 11 | Markdown subset, inlines, spans, validity |
 | `html.rs` (html) | 9 | HTML subset shapes, table grid, degradation, recovery, pipeline |
-| `latex.rs` (latex) | 10 | LaTeX subset shapes, math source, table grid, metadata, subtitle to cover, recovery, pipeline |
+| `latex.rs` (latex) | 13 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, recovery, pipeline |
 | `math.rs` (soma-math) | 26 | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, spacing, styles, errors |
 | `e11_math.rs` (layout) | 8 | centring, baseline inside the box, flow, canonical `math` field |
 | `e12_inline_math.rs` (layout) | 11 | marker atoms, line-box growth, text style, placeholder, canonical `inlineMath` |
-| `e13_toc.rs` (layout) | 9 | TOC depth, page numbers, row shape, forced page, section-start master |
+| `e13_toc.rs` (layout) | 12 | TOC depth, page numbers, row shape, leaders, forced page, figure/table lists, section-start master |
 | `e14_alignment.rs` (layout) | 6 | left/center/right placement, first-indent interaction, justify unchanged |
 | `e15_cover.rs` (layout) | 7 | cover metadata, master, centring, fallbacks, unknown master error |
+| `e16_numbering.rs` (layout) | 8 | chinese-chapter, arabic-dotted, depth, figure/table counters, numbered TOC entries |
+| `e17_front_matter.rs` (layout) | 5 | continuous/roman/hidden labels, `{pages}` = body pages, no folio on hidden pages |
 | `cli.rs` (soma-cli) | 13 | render md/tex to html/svg/json, template geometry, TOC template, example book, `--out`, check, error paths |
 | `blind_pipeline.rs` (eval) | 3 | dry-run fixture through key + statistics + decision |
 | `k7_object_metrics.rs` | 4 | object hooks vs text paths, default-hook equivalence |
@@ -158,7 +160,7 @@ Cumulative public test files:
 | core unit | 24 | IR, units, breaker, result, presets |
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 
-Total: **485 tests**.
+Total: **508 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

@@ -1,12 +1,12 @@
 # 模板规范（`soma-template`）
 
-状态：**A2 已落地，E4 扩展，表格规则、单元上下文、目录、章节起始母版与封面已加**
-（schema `soma.template/7` / `soma.styles/4`）。
+状态：**A2 已落地，E4 扩展，表格规则、单元上下文、目录、章节起始母版、封面、自动编号与前置页已加**
+（schema `soma.template/8` / `soma.styles/6`）。
 代码是权威，本文解释 DSL、单位与级联规则。
 
 参考：`docs/architecture-v2.md` §7、ADR-0003（纯 YAML）、ADR-0009（语义/呈现边界）、
 ADR-0010 §3（`StyledDoc` 为纯数据）、ADR-0014（标点/网格）、ADR-0015（页面母版）、
-ADR-0019（表格规则与 `within`）。
+ADR-0019（表格规则与 `within`）、ADR-0031（封面与对齐）、ADR-0032（编号、前置页、目录扩展）。
 
 ---
 
@@ -75,6 +75,13 @@ page:
   footer: 8mm              # 页脚带高度，位于下边距内
   header-text: running-title   # 或字面量字符串
   folio: "第 {page} 页 / 共 {pages} 页"
+  start-master: chapter    # 章节起始页用的母版，可选
+  front-matter: continuous # continuous | roman | hidden
+numbering:
+  headings: none           # none | chinese-chapter | arabic-dotted
+  depth: 2                 # 1–3，编号到几级
+  figures: "图 {n}"         # 可选；必须含 {n}
+  tables: "表 {n}"
 footnote:
   numbering: document      # document | page | section
 table:
@@ -129,6 +136,30 @@ styles:                    # 必填，非空序列
   标题样式用 `element: tocTitle`，默认继承正文。
   目录占自己的页，之后强制分页；页码由布局反解，最多迭代 4 遍
   （报告在页面结果的 `toc` 字段里，`stable: false` 表示未收敛）。
+  `leaders`（默认 `true`）在条目与页码之间生成引导点；
+  `figures` / `tables` 各给一个列表标题值：（省略 = 不生成该列表；
+  空字符串 `""` = 生成无标题列表）。列表条目使用题注文本（含编号）和题注所在页的
+  打印页码，排在章节条目之后。
+
+编号（`numbering:`）：
+
+- `headings: chinese-chapter` 生成 `第一章` / `第一节` / `一、`；
+  `arabic-dotted` 生成 `1` / `1.2` / `1.2.3`。`none` 不编号。
+- `depth` 同时限制编号级别和点号编号的层数；更深的标题保持原样。
+- 编号由布局生成，**不写进 DocIR**；目录条目拿到的就是带编号的标题文本。
+- 图/表计数全文档独立；`{n}` 作文本替换，无题注的浮动体不占号。
+- 编号前缀与标题之间是一个正常的空格边界（宽度来自度量表），
+  不是硬编码间距。
+
+前置页（`page.front-matter:`）：
+
+- `continuous`：物理页从 1 连续编号。
+- `roman`：封面/目录用小罗马数字 `i, ii, iii…`，正文从 `1` 重新开始。
+- `hidden`：前置页不印页码，正文从 `1` 开始。
+
+前置页 = 垂直流头部**只含生成内容**（封面、目录）的连续页；`Page.number` 仍是物理页，
+`Page.printed` 才是印在页上的标签。标签为空时不生成页脚块，所以 `hidden` 与
+`footer: 0` 的母版都不需要特例。`{pages}` 在 `roman`/`hidden` 下等于正文页数。
 
 DocIR 的 `Section.page_template: <name>` 选择母版；换母版会强制新页
 （节首不会和上一节挤在同一页），文档开头的节直接作用于第 1 页；未知名字是布局错误。
@@ -136,13 +167,15 @@ DocIR 的 `Section.page_template: <name>` 选择母版；换母版会强制新�
 
 ## 5. 选择器与级联
 
-- 选择器可以是 `element`、`role`、`class`/`classes`、`within` 的任意组合；
+- 选择器可以是 `element`、`role`、`class`/`classes`、`within`、`level` 的任意组合；
   **所有给出的部分都必须匹配**。
+- `level: 1`–`9` 匹配标题（`heading`）与节（`section`）的级别；其他元素一律
+  `level: null`。可以只写 `level`（不带 `element`）。
 - `within: cell` 表示“某个块级祖先的元素名是 `cell`”，用来把单元内的段落和正文段落
   分开。可用值同 `ELEMENTS`，写错是错误。
 - 元素名来自 DocIR 节点种类（`paragraph`、`heading`、`strong`、`table`、`cell`、`footnote`…），
   完整清单在 `soma_template::ELEMENTS`；写错名字是错误，不会静默不匹配。
-- 特异性从低到高：`element` < `role` / `within` < 每个 `class`。
+- 特异性从低到高：`element` < `role` / `within` < `level` < 每个 `class`。
 - 同特异性按**声明顺序**，后面的覆盖前面的。
 - 规则内属性按固定顺序应用：`font-size` → `line-height` → 其余，因此 `em` 长度看到的是新字号。
 - 同一规则内同属性重复声明时，最后一条生效。
@@ -206,8 +239,8 @@ pub struct StyledDoc {
 
 | Hash | 覆盖 |
 |---|---|
-| `template_hash()` | `soma.template/7` canonical JSON：名称、版本、页面（含母版、起始母版）、脚注、目录、封面、表格线宽、全部规则与声明 |
-| `style_hash()` | `soma.styles/4` canonical JSON：模板 hash + 解析后的页面/样式/目录与封面设置/节点映射 |
+| `template_hash()` | `soma.template/8` canonical JSON：名称、版本、页面（含母版、起始母版、前置页编号）、脚注、目录（含引导点与图/表目录）、封面、编号、表格线宽、全部规则与声明 |
+| `style_hash()` | `soma.styles/6` canonical JSON：模板 hash + 解析后的页面/样式/目录与封面设置/节点映射 |
 
 两者都是 FNV-1a 64，与 `paramHash` / `docHash` 同一原语。
 

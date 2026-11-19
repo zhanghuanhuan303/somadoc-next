@@ -63,7 +63,7 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   (`docHash` for exact reproduction, `contentHash` for content identity). The
   crate has **zero dependencies** and no floats; Gate A enforces that.
 - A3–A6 pipeline: `soma-layout` builds paragraph boxes over the frozen kernel and
-  paginates with **line-level vertical K-P** by default (`soma.pages/6`):
+  paginates with **line-level vertical K-P** by default (`soma.pages/8`):
   paragraphs split across pages, widows/orphans are penalties, vertical glue can
   stretch, footnotes are charged to the marker's line, and page masters add a
   running header, footer, and folio. Figure boxes, table cell boxes,
@@ -100,29 +100,36 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   atom window, fallback switches, vertical cost model) into the same
   `BreakConfig`/`VerticalParams` the hand-built path uses. See
   [`docs/engine.md`](docs/engine.md) and ADR-0016.
-- Contents pages and chapter openings (ADR-0028): `toc: {depth, title}` in the
-  template produces an automatically paginated contents page (page numbers are
-  a fixed point over at most four layout passes, reported as `toc.stable`), and
+- Contents pages and chapter openings (ADR-0028/ADR-0032): `toc: {depth, title,
+  leaders, figures, tables}` produces an automatically paginated contents page
+  with dot leaders and optional lists of figures and tables (page numbers are a
+  fixed point over at most four layout passes, reported as `toc.stable`), and
   `page.start-master` selects a master for pages that open a section.
+  `numbering:` generates Chinese (`第一章`/`第一节`) or dotted (`1.2.3`) heading
+  numbers and `图 {n}`/`表 {n}` caption numbers at layout time; they never enter
+  DocIR. `page.front-matter: continuous|roman|hidden` prints the cover and
+  contents in roman numerals (or none) and restarts the body at 1.
 - One command (ADR-0029): `soma render --input doc.tex --template book.yaml
   --format html|svg|json` runs the whole pipeline; `soma check` prints layout
   facts and the canonical hash. See [`docs/cli.md`](docs/cli.md).
-- First-release artifact (`examples/book`, ADR-0031): `scripts/book.sh` renders a
-  nine-page book from `examples/book/book.tex` + `book.yaml` — generated cover,
-  contents page, chapter openings without running heads, a formula, a three-line
-  table, and a footnote. Alignment (`left`/`center`/`right`) is a layout pass, so
-  titles and cover lines can be centred. The build has 0 overflow pages and 0
-  degraded lines; `docs/first-release.md` lists the remaining design gaps.
+- First-release artifact (`examples/book`, ADR-0031/ADR-0032): `scripts/book.sh`
+  renders a ten-page book from `examples/book/book.tex` + `book.yaml` — generated
+  cover, roman-numbered front matter, contents with leaders plus figure/table
+  lists, numbered chapters and sections, a figure with a caption, a formula, a
+  three-line table with a caption, and a footnote. Alignment
+  (`left`/`center`/`right`) is a layout pass, so titles and cover lines can be
+  centred. The build has 0 overflow pages and 0 degraded lines;
+  `docs/first-release.md` lists the remaining design gaps.
 - Blind-test tooling: kit generation, key unmapping, Wilson interval, Fleiss'
   kappa, and a committable Markdown report (`soma-eval blind --out`). A
   **simulated** dry run proves the chain (`docs/blind-dry-run.md`); the human
   panel (D01) is still open.
-- A2 template layer (`soma-template`, schemas `soma.template/6` and
-  `soma.styles/3`): a documented YAML subset with line/column errors, exact units
+- A2 template layer (`soma-template`, schemas `soma.template/8` and
+  `soma.styles/6`): a documented YAML subset with line/column errors, exact units
   (decimal → rational → 1/4096 em, truncation toward zero), a selector cascade
-  with inheritance, a 25-property whitelist, `templateHash`, and `StyledDoc` as
-  lifetime-free data with `styleHash`. Templates cannot write engine knobs; Gate A
-  enforces that statically.
+  with inheritance and heading levels, a 25-property whitelist, `templateHash`,
+  and `StyledDoc` as lifetime-free data with `styleHash`. Templates cannot write
+  engine knobs; Gate A enforces that statically.
 
 ## What is not here yet
 
@@ -192,7 +199,7 @@ scripts/
   kp-verify.sh # K-P closure: gates + bench budget + length policy
 docs/
   architecture-v2.md  # frozen architecture
-  adr/                # accepted decisions (ADR-0001 … 0031)
+  adr/                # accepted decisions (ADR-0001 … 0032)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
   debt.md             # global not-done register (D01–D77, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
@@ -252,7 +259,7 @@ cargo run -p soma-eval --release -- blind preferences.csv
 scripts/gates.sh
 ```
 
-The gate runs format, clippy, 330 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 508 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-template`,
 `soma-layout`, `soma-md`, `soma-render-html`, and `soma-render-svg`, a
 native/`wasm32-wasip1` canonical-byte comparison (DocIR + inline layout + pages),
