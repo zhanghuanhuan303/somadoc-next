@@ -112,6 +112,21 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
     write_length_object(out, template.table.header_rule)?;
     out.write_str(",\"outerRuleWidth\":")?;
     write_length_object(out, template.table.outer_rule)?;
+    out.write_str(",\"columnRuleWidth\":")?;
+    write_length_object(out, template.table.column_rule)?;
+    out.write_str(",\"outerColumnRuleWidth\":")?;
+    write_length_object(out, template.table.outer_column_rule)?;
+    out.write_str(",\"ruleStyle\":\"")?;
+    out.write_str(template.table.style.as_str())?;
+    out.write_str("\",\"ruleColor\":")?;
+    match template.table.color {
+        Some(color) => {
+            out.write_char('"')?;
+            write_color(out, Some(color))?;
+            out.write_char('"')?;
+        }
+        None => out.write_str("null")?,
+    }
     out.write_char('}')?;
 
     out.write_str(",\"styles\":[")?;

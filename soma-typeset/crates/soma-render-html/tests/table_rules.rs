@@ -9,7 +9,7 @@ use soma_layout::layout;
 use soma_render_html::render;
 use soma_template::{parse_template, resolve};
 
-const TEMPLATE: &str = r#"
+const TEMPLATE: &str = r##"
 name: ruled
 page:
   size: A5
@@ -18,6 +18,7 @@ table:
   rule-width: 0.4pt
   header-rule-width: 0.6pt
   outer-rule-width: 0.8pt
+  rule-color: "#336699"
 styles:
   - selector:
       element: document
@@ -25,7 +26,7 @@ styles:
       font-size: 10.5pt
       line-height: 1.6
       align: justify
-"#;
+"##;
 
 fn cell(value: &str) -> Cell {
     Cell::new(
@@ -68,6 +69,10 @@ fn a_ruled_table_emits_positioned_rule_boxes() {
         "one box per rule: {html}"
     );
     assert!(html.contains("height:0."), "the rule height is painted");
+    assert!(
+        html.contains("background:#336699"),
+        "the rule color is painted"
+    );
 
     let rules = pages.pages[0]
         .blocks

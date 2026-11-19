@@ -14,7 +14,7 @@ use crate::units::{LengthSpec, LineHeightSpec, Rational, Unit};
 use crate::yaml::{Key, Value, ValueKind};
 use crate::TemplateError;
 
-pub const SCHEMA: &str = "soma.template/3";
+pub const SCHEMA: &str = "soma.template/4";
 
 /// Element names a selector may target. Derived from DocIR node kinds; a typo is
 /// an error instead of silently matching nothing.
@@ -203,6 +203,39 @@ pub struct TableSpec {
     pub header_rule: LengthSpec,
     /// Rule above row 0 and below the last row.
     pub outer_rule: LengthSpec,
+    /// Vertical rule between two body columns.
+    pub column_rule: LengthSpec,
+    /// Vertical rule left of column 0 and right of the last column.
+    pub outer_column_rule: LengthSpec,
+    /// Solid or dashed.
+    pub style: RuleStyle,
+    /// Packed `0xRRGGBB`; `None` uses the table style's color.
+    pub color: Option<u32>,
+}
+
+/// How a table rule is painted.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RuleStyle {
+    #[default]
+    Solid,
+    Dashed,
+}
+
+impl RuleStyle {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Solid => "solid",
+            Self::Dashed => "dashed",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "solid" => Some(Self::Solid),
+            "dashed" => Some(Self::Dashed),
+            _ => None,
+        }
+    }
 }
 
 impl Default for TableSpec {
@@ -211,6 +244,10 @@ impl Default for TableSpec {
             rule: LengthSpec::zero(),
             header_rule: LengthSpec::zero(),
             outer_rule: LengthSpec::zero(),
+            column_rule: LengthSpec::zero(),
+            outer_column_rule: LengthSpec::zero(),
+            style: RuleStyle::Solid,
+            color: None,
         }
     }
 }
@@ -221,6 +258,8 @@ impl TableSpec {
         self.rule.value == Rational::ZERO
             && self.header_rule.value == Rational::ZERO
             && self.outer_rule.value == Rational::ZERO
+            && self.column_rule.value == Rational::ZERO
+            && self.outer_column_rule.value == Rational::ZERO
     }
 }
 
@@ -620,7 +659,15 @@ fn parse_footnote(value: &Value, path: &str) -> Result<FootnoteSpec, TemplateErr
 
 fn parse_table(value: &Value, path: &str) -> Result<TableSpec, TemplateError> {
     let fields = Fields::new(value, path)?;
-    fields.reject_unknown(&["rule-width", "header-rule-width", "outer-rule-width"])?;
+    fields.reject_unknown(&[
+        "rule-width",
+        "header-rule-width",
+        "outer-rule-width",
+        "column-rule-width",
+        "outer-column-rule-width",
+        "rule-style",
+        "rule-color",
+    ])?;
 
     let mut spec = TableSpec::default();
     let read = |name: &str| -> Result<Option<LengthSpec>, TemplateError> {
@@ -638,8 +685,28 @@ fn parse_table(value: &Value, path: &str) -> Result<TableSpec, TemplateError> {
     if let Some(length) = read("outer-rule-width")? {
         spec.outer_rule = length;
     }
+    if let Some(length) = read("column-rule-width")? {
+        spec.column_rule = length;
+    }
+    if let Some(length) = read("outer-column-rule-width")? {
+        spec.outer_column_rule = length;
+    }
+    if let Some(text) = fields.optional_str("rule-style")? {
+        spec.style = RuleStyle::parse(&text)
+            .ok_or_else(|| fields.error("rule style must be solid or dashed"))?;
+    }
+    if let Some(text) = fields.optional_str("rule-color")? {
+        spec.color =
+            Some(parse_color(&text).ok_or_else(|| fields.error("rule color must be #rrggbb"))?);
+    }
 
-    for length in [spec.rule, spec.header_rule, spec.outer_rule] {
+    for length in [
+        spec.rule,
+        spec.header_rule,
+        spec.outer_rule,
+        spec.column_rule,
+        spec.outer_column_rule,
+    ] {
         if length.value.num() < 0 {
             return Err(fields.error("table rule width must not be negative"));
         }

@@ -78,13 +78,18 @@ fn render_block_at(
     let style = styles.get(block.style);
     match block.kind {
         BoxKind::Rule | BoxKind::TableRule => {
+            let paint = match style.and_then(|style| style.color) {
+                Some(value) => color(Some(value)),
+                None => String::from("#333"),
+            };
             out.push_str(&format!(
-                "<rect data-page=\"{page}\" data-node=\"{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#333\"/>\n",
+                "<rect data-page=\"{page}\" data-node=\"{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>\n",
                 block.node.0,
                 em(Width(layout.page.margin_left.0 + block.x.0)),
                 em(Width(layout.page.margin_top.0 + block.y.0 + extra_y)),
                 em(block.width),
-                em(block.height)
+                em(block.height),
+                paint
             ));
             return;
         }

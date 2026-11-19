@@ -251,3 +251,190 @@ fn a_template_without_a_table_section_draws_no_rules() {
     let header = of_kind(&layout, 0, BoxKind::TableCell);
     assert_eq!(header[0].y.0, 0, "no rule space is reserved");
 }
+
+const GRID: &str = r#"
+name: grid
+page:
+  size: custom
+  width: 100mm
+  height: 60mm
+  margin: 4mm
+table:
+  rule-width: 0
+  outer-rule-width: 0
+  column-rule-width: 0.4pt
+  outer-column-rule-width: 0.8pt
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+      align: justify
+"#;
+
+fn two_columns(rows: Vec<Row>) -> Block {
+    Block::Table(Table::new(NodeMeta::synthesized(), columns(2), rows))
+}
+
+#[test]
+fn a_grid_draws_vertical_rules_and_a_frame() {
+    let rows = vec![
+        Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![cell("左上", 1, 1), cell("右上", 1, 1)],
+        ),
+        Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![cell("左下", 1, 1), cell("右下", 1, 1)],
+        ),
+    ];
+    let doc = document(vec![two_columns(rows)]);
+    let styled = styled(&doc, GRID);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+
+    let rules = of_kind(&layout, 0, BoxKind::TableRule);
+    assert_eq!(rules.len(), 3, "left frame, middle rule, right frame");
+    let table_width = layout.page.content_width().0;
+    let column = table_width / 2;
+    let middle = rules
+        .iter()
+        .find(|rule| rule.x.0 > 0 && rule.x.0 + rule.width.0 < table_width)
+        .expect("middle vertical rule");
+    assert_eq!(middle.width.0, RULE);
+    assert_eq!(middle.x.0, column - RULE / 2);
+    let height = 2 * LINE;
+    assert_eq!(middle.y.0, 0);
+    assert_eq!(middle.height.0, height);
+
+    let left = rules.iter().find(|rule| rule.x.0 == 0).expect("left frame");
+    assert_eq!(left.width.0, OUTER);
+    assert_eq!(left.height.0, height);
+    let right = rules
+        .iter()
+        .find(|rule| rule.x.0 + rule.width.0 == table_width)
+        .expect("right frame");
+    assert_eq!(right.width.0, OUTER);
+    assert_eq!(right.height.0, height);
+}
+
+#[test]
+fn a_vertical_rule_skips_a_colspan_cell() {
+    let rows = vec![
+        Row::new(NodeMeta::synthesized(), false, vec![cell("跨两列", 2, 1)]),
+        Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![cell("左下", 1, 1), cell("右下", 1, 1)],
+        ),
+    ];
+    let doc = document(vec![two_columns(rows)]);
+    let styled = styled(&doc, GRID);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+
+    let table_width = layout.page.content_width().0;
+    let column = table_width / 2;
+    let middle: Vec<_> = of_kind(&layout, 0, BoxKind::TableRule)
+        .into_iter()
+        .filter(|rule| rule.x.0 > 0 && rule.x.0 + rule.width.0 < table_width)
+        .collect();
+    assert_eq!(middle.len(), 1, "one segment below the spanning cell");
+    assert_eq!(middle[0].y.0, LINE, "the span hides the first row");
+    assert_eq!(middle[0].height.0, LINE);
+    assert_eq!(middle[0].x.0, column - RULE / 2);
+}
+
+#[test]
+fn a_dashed_rule_is_a_series_of_segments() {
+    const DASHED: &str = r#"
+name: dashed
+page:
+  size: custom
+  width: 100mm
+  height: 60mm
+  margin: 4mm
+table:
+  outer-rule-width: 0.8pt
+  rule-style: dashed
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+      align: justify
+"#;
+    let table = Table::new(
+        NodeMeta::synthesized(),
+        columns(1),
+        vec![Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![cell("唯一行", 1, 1)],
+        )],
+    );
+    let doc = document(vec![Block::Table(table)]);
+    let styled = styled(&doc, DASHED);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+
+    let rules = of_kind(&layout, 0, BoxKind::TableRule);
+    assert!(
+        rules.len() >= 4,
+        "dashes split each outer rule: {}",
+        rules.len()
+    );
+    assert!(rules.iter().all(|rule| rule.height.0 == OUTER));
+    let dashes: Vec<_> = rules.iter().filter(|rule| rule.y.0 == 0).collect();
+    assert!(dashes.len() >= 2);
+    assert_eq!(dashes[0].x.0, 0);
+    assert_eq!(dashes[1].x.0, (OUTER * 3).max(1) + (OUTER * 2).max(1));
+}
+
+#[test]
+fn a_rule_color_rides_the_block_style() {
+    const RED: &str = r##"
+name: red
+page:
+  size: custom
+  width: 100mm
+  height: 60mm
+  margin: 4mm
+table:
+  outer-rule-width: 0.8pt
+  rule-color: "#aa0000"
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+      align: justify
+"##;
+    let table = Table::new(
+        NodeMeta::synthesized(),
+        columns(1),
+        vec![Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![cell("唯一行", 1, 1)],
+        )],
+    );
+    let doc = document(vec![Block::Table(table)]);
+    let styled = styled(&doc, RED);
+    assert_eq!(
+        styled.table_rules().style_id.0,
+        styled.table_rules().style_id.0
+    );
+    let style = styled
+        .style(styled.table_rules().style_id)
+        .expect("rule style");
+    assert_eq!(style.color, Some(0xaa0000));
+
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let rules = of_kind(&layout, 0, BoxKind::TableRule);
+    assert!(rules
+        .iter()
+        .all(|rule| rule.style == styled.table_rules().style_id));
+}

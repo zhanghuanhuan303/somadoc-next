@@ -549,6 +549,74 @@ struct TableCellLayout {
     height: Width,
 }
 
+/// Segments of a rule: one full span, or dash/gap runs.
+fn rule_segments(total: i32, thickness: i32, dashed: bool) -> Vec<(i32, i32)> {
+    let mut out = Vec::new();
+    if total <= 0 || thickness <= 0 {
+        return out;
+    }
+    if !dashed {
+        out.push((0, total));
+        return out;
+    }
+    let dash = (thickness * 3).max(1);
+    let gap = (thickness * 2).max(1);
+    let mut offset = 0;
+    while offset < total {
+        out.push((offset, dash.min(total - offset)));
+        offset += dash + gap;
+    }
+    out
+}
+
+/// What every rule segment shares.
+#[derive(Clone, Copy)]
+struct RulePen {
+    node: NodeId,
+    style: StyleId,
+    dashed: bool,
+}
+
+fn push_horizontal_rule(
+    out: &mut Vec<PlacedBlock>,
+    pen: RulePen,
+    x: Width,
+    y: Width,
+    width: Width,
+    thickness: Width,
+) {
+    for (offset, length) in rule_segments(width.0, thickness.0, pen.dashed) {
+        out.push(table_rule(
+            pen.node,
+            pen.style,
+            Width(x.0 + offset),
+            y,
+            Width(length),
+            thickness,
+        ));
+    }
+}
+
+fn push_vertical_rule(
+    out: &mut Vec<PlacedBlock>,
+    pen: RulePen,
+    x: Width,
+    y: Width,
+    height: Width,
+    thickness: Width,
+) {
+    for (offset, length) in rule_segments(height.0, thickness.0, pen.dashed) {
+        out.push(table_rule(
+            pen.node,
+            pen.style,
+            x,
+            Width(y.0 + offset),
+            thickness,
+            Width(length),
+        ));
+    }
+}
+
 /// A horizontal table rule at an exact position.
 fn table_rule(
     node: NodeId,
@@ -883,15 +951,20 @@ impl Builder<'_> {
                     let header_height = row_top[header_rows];
 
                     let mut blocks = Vec::new();
+                    let pen = RulePen {
+                        node: node.meta.id,
+                        style: rules.style_id,
+                        dashed: rules.style == soma_template::RuleStyle::Dashed,
+                    };
                     if rules.outer_rule.0 > 0 {
-                        blocks.push(table_rule(
-                            node.meta.id,
-                            style,
+                        push_horizontal_rule(
+                            &mut blocks,
+                            pen,
                             Width::ZERO,
                             Width::ZERO,
                             table_width,
                             rules.outer_rule,
-                        ));
+                        );
                     }
                     for cell in &cells {
                         let cell_top = row_top[cell.row];
@@ -934,15 +1007,82 @@ impl Builder<'_> {
                             while column < columns && !covered[column] {
                                 column += 1;
                             }
-                            blocks.push(table_rule(
-                                node.meta.id,
-                                style,
+                            push_horizontal_rule(
+                                &mut blocks,
+                                pen,
                                 Width(column_width.0 * start as i32),
                                 y,
                                 Width(column_width.0 * (column - start) as i32),
                                 thickness,
-                            ));
+                            );
                         }
+                    }
+
+                    // Vertical rules: internal boundaries plus the left/right
+                    // frame. A cell that spans the boundary hides the segment
+                    // for its own rows, and the header band is split out so the
+                    // repeated header can carry its own side lines.
+                    for boundary in 0..=columns {
+                        let thickness = if boundary == 0 || boundary == columns {
+                            rules.outer_column_rule
+                        } else {
+                            rules.column_rule
+                        };
+                        if thickness.0 == 0 {
+                            continue;
+                        }
+                        let x = if boundary == 0 {
+                            Width::ZERO
+                        } else if boundary == columns {
+                            Width(table_width.0 - thickness.0)
+                        } else {
+                            Width(column_width.0 * boundary as i32 - thickness.0 / 2)
+                        };
+                        let mut covered: Vec<(i32, i32)> = Vec::new();
+                        if boundary > 0 && boundary < columns {
+                            for cell in &cells {
+                                if cell.column < boundary && boundary < cell.column + cell.colspan {
+                                    let start = row_top[cell.row].0;
+                                    let end_row = cell.row + cell.rowspan - 1;
+                                    let end = row_top[end_row + 1].0 - rule_after[end_row].0;
+                                    covered.push((start, end.max(start)));
+                                }
+                            }
+                        }
+                        covered.sort_unstable();
+                        let mut cursor = 0i32;
+                        let mut emit = |from: i32, to: i32| {
+                            if to <= from {
+                                return;
+                            }
+                            let mut start = from;
+                            if header_rows > 0 && start < header_height.0 && to > header_height.0 {
+                                push_vertical_rule(
+                                    &mut blocks,
+                                    pen,
+                                    x,
+                                    Width(start),
+                                    Width(header_height.0 - start),
+                                    thickness,
+                                );
+                                start = header_height.0;
+                            }
+                            push_vertical_rule(
+                                &mut blocks,
+                                pen,
+                                x,
+                                Width(start),
+                                Width(to - start),
+                                thickness,
+                            );
+                        };
+                        for (start, end) in covered {
+                            if start > cursor {
+                                emit(cursor, start);
+                            }
+                            cursor = cursor.max(end);
+                        }
+                        emit(cursor, table_height.0);
                     }
 
                     let mut header_blocks = Vec::new();

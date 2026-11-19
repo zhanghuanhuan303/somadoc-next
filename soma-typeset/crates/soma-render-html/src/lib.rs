@@ -100,12 +100,17 @@ fn render_block(
             return;
         }
         BoxKind::TableRule => {
+            let paint = style
+                .and_then(|style| style.color)
+                .map(|color| format!("#{color:06x}"))
+                .unwrap_or_else(|| String::from("#333"));
             html.push_str(&format!(
-                "<div class=\"table-rule\" style=\"left:{};top:{};width:{};height:{};\"></div>\n",
+                "<div class=\"table-rule\" style=\"left:{};top:{};width:{};height:{};background:{};\"></div>\n",
                 em(Width(left)),
                 em(Width(top)),
                 em(block.width),
-                em(block.height)
+                em(block.height),
+                paint
             ));
             return;
         }

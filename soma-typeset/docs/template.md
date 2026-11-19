@@ -1,6 +1,6 @@
 # 模板规范（`soma-template`）
 
-状态：**A2 已落地，E4 扩展，表格规则与单元上下文已加**（schema `soma.template/3` / `soma.styles/2`）。
+状态：**A2 已落地，E4 扩展，表格规则与单元上下文已加**（schema `soma.template/4` / `soma.styles/2`）。
 代码是权威，本文解释 DSL、单位与级联规则。
 
 参考：`docs/architecture-v2.md` §7、ADR-0003（纯 YAML）、ADR-0009（语义/呈现边界）、
@@ -77,9 +77,13 @@ page:
 footnote:
   numbering: document      # document | page | section
 table:
-  rule-width: 0            # 行之间；0 = 不画
-  header-rule-width: 0.6pt # 表头下方
-  outer-rule-width: 0.8pt  # 表格上下两条
+  rule-width: 0                 # 行之间；0 = 不画
+  header-rule-width: 0.6pt      # 表头下方
+  outer-rule-width: 0.8pt       # 表格上下两条
+  column-rule-width: 0          # 列之间
+  outer-column-rule-width: 0    # 表格左右两条（框线）
+  rule-style: solid             # solid | dashed
+  rule-color: #333333         # 可省略
 styles:                    # 必填，非空序列
   - selector:
       element: paragraph
@@ -100,8 +104,13 @@ styles:                    # 必填，非空序列
 
 `table:` 整段可省略；省略或全为 `0` 时不画线，表格几何与旧版一致
 （页面 canonical 只差 schema 版本号）。
-线宽是全表统一参数（暂不支持按表/按行覆盖），`pt`/`em`/`mm` 都可以，
-负值报错。三条线各自独立：**没有隐式回退**，想要网格就三条都写。
+五条线宽是全表统一参数（暂不支持按表/按行覆盖），`pt`/`em`/`mm` 都可以，
+负值报错。每条线各自独立：**没有隐式回退**，三线表只写
+`outer-rule-width` + `header-rule-width`，网格表再把 `rule-width` 与
+`column-rule-width`（以及左右框 `outer-column-rule-width`）写上。
+`rule-style: dashed` 用固定 3:2 的线段/间隔，线段长度随线宽缩放，断点从每段线起点算。
+跨行/跨列单元会挡住穿过它的线：横线按列分段，竖线按行分段；表头带单独切分，
+续页重画的表头自带左右框。
 
 ## 5. 选择器与级联
 
@@ -175,7 +184,7 @@ pub struct StyledDoc {
 
 | Hash | 覆盖 |
 |---|---|
-| `template_hash()` | `soma.template/3` canonical JSON：名称、版本、页面（含母版）、脚注、表格线宽、全部规则与声明 |
+| `template_hash()` | `soma.template/4` canonical JSON：名称、版本、页面（含母版）、脚注、表格线宽、全部规则与声明 |
 | `style_hash()` | `soma.styles/2` canonical JSON：模板 hash + 解析后的页面/样式/节点映射 |
 
 两者都是 FNV-1a 64，与 `paramHash` / `docHash` 同一原语。

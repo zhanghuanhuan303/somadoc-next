@@ -187,12 +187,24 @@ pub struct TableRules {
     pub header_rule: Width,
     /// Rule above row 0 and below the last row.
     pub outer_rule: Width,
+    /// Vertical rule between two body columns.
+    pub column_rule: Width,
+    /// Vertical rule left of column 0 and right of the last column.
+    pub outer_column_rule: Width,
+    /// Solid or dashed.
+    pub style: crate::template::RuleStyle,
+    /// Interned style carrying the rule color.
+    pub style_id: StyleId,
 }
 
 impl TableRules {
     /// No rule is drawn anywhere.
     pub fn is_empty(self) -> bool {
-        self.rule.0 == 0 && self.header_rule.0 == 0 && self.outer_rule.0 == 0
+        self.rule.0 == 0
+            && self.header_rule.0 == 0
+            && self.outer_rule.0 == 0
+            && self.column_rule.0 == 0
+            && self.outer_column_rule.0 == 0
     }
 }
 
@@ -340,6 +352,13 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         ));
     }
 
+    // Table rules carry their own color; when the template does not set one
+    // they inherit the document color (and renderers fall back to black).
+    let rule_style = resolver.table.intern(ComputedStyle {
+        color: template.table.color.or(root.color),
+        ..root.clone()
+    });
+
     Ok(StyledDoc {
         node_style: resolver.node_style,
         table: resolver.table,
@@ -349,6 +368,13 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
             rule: template.table.rule.resolve(root.font_size, body_pt),
             header_rule: template.table.header_rule.resolve(root.font_size, body_pt),
             outer_rule: template.table.outer_rule.resolve(root.font_size, body_pt),
+            column_rule: template.table.column_rule.resolve(root.font_size, body_pt),
+            outer_column_rule: template
+                .table
+                .outer_column_rule
+                .resolve(root.font_size, body_pt),
+            style: template.table.style,
+            style_id: rule_style,
         },
         header_text: template.page.header_text.clone(),
         folio: template.page.folio.clone(),

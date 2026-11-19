@@ -77,7 +77,7 @@ fn canonical_json_is_stable_and_namespaced() {
     let json = template.canonical_json();
 
     assert!(
-        json.starts_with("{\"schema\":\"soma.template/3\""),
+        json.starts_with("{\"schema\":\"soma.template/4\""),
         "{json}"
     );
     assert!(json.contains("\"size\":\"A4\""));
@@ -284,4 +284,40 @@ styles:
     let error = parse_template(&source.replace("outer-rule-width: 1pt", "outer: 1pt"))
         .expect_err("unknown table key");
     assert!(error.reason.contains("unknown"));
+}
+
+#[test]
+fn column_rules_style_and_color_parse() {
+    let source = r##"
+name: grid
+page:
+  size: A4
+table:
+  column-rule-width: 0.4pt
+  outer-column-rule-width: 0.8pt
+  rule-style: dashed
+  rule-color: "#aa0000"
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+"##;
+    let template = parse_template(source).expect("column rules parse");
+    assert_eq!(
+        template.table.column_rule,
+        soma_template::LengthSpec::parse("0.4pt").unwrap()
+    );
+    assert_eq!(template.table.style, soma_template::RuleStyle::Dashed);
+    assert_eq!(template.table.color, Some(0xaa0000));
+
+    let json = template.canonical_json();
+    assert!(json.contains("\"ruleStyle\":\"dashed\""), "{json}");
+    assert!(json.contains("\"ruleColor\":\"#aa0000\""), "{json}");
+
+    let error = parse_template(&source.replace("dashed", "dotted")).expect_err("bad style");
+    assert_eq!(error.reason, "rule style must be solid or dashed");
+
+    let error = parse_template(&source.replace("aa0000", "red")).expect_err("bad color");
+    assert_eq!(error.reason, "rule color must be #rrggbb");
 }
