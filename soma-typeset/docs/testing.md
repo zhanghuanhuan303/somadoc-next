@@ -115,6 +115,7 @@ Cumulative public test files:
 | `e4_master.rs` | 6 | header/footer bands, folio, running title, margin limits |
 | `e5_grid.rs` | 3 | baseline grid alignment, unchanged text, wider grid leading |
 | `e7_tables.rs` | 2 | rowspan coverage without overlap, repeated header on every table page |
+| `e8_table_split.rs` | 4 | row bands continue across pages, spanning rows stay whole, tall cells are moved not clipped |
 | `gate_r.rs` (svg) | 4 | Gate V/R: SVG golden, coordinates = layout, HTML/SVG atom parity |
 | `effect.rs` (eval) | 7 | Gate Q′ structural claims on the scorecard |
 | `engine.rs` | 15 | `soma.engine/1`: parse, reject, canonical hash, layout equivalence |
@@ -136,7 +137,7 @@ Cumulative public test files:
 | core unit | 23 | IR, units, breaker, result |
 | layout unit | 2 | trim scaling at body and non-body sizes |
 
-Total: **330 tests**.
+Total: **334 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, bold faces, tracking fallback, and calibrated trim ratios.
