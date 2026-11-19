@@ -2,7 +2,7 @@
 
 Status: **frozen on 2026-11-20** with `docs/architecture-v2.md`.
 ADR-0010 amends §15.1 (one extra crate) and fixes shapes that
-architecture v2 left open; ADR-0012…0020 extend the implemented system
+architecture v2 left open; ADR-0012…0021 extend the implemented system
 (table metrics, line-level pagination, typography, page masters, engine
 configuration, table continuation, table rules and context selectors)
 without changing the layer contract.
@@ -32,6 +32,7 @@ with the already-implemented code; they do not change the frozen inline kernel.
 | [0018](0018-table-continuation-bands.md) | Table continuation by row bands; safe row boundaries; header reuse per part | Accepted |
 | [0019](0019-table-rules-and-within.md) | Template-level table rules; `within` selectors for cell context | Accepted |
 | [0020](0020-table-column-rules.md) | Table column rules, cell-border grids, dashed rules, rule color | Accepted |
+| [0021](0021-page-masters.md) | Named page masters selected by sections; shared content box | Accepted |
 
 ## Rules
 
