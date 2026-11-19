@@ -331,3 +331,65 @@ fn declarations_are_typed() {
         .iter()
         .any(|declaration| matches!(declaration.value, PropertyValue::Text(_))));
 }
+
+#[test]
+fn heading_levels_resolve_to_different_styles() {
+    use soma_doc::block::Heading;
+    use soma_doc::node::NodeMeta;
+    use soma_doc::{Block, Inline, Text};
+
+    let source = r#"
+name: levels
+page:
+  size: A4
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+  - selector:
+      element: heading
+    declarations:
+      font-size: 16pt
+  - selector:
+      element: heading
+      level: 1
+    declarations:
+      font-size: 22pt
+"#;
+    let template = parse_template(source).expect("template");
+
+    let mut doc = document();
+    let mut h1 = Heading::new(
+        NodeMeta::synthesized(),
+        1,
+        vec![Inline::Text(Text::new(NodeMeta::synthesized(), "A"))],
+    );
+    h1.meta.id = soma_doc::NodeId::new(900);
+    let h2 = {
+        let mut heading = Heading::new(
+            NodeMeta::synthesized(),
+            2,
+            vec![Inline::Text(Text::new(NodeMeta::synthesized(), "B"))],
+        );
+        heading.meta.id = soma_doc::NodeId::new(901);
+        heading
+    };
+    doc.blocks = vec![Block::Heading(h1), Block::Heading(h2)];
+    doc.renumber();
+
+    let styled = resolve(&doc, &template).expect("resolve");
+    let ids: Vec<soma_doc::NodeId> = doc.blocks.iter().map(|block| block.meta().id).collect();
+    let styles: Vec<i32> = ids
+        .iter()
+        .map(|id| {
+            let style_id = styled.style_of(*id).expect("style");
+            styled.table().get(style_id).expect("computed").font_size.0
+        })
+        .collect();
+
+    // 22pt and 16pt against a 10.5pt body: 1em = 4096 units.
+    assert_eq!(styles[0], 8582, "level 1 keeps the 22pt rule");
+    assert_eq!(styles[1], 6241, "level 2 keeps the 16pt rule");
+    assert!(styles[0] > styles[1]);
+}

@@ -15,7 +15,7 @@ use crate::units::{LengthSpec, LineHeightSpec, Rational};
 use crate::StyleHash;
 use crate::TemplateHash;
 
-pub(crate) const STYLE_SCHEMA: &str = "soma.styles/4";
+pub(crate) const STYLE_SCHEMA: &str = "soma.styles/6";
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -102,7 +102,9 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
     write_opt_string(out, template.page.folio.as_deref())?;
     out.write_str(",\"startMaster\":")?;
     write_opt_string(out, template.page.start_master.as_deref())?;
-    out.write_char('}')?;
+    out.write_str(",\"frontMatter\":\"")?;
+    out.write_str(template.page.front_matter.as_str())?;
+    out.write_str("\"}")?;
 
     out.write_str(",\"footnote\":{\"numbering\":\"")?;
     out.write_str(template.footnote.numbering.as_str())?;
@@ -110,11 +112,7 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
 
     out.write_str(",\"toc\":")?;
     match &template.toc {
-        Some(toc) => {
-            write!(out, "{{\"depth\":{},\"title\":", toc.depth)?;
-            write_opt_string(out, toc.title.as_deref())?;
-            out.write_char('}')?;
-        }
+        Some(toc) => write_toc(out, toc)?,
         None => out.write_str("null")?,
     }
 
@@ -127,6 +125,7 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
         }
         None => out.write_str("null")?,
     }
+    write_numbering(out, &template.numbering)?;
 
     out.write_str(",\"table\":{\"ruleWidth\":")?;
     write_length_object(out, template.table.rule)?;
@@ -204,7 +203,25 @@ fn write_selector(out: &mut impl Write, selector: &Selector) -> fmt::Result {
     out.write_str("]")?;
     out.write_str(",\"within\":")?;
     write_opt_string(out, selector.within.as_deref())?;
+    out.write_str(",\"level\":")?;
+    match selector.level {
+        Some(level) => write!(out, "{level}")?,
+        None => out.write_str("null")?,
+    }
     out.write_str("}")
+}
+
+fn write_numbering(out: &mut impl Write, spec: &crate::template::NumberingSpec) -> fmt::Result {
+    write!(
+        out,
+        ",\"numbering\":{{\"headings\":\"{}\",\"depth\":{},\"figures\":",
+        spec.headings.as_str(),
+        spec.depth
+    )?;
+    write_opt_string(out, spec.figures.as_deref())?;
+    out.write_str(",\"tables\":")?;
+    write_opt_string(out, spec.tables.as_deref())?;
+    out.write_char('}')
 }
 
 fn write_declaration(out: &mut impl Write, declaration: &Declaration) -> fmt::Result {
@@ -300,6 +317,9 @@ fn write_style(out: &mut impl Write, styled: &StyledDoc) -> fmt::Result {
         Some(index) => write!(out, "{index}")?,
         None => out.write_str("null")?,
     }
+    out.write_str(",\"frontMatter\":\"")?;
+    out.write_str(styled.front_matter().as_str())?;
+    out.write_char('"')?;
 
     out.write_str(",\"footnote\":{\"numbering\":\"")?;
     out.write_str(styled.footnote_numbering().as_str())?;
@@ -307,11 +327,7 @@ fn write_style(out: &mut impl Write, styled: &StyledDoc) -> fmt::Result {
 
     out.write_str(",\"toc\":")?;
     match styled.toc() {
-        Some(toc) => {
-            write!(out, "{{\"depth\":{},\"title\":", toc.depth)?;
-            write_opt_string(out, toc.title.as_deref())?;
-            out.write_char('}')?;
-        }
+        Some(toc) => write_toc(out, toc)?,
         None => out.write_str("null")?,
     }
 
@@ -324,6 +340,7 @@ fn write_style(out: &mut impl Write, styled: &StyledDoc) -> fmt::Result {
         }
         None => out.write_str("null")?,
     }
+    write_numbering(out, styled.numbering())?;
 
     out.write_str(",\"masters\":[")?;
     for (index, master) in styled.masters().iter().enumerate() {
@@ -442,6 +459,16 @@ fn write_opt_string(out: &mut impl Write, value: Option<&str>) -> fmt::Result {
         Some(value) => write_string(out, value),
         None => out.write_str("null"),
     }
+}
+
+fn write_toc(out: &mut impl Write, toc: &crate::template::TocSpec) -> fmt::Result {
+    write!(out, "{{\"depth\":{},\"title\":", toc.depth)?;
+    write_opt_string(out, toc.title.as_deref())?;
+    write!(out, ",\"leaders\":{},\"figures\":", toc.leaders)?;
+    write_opt_string(out, toc.figures.as_deref())?;
+    out.write_str(",\"tables\":")?;
+    write_opt_string(out, toc.tables.as_deref())?;
+    out.write_char('}')
 }
 
 fn write_string(out: &mut impl Write, value: &str) -> fmt::Result {

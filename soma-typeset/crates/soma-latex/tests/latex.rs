@@ -158,7 +158,54 @@ fn tabular_becomes_a_header_table() {
     assert_eq!(table.rows.len(), 3);
     assert!(table.rows[0].header);
     assert!(!table.rows[1].header);
-    assert_eq!(table.rows[1].cells.len(), 3);
+    // `\midrule` is eight bytes including the backslash: nothing of the
+    // command may leak into the first body cell.
+    let first_cell = &table.rows[1].cells[0];
+    let Block::Paragraph(paragraph) = &first_cell.blocks[0] else {
+        panic!("cell paragraph");
+    };
+    assert_eq!(inline_text(&paragraph.inlines), "合计");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn a_table_environment_attaches_its_caption() {
+    let source = r#"\begin{table}
+\caption{参数表}
+\begin{tabular}{ll}
+甲 & 乙 \\
+1 & 2 \\
+\end{tabular}
+\end{table}"#;
+    let document = parse_latex(source);
+    let Block::Table(table) = &document.blocks[0] else {
+        panic!("table");
+    };
+    assert_eq!(table.columns.len(), 2);
+    assert_eq!(inline_text(&table.caption), "参数表");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn a_figure_environment_becomes_a_figure_with_a_caption() {
+    let source = r#"\begin{figure}
+\centering
+\includegraphics[width=0.6\linewidth]{fig/arch.pdf}
+\caption{架构图}
+\end{figure}"#;
+    let document = parse_latex(source);
+    let Block::Figure(figure) = &document.blocks[0] else {
+        panic!("figure");
+    };
+    assert_eq!(figure.image.source.src, "fig/arch.pdf");
+    assert_eq!(inline_text(&figure.caption), "架构图");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn a_figure_without_a_path_is_dropped() {
+    let document = parse_latex("\\begin{figure}\\caption{无图}\\end{figure}");
+    assert!(document.blocks.is_empty());
     document.validate().expect("valid DocIR");
 }
 

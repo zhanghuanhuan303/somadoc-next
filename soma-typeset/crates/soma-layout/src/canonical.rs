@@ -9,7 +9,7 @@ use core::fmt::{self, Write};
 
 use crate::PagedLayout;
 
-pub(crate) const SCHEMA: &str = "soma.pages/7";
+pub(crate) const SCHEMA: &str = "soma.pages/8";
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -81,6 +81,8 @@ fn write_layout(out: &mut impl Write, layout: &PagedLayout) -> fmt::Result {
             out.write_char(',')?;
         }
         write!(out, "{{\"number\":{}", page.number)?;
+        out.write_str(",\"printed\":")?;
+        write_string(out, &page.printed)?;
         write!(out, ",\"usedHeight\":{}", page.used_height.0)?;
         write!(out, ",\"footnoteHeight\":{}", page.footnote_height.0)?;
         write!(out, ",\"overflow\":{}", page.overflow)?;
@@ -120,8 +122,8 @@ fn write_layout(out: &mut impl Write, layout: &PagedLayout) -> fmt::Result {
         None => out.write_str("null")?,
         Some(toc) => write!(
             out,
-            "{{\"passes\":{},\"stable\":{},\"entries\":{}}}",
-            toc.passes, toc.stable, toc.entries
+            "{{\"passes\":{},\"stable\":{},\"entries\":{},\"figures\":{},\"tables\":{}}}",
+            toc.passes, toc.stable, toc.entries, toc.figures, toc.tables
         )?,
     }
     out.write_char('}')

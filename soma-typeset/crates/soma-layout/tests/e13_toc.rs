@@ -154,7 +154,10 @@ fn toc_depth_filters_heading_levels() {
 #[test]
 fn each_toc_row_is_one_flow_item_with_title_and_number() {
     let blocks = vec![heading(1, "第一节"), paragraph("正文。")];
-    let layout = build(blocks, &with_toc("toc:\n  depth: 2\n  title: 目录\n"));
+    let layout = build(
+        blocks,
+        &with_toc("toc:\n  depth: 2\n  title: 目录\n  leaders: false\n"),
+    );
 
     // Page 1 holds: TOC title, the entry (title box + number box).
     let rows: Vec<_> = layout.pages[0]
@@ -238,6 +241,113 @@ fn toc_entries_use_the_toc_style() {
         entry_height.0,
         body_height.0
     );
+}
+
+#[test]
+fn leaders_fill_the_gap_between_the_title_and_the_page_number() {
+    let blocks = vec![heading(1, "第一章"), paragraph("正文。")];
+    let layout = build(blocks, &with_toc("toc:\n  depth: 1\n  title: 目录\n"));
+    let rows: Vec<_> = layout.pages[0]
+        .blocks
+        .iter()
+        .filter(|block| block.kind == BoxKind::Paragraph)
+        .collect();
+
+    assert_eq!(rows.len(), 4, "title + entry title + leaders + page number");
+    let leaders = block_text(&layout, rows[2]);
+    assert!(!leaders.is_empty(), "the gap holds leaders");
+    assert!(
+        leaders.chars().all(|character| character == '·'),
+        "leaders are dot runs: {leaders:?}"
+    );
+    assert!(
+        rows[2].x.0 > rows[1].x.0,
+        "leaders start after the entry title"
+    );
+    assert!(
+        rows[2].x.0 + rows[2].width.0 <= rows[3].x.0,
+        "leaders stop before the page number ({} + {} <= {})",
+        rows[2].x.0,
+        rows[2].width.0,
+        rows[3].x.0
+    );
+}
+
+#[test]
+fn leaders_can_be_turned_off() {
+    let blocks = vec![heading(1, "第一章"), paragraph("正文。")];
+    let layout = build(
+        blocks,
+        &with_toc("toc:\n  depth: 1\n  title: 目录\n  leaders: false\n"),
+    );
+    let rows: Vec<_> = layout.pages[0]
+        .blocks
+        .iter()
+        .filter(|block| block.kind == BoxKind::Paragraph)
+        .collect();
+
+    assert_eq!(rows.len(), 3, "title + entry title + page number");
+}
+
+#[test]
+fn figure_and_table_lists_follow_the_chapter_entries() {
+    let figure = sample_figure("架构");
+    let table = sample_table("参数");
+    let blocks = vec![heading(1, "第一章"), paragraph("正文。"), figure, table];
+    let layout = build(
+        blocks,
+        &with_toc(
+            "toc:\n  depth: 1\n  title: 目录\n  leaders: false\n  figures: 图目录\n  tables: 表目录\n",
+        ),
+    );
+    let report = layout.toc.as_ref().expect("toc report");
+
+    assert_eq!(report.figures, 1);
+    assert_eq!(report.tables, 1);
+    let text = (0..layout.pages.len())
+        .map(|index| page_text(&layout, index))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let chapter = text.find("第一章").expect("chapter entry");
+    let figures = text.find("图目录").expect("figure list title");
+    let tables = text.find("表目录").expect("table list title");
+    assert!(chapter < figures && figures < tables, "{text}");
+    assert!(
+        text[figures..].contains("架构"),
+        "the figure list holds the caption: {text}"
+    );
+    assert!(
+        text[tables..].contains("参数"),
+        "the table list holds the caption: {text}"
+    );
+}
+
+fn sample_figure(caption: &str) -> Block {
+    let mut figure = soma_doc::block::Figure::new(
+        NodeMeta::synthesized(),
+        soma_doc::inline::Image::new(
+            NodeMeta::synthesized(),
+            soma_doc::meta::ImageRef::new("figure.png").with_intrinsic(40, 20),
+        ),
+    );
+    figure.caption = vec![text(caption)];
+    Block::Figure(figure)
+}
+
+fn sample_table(caption: &str) -> Block {
+    use soma_doc::block::{Cell, Column, Row, Table};
+    let columns = vec![Column::new(
+        NodeMeta::synthesized(),
+        soma_doc::CellAlign::Left,
+    )];
+    let row = Row::new(
+        NodeMeta::synthesized(),
+        false,
+        vec![Cell::new(NodeMeta::synthesized(), vec![paragraph("单元")])],
+    );
+    let mut table = Table::new(NodeMeta::synthesized(), columns, vec![row]);
+    table.caption = vec![text(caption)];
+    Block::Table(table)
 }
 
 #[test]

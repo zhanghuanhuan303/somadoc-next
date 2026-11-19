@@ -14,7 +14,7 @@ use crate::units::{LengthSpec, LineHeightSpec, Rational, Unit};
 use crate::yaml::{Key, Value, ValueKind};
 use crate::TemplateError;
 
-pub const SCHEMA: &str = "soma.template/7";
+pub const SCHEMA: &str = "soma.template/8";
 
 /// Element names a selector may target. Derived from DocIR node kinds; a typo is
 /// an error instead of silently matching nothing.
@@ -74,6 +74,7 @@ pub struct Template {
     pub footnote: FootnoteSpec,
     pub toc: Option<TocSpec>,
     pub cover: Option<CoverSpec>,
+    pub numbering: NumberingSpec,
     pub table: TableSpec,
     /// Named page masters beyond the default `page:` geometry.
     pub masters: Vec<MasterSpec>,
@@ -133,6 +134,30 @@ pub struct PageSpec {
     pub folio: Option<String>,
     /// Master used for a page that begins a section (a chapter opening).
     pub start_master: Option<String>,
+    /// Page numbers before the body starts (cover, contents).
+    pub front_matter: FrontMatterNumbering,
+}
+
+/// How the pages before the body are numbered.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FrontMatterNumbering {
+    /// One arabic sequence from the first page; body numbering continues.
+    #[default]
+    Continuous,
+    /// Front matter takes lowercase roman numerals; the body restarts at 1.
+    Roman,
+    /// Front matter prints no folio; the body restarts at 1.
+    Hidden,
+}
+
+impl FrontMatterNumbering {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Continuous => "continuous",
+            Self::Roman => "roman",
+            Self::Hidden => "hidden",
+        }
+    }
 }
 
 /// Named page size or an explicit pair of lengths.
@@ -210,6 +235,59 @@ pub struct TocSpec {
     pub depth: u8,
     /// Heading above the entries; `None` prints no title.
     pub title: Option<String>,
+    /// Fill the gap between entry and page number with dot leaders.
+    pub leaders: bool,
+    /// Title of the list of figures. `None` emits no list; an empty string
+    /// emits an untitled list.
+    pub figures: Option<String>,
+    /// Title of the list of tables; same conventions as `figures`.
+    pub tables: Option<String>,
+}
+
+/// How generated numbers are written.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HeadingNumbering {
+    /// No heading numbers.
+    #[default]
+    None,
+    /// Chinese book convention: 第一章 / 第一节 / 一、
+    ChineseChapter,
+    /// Technical convention: 1 / 1.2 / 1.2.3
+    ArabicDotted,
+}
+
+impl HeadingNumbering {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::ChineseChapter => "chinese-chapter",
+            Self::ArabicDotted => "arabic-dotted",
+        }
+    }
+}
+
+/// Automatic numbering. Numbers are content, not presentation: the layout owns
+/// the counters, the template chooses the scheme and the labels.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NumberingSpec {
+    pub headings: HeadingNumbering,
+    /// Deepest heading level that gets a number (`1..=3`).
+    pub depth: u8,
+    /// Figure caption pattern with `{n}`, e.g. `图 {n}`. `None` = no numbers.
+    pub figures: Option<String>,
+    /// Table caption pattern with `{n}`.
+    pub tables: Option<String>,
+}
+
+impl Default for NumberingSpec {
+    fn default() -> Self {
+        Self {
+            headings: HeadingNumbering::None,
+            depth: 3,
+            figures: None,
+            tables: None,
+        }
+    }
 }
 
 /// Cover page settings. The *content* comes from the document metadata; the
@@ -321,6 +399,8 @@ pub struct Selector {
     pub role: Option<String>,
     pub classes: Vec<String>,
     pub within: Option<String>,
+    /// Heading/section level (`1..=9`). Only matches `heading` and `section`.
+    pub level: Option<u8>,
 }
 
 impl Selector {
@@ -330,6 +410,7 @@ impl Selector {
         role: Option<&str>,
         classes: &[&str],
         ancestors: &[&str],
+        level: Option<u8>,
     ) -> bool {
         if let Some(expected) = &self.element {
             if expected != element {
@@ -338,6 +419,11 @@ impl Selector {
         }
         if let Some(expected) = &self.role {
             if role != Some(expected.as_str()) {
+                return false;
+            }
+        }
+        if let Some(expected) = self.level {
+            if level != Some(expected) {
                 return false;
             }
         }
@@ -355,7 +441,9 @@ impl Selector {
     pub(crate) fn specificity(&self) -> (u32, u32, u32) {
         (
             self.classes.len() as u32,
-            if self.role.is_some() { 1 } else { 0 } + if self.within.is_some() { 1 } else { 0 },
+            (if self.role.is_some() { 1 } else { 0 })
+                + (if self.within.is_some() { 1 } else { 0 })
+                + (if self.level.is_some() { 1 } else { 0 }),
             if self.element.is_some() { 1 } else { 0 },
         )
     }
@@ -501,7 +589,16 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
     let root = crate::yaml::parse(source)?;
     let fields = Fields::new(&root, "")?;
     fields.reject_unknown(&[
-        "name", "version", "page", "footnote", "toc", "cover", "table", "masters", "styles",
+        "name",
+        "version",
+        "page",
+        "footnote",
+        "toc",
+        "cover",
+        "numbering",
+        "table",
+        "masters",
+        "styles",
     ])?;
 
     let name = fields.require_str("name")?;
@@ -516,6 +613,10 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
     let toc = match fields.optional("toc") {
         Some(value) if !value.is_null() => Some(parse_toc(value, "toc")?),
         _ => None,
+    };
+    let numbering = match fields.optional("numbering") {
+        Some(value) if !value.is_null() => parse_numbering(value, "numbering")?,
+        _ => NumberingSpec::default(),
     };
     let cover = match fields.optional("cover") {
         Some(value) if !value.is_null() => Some(parse_cover(value, "cover")?),
@@ -545,6 +646,7 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
         footnote,
         toc,
         cover,
+        numbering,
         table,
         masters,
         styles,
@@ -627,6 +729,7 @@ fn parse_page(value: &Value, path: &str) -> Result<PageSpec, TemplateError> {
         "header-text",
         "folio",
         "start-master",
+        "front-matter",
     ])?;
 
     let size_text = fields.require_str("size")?;
@@ -693,6 +796,14 @@ fn parse_page(value: &Value, path: &str) -> Result<PageSpec, TemplateError> {
     let header_text = fields.optional_str("header-text")?;
     let folio = fields.optional_str("folio")?;
     let start_master = fields.optional_str("start-master")?;
+    let front_matter = match fields.optional_str("front-matter")?.as_deref() {
+        None | Some("continuous") => FrontMatterNumbering::Continuous,
+        Some("roman") => FrontMatterNumbering::Roman,
+        Some("hidden") => FrontMatterNumbering::Hidden,
+        Some(_) => {
+            return Err(fields.error("page.front-matter must be continuous, roman, or hidden"))
+        }
+    };
 
     Ok(PageSpec {
         size,
@@ -705,6 +816,55 @@ fn parse_page(value: &Value, path: &str) -> Result<PageSpec, TemplateError> {
         header_text,
         folio,
         start_master,
+        front_matter,
+    })
+}
+
+fn parse_numbering(value: &Value, path: &str) -> Result<NumberingSpec, TemplateError> {
+    let fields = Fields::new(value, path)?;
+    fields.reject_unknown(&["headings", "depth", "figures", "tables"])?;
+
+    let headings = match fields.optional_str("headings")?.as_deref() {
+        None | Some("none") => HeadingNumbering::None,
+        Some("chinese-chapter") => HeadingNumbering::ChineseChapter,
+        Some("arabic-dotted") => HeadingNumbering::ArabicDotted,
+        Some(_) => {
+            return Err(
+                fields.error("numbering.headings must be none, chinese-chapter, or arabic-dotted")
+            )
+        }
+    };
+
+    let depth = match fields.optional("depth") {
+        None => 3,
+        Some(value) => {
+            let text = value.as_str("numbering.depth")?;
+            let depth = text
+                .parse::<u8>()
+                .map_err(|_| fields.error("numbering.depth must be 1, 2, or 3"))?;
+            if !(1..=3).contains(&depth) {
+                return Err(fields.error("numbering.depth must be 1, 2, or 3"));
+            }
+            depth
+        }
+    };
+
+    let label = |name: &str| -> Result<Option<String>, TemplateError> {
+        let text = match fields.optional_str(name)? {
+            Some(text) => text,
+            None => return Ok(None),
+        };
+        if !text.contains("{n}") {
+            return Err(fields.error("numbering label must contain {n}"));
+        }
+        Ok(Some(text))
+    };
+
+    Ok(NumberingSpec {
+        headings,
+        depth,
+        figures: label("figures")?,
+        tables: label("tables")?,
     })
 }
 
@@ -717,7 +877,7 @@ fn parse_cover(value: &Value, path: &str) -> Result<CoverSpec, TemplateError> {
 
 fn parse_toc(value: &Value, path: &str) -> Result<TocSpec, TemplateError> {
     let fields = Fields::new(value, path)?;
-    fields.reject_unknown(&["depth", "title"])?;
+    fields.reject_unknown(&["depth", "title", "leaders", "figures", "tables"])?;
     let depth = match fields.optional("depth") {
         Some(value) => {
             let text = value.as_str("toc.depth")?;
@@ -732,7 +892,20 @@ fn parse_toc(value: &Value, path: &str) -> Result<TocSpec, TemplateError> {
         None => 2,
     };
     let title = fields.optional_str("title")?;
-    Ok(TocSpec { depth, title })
+    let leaders = match fields.optional_str("leaders")?.as_deref() {
+        None | Some("true") | Some("yes") => true,
+        Some("false") | Some("no") => false,
+        Some(_) => return Err(fields.error("toc leaders must be true or false")),
+    };
+    let figures = fields.optional_text("figures")?;
+    let tables = fields.optional_text("tables")?;
+    Ok(TocSpec {
+        depth,
+        title,
+        leaders,
+        figures,
+        tables,
+    })
 }
 
 fn parse_footnote(value: &Value, path: &str) -> Result<FootnoteSpec, TemplateError> {
@@ -874,7 +1047,7 @@ fn parse_rule(value: &Value, index: usize) -> Result<StyleRule, TemplateError> {
 
 fn parse_selector(value: &Value, path: &str) -> Result<Selector, TemplateError> {
     let fields = Fields::new(value, path)?;
-    fields.reject_unknown(&["element", "role", "class", "classes", "within"])?;
+    fields.reject_unknown(&["element", "role", "class", "classes", "within", "level"])?;
 
     let element = fields.optional_str("element")?;
     if let Some(element) = &element {
@@ -913,8 +1086,22 @@ fn parse_selector(value: &Value, path: &str) -> Result<Selector, TemplateError> 
         }
     }
 
-    if element.is_none() && role.is_none() && classes.is_empty() {
-        return Err(fields.error("selector must name an element, role, or class"));
+    let level = match fields.optional("level") {
+        None => None,
+        Some(value) => {
+            let text = value.as_str(path)?;
+            let level = text
+                .parse::<u8>()
+                .map_err(|_| fields.error("level must be a number from 1 to 9"))?;
+            if !(1..=9).contains(&level) {
+                return Err(fields.error("level must be a number from 1 to 9"));
+            }
+            Some(level)
+        }
+    };
+
+    if element.is_none() && role.is_none() && classes.is_empty() && level.is_none() {
+        return Err(fields.error("selector must name an element, role, class, or level"));
     }
 
     Ok(Selector {
@@ -922,6 +1109,7 @@ fn parse_selector(value: &Value, path: &str) -> Result<Selector, TemplateError> 
         role,
         classes,
         within,
+        level,
     })
 }
 
@@ -1105,6 +1293,16 @@ impl<'a> Fields<'a> {
             return Err(value.error(self.path, "value must not be empty"));
         }
         Ok(text)
+    }
+
+    /// Like [`Self::optional_str`] but tolerates an empty string, which some
+    /// fields use as "present but untitled".
+    fn optional_text(&self, name: &str) -> Result<Option<String>, TemplateError> {
+        match self.optional(name) {
+            None => Ok(None),
+            Some(value) if value.is_null() => Ok(None),
+            Some(value) => Ok(Some(value.as_str(self.path)?)),
+        }
     }
 
     fn optional_str(&self, name: &str) -> Result<Option<String>, TemplateError> {

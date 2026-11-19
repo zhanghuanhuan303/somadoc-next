@@ -26,12 +26,12 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use soma_doc::block::{
-    BlockQuote, Cell, CodeBlock, Column, Heading, List, ListItem, MathBlock, PageBreak, Paragraph,
-    Row, Table,
+    BlockQuote, Cell, CodeBlock, Column, Figure, Heading, List, ListItem, MathBlock, PageBreak,
+    Paragraph, Row, Table,
 };
 use soma_doc::inline::FootnoteRef;
-use soma_doc::inline::{Container, Inline, LineBreak, LineBreakKind, Link, MathInline};
-use soma_doc::meta::{Author, CoverData, Date, DocumentMeta};
+use soma_doc::inline::{Container, Image, Inline, LineBreak, LineBreakKind, Link, MathInline};
+use soma_doc::meta::{Author, CoverData, Date, DocumentMeta, ImageRef};
 use soma_doc::node::NodeMeta;
 use soma_doc::{Block, Code, Document, FootnoteDef, Text};
 
@@ -140,6 +140,94 @@ fn preamble_group<'a>(source: &'a str, command: &str) -> Option<&'a str> {
             index += 1;
         }
         if index < bytes.len() && bytes[index] == b'{' {
+            let mut depth = 0usize;
+            let mut cursor = index;
+            while cursor < bytes.len() {
+                match bytes[cursor] {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some(&source[index + 1..cursor]);
+                        }
+                    }
+                    _ => {}
+                }
+                cursor += 1;
+            }
+        }
+        search = start;
+    }
+    None
+}
+
+/// Byte range (including the command and braces) and body of
+/// `\command{...}`, so a caller can remove the whole command from a body.
+fn command_group_span<'a>(source: &'a str, command: &str) -> Option<(usize, usize, &'a str)> {
+    let needle = alloc::format!("\\{command}");
+    let mut search = 0usize;
+    while let Some(offset) = source[search..].find(&needle) {
+        let start = search + offset;
+        let bytes = source.as_bytes();
+        let mut index = start + needle.len();
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if bytes.get(index) == Some(&b'{') {
+            let mut depth = 0usize;
+            let mut cursor = index;
+            while cursor < bytes.len() {
+                match bytes[cursor] {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some((start, cursor + 1, &source[index + 1..cursor]));
+                        }
+                    }
+                    _ => {}
+                }
+                cursor += 1;
+            }
+        }
+        search = start + needle.len();
+    }
+    None
+}
+
+/// Split a float body into its caption text and the body without the
+/// `\caption{...}` command.
+fn split_caption(body: &str) -> (Option<String>, String) {
+    match command_group_span(body, "caption") {
+        Some((start, end, text)) => (
+            Some(String::from(text)),
+            alloc::format!("{}{}", &body[..start], &body[end..]),
+        ),
+        None => (None, String::from(body)),
+    }
+}
+
+/// The path argument of `\includegraphics[options]{path}`.
+fn graphics_path(source: &str) -> Option<&str> {
+    let needle = "\\includegraphics";
+    let mut search = 0usize;
+    while let Some(offset) = source[search..].find(needle) {
+        let start = search + offset + needle.len();
+        let bytes = source.as_bytes();
+        let mut index = start;
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if bytes.get(index) == Some(&b'[') {
+            while index < bytes.len() && bytes[index] != b']' {
+                index += 1;
+            }
+            index += 1;
+            while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+                index += 1;
+            }
+        }
+        if bytes.get(index) == Some(&b'{') {
             let mut depth = 0usize;
             let mut cursor = index;
             while cursor < bytes.len() {
@@ -616,6 +704,39 @@ impl<'a> Parser<'a> {
                 self.pos = end;
                 self.parse_tabular(value).into_iter().collect()
             }
+            "table" | "table*" => {
+                let raw = self.environment_body(&env);
+                let (caption, body) = split_caption(&raw);
+                let mut parser = Parser::new(&body);
+                let mut blocks = parser.parse_blocks(None, false);
+                self.footnotes
+                    .extend(core::mem::take(&mut parser.footnotes));
+                if let Some(caption) = caption {
+                    let inlines = self.caption_inlines(&caption);
+                    if let Some(Block::Table(table)) = blocks
+                        .iter_mut()
+                        .find(|block| matches!(block, Block::Table(_)))
+                    {
+                        table.caption = inlines;
+                    }
+                }
+                blocks
+            }
+            "figure" | "figure*" => {
+                let raw = self.environment_body(&env);
+                let (caption, body) = split_caption(&raw);
+                let Some(path) = graphics_path(&body) else {
+                    return Some(Vec::new());
+                };
+                let mut figure = Figure::new(
+                    NodeMeta::synthesized(),
+                    Image::new(NodeMeta::synthesized(), ImageRef::new(path)),
+                );
+                if let Some(caption) = caption {
+                    figure.caption = self.caption_inlines(&caption);
+                }
+                vec![Block::Figure(figure)]
+            }
             "equation" | "equation*" | "displaymath" | "math" => {
                 let rest = &self.input[self.pos..];
                 let marker = alloc::format!("\\end{{{env}}}");
@@ -643,6 +764,28 @@ impl<'a> Parser<'a> {
         if self.starts(&marker) {
             self.pos += marker.len();
         }
+    }
+
+    /// Consume the rest of the current environment and return its body.
+    fn environment_body(&mut self, env: &str) -> String {
+        let rest = &self.input[self.pos..];
+        let marker = alloc::format!("\\end{{{env}}}");
+        let (body, end) = match rest.find(&marker) {
+            Some(offset) => (&rest[..offset], self.pos + offset + marker.len()),
+            None => (rest, self.input.len()),
+        };
+        self.pos = end;
+        String::from(body)
+    }
+
+    /// Parse a caption body as inline content, lifting any footnotes into the
+    /// document.
+    fn caption_inlines(&mut self, source: &str) -> Vec<Inline> {
+        let mut parser = Parser::new(source);
+        let inlines = parser.parse_inlines(false);
+        self.footnotes
+            .extend(core::mem::take(&mut parser.footnotes));
+        inlines
     }
 
     fn parse_items(&mut self, env: &str) -> Vec<ListItem> {
@@ -720,7 +863,7 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 if rest.starts_with("midrule") {
-                    index += 7;
+                    index += 8;
                     if saw_row && header_end.is_none() {
                         header_end = Some(rows.len());
                     }

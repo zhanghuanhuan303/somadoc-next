@@ -243,6 +243,10 @@ pub struct StyledDoc {
     toc: Option<crate::template::TocSpec>,
     /// Cover settings, when the template asks for a cover page.
     cover: Option<crate::template::CoverSpec>,
+    /// Automatic numbering scheme.
+    numbering: crate::template::NumberingSpec,
+    /// Numbering of the pages before the body.
+    front_matter: crate::template::FrontMatterNumbering,
     /// Style for TOC entries (`element: toc`).
     toc_style: StyleId,
     /// Style for the TOC heading (`element: tocTitle`).
@@ -332,6 +336,16 @@ impl StyledDoc {
         self.cover.as_ref()
     }
 
+    /// Automatic numbering scheme.
+    pub fn numbering(&self) -> &crate::template::NumberingSpec {
+        &self.numbering
+    }
+
+    /// Numbering of the pages before the body.
+    pub fn front_matter(&self) -> crate::template::FrontMatterNumbering {
+        self.front_matter
+    }
+
     /// Styles of the generated cover lines.
     pub fn cover_styles(&self) -> CoverStyles {
         self.cover_styles
@@ -375,7 +389,7 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         node_style: Vec::new(),
     };
 
-    let root = resolver.compute("document", None, &[], ComputedStyle::base(), &[])?;
+    let root = resolver.compute("document", None, &[], None, ComputedStyle::base(), &[])?;
     resolver.table.intern(root.clone());
 
     let mut ancestors: Vec<&'static str> = Vec::new();
@@ -388,6 +402,7 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
             "footnote",
             definition.meta.attrs.role.as_deref(),
             &class_refs(&definition.meta.attrs.classes),
+            None,
             ComputedStyle::inherited_from(&root),
             &ancestors,
         )?;
@@ -467,8 +482,14 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
 
     // Generated content needs styles that no DocIR node carries: TOC entries
     // and the TOC heading. They inherit the document style.
-    let toc_style =
-        resolver.compute("toc", None, &[], ComputedStyle::inherited_from(&root), &[])?;
+    let toc_style = resolver.compute(
+        "toc",
+        None,
+        &[],
+        None,
+        ComputedStyle::inherited_from(&root),
+        &[],
+    )?;
     let toc_style_id = resolver.table.intern(toc_style);
     let cover_styles = CoverStyles {
         title: intern_element(&mut resolver, "coverTitle", &root)?,
@@ -480,6 +501,7 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         "tocTitle",
         None,
         &[],
+        None,
         ComputedStyle::inherited_from(&root),
         &[],
     )?;
@@ -516,6 +538,8 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         footnote: template.footnote.numbering,
         toc: template.toc.clone(),
         cover: template.cover.clone(),
+        numbering: template.numbering.clone(),
+        front_matter: template.page.front_matter,
         toc_style: toc_style_id,
         toc_title_style: toc_title_style_id,
         cover_styles,
@@ -539,13 +563,29 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
     })
 }
 
+/// Heading and section nodes carry a level selectors can match.
+fn block_level(block: &Block) -> Option<u8> {
+    match block {
+        Block::Heading(heading) => Some(heading.level),
+        Block::Section(section) => Some(section.level),
+        _ => None,
+    }
+}
+
 /// Resolve and intern one generated element style.
 fn intern_element(
     resolver: &mut Resolver<'_>,
     element: &str,
     root: &ComputedStyle,
 ) -> Result<StyleId, TemplateError> {
-    let style = resolver.compute(element, None, &[], ComputedStyle::inherited_from(root), &[])?;
+    let style = resolver.compute(
+        element,
+        None,
+        &[],
+        None,
+        ComputedStyle::inherited_from(root),
+        &[],
+    )?;
     Ok(resolver.table.intern(style))
 }
 
@@ -570,6 +610,7 @@ impl Resolver<'_> {
                 element,
                 meta.attrs.role.as_deref(),
                 &class_refs(&meta.attrs.classes),
+                block_level(block),
                 ComputedStyle::inherited_from(parent),
                 ancestors,
             )?;
@@ -598,6 +639,7 @@ impl Resolver<'_> {
                         "listItem",
                         meta.attrs.role.as_deref(),
                         &class_refs(&meta.attrs.classes),
+                        None,
                         ComputedStyle::inherited_from(style),
                         ancestors,
                     )?;
@@ -616,6 +658,7 @@ impl Resolver<'_> {
                     "image",
                     meta.attrs.role.as_deref(),
                     &class_refs(&meta.attrs.classes),
+                    None,
                     ComputedStyle::inherited_from(style),
                     ancestors,
                 )?;
@@ -630,6 +673,7 @@ impl Resolver<'_> {
                         "column",
                         meta.attrs.role.as_deref(),
                         &class_refs(&meta.attrs.classes),
+                        None,
                         ComputedStyle::inherited_from(style),
                         ancestors,
                     )?;
@@ -643,6 +687,7 @@ impl Resolver<'_> {
                         "row",
                         meta.attrs.role.as_deref(),
                         &class_refs(&meta.attrs.classes),
+                        None,
                         ComputedStyle::inherited_from(style),
                         ancestors,
                     )?;
@@ -655,6 +700,7 @@ impl Resolver<'_> {
                             "cell",
                             cell_meta.attrs.role.as_deref(),
                             &class_refs(&cell_meta.attrs.classes),
+                            None,
                             ComputedStyle::inherited_from(&row_style),
                             ancestors,
                         )?;
@@ -696,6 +742,7 @@ impl Resolver<'_> {
                 element,
                 meta.attrs.role.as_deref(),
                 &class_refs(&meta.attrs.classes),
+                None,
                 ComputedStyle::inherited_from(parent),
                 ancestors,
             )?;
@@ -713,6 +760,7 @@ impl Resolver<'_> {
         element: &str,
         role: Option<&str>,
         classes: &[&str],
+        level: Option<u8>,
         mut style: ComputedStyle,
         ancestors: &[&str],
     ) -> Result<ComputedStyle, TemplateError> {
@@ -720,7 +768,10 @@ impl Resolver<'_> {
             .rules
             .iter()
             .enumerate()
-            .filter(|(_, rule)| rule.selector.matches(element, role, classes, ancestors))
+            .filter(|(_, rule)| {
+                rule.selector
+                    .matches(element, role, classes, ancestors, level)
+            })
             .map(|(index, rule)| (index as u32, rule.selector.specificity(), rule))
             .collect();
         matched.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));

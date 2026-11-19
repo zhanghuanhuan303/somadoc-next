@@ -62,7 +62,7 @@ fn json_is_the_canonical_page_result() {
     ]);
 
     assert!(ok, "stderr: {stderr}");
-    assert!(stdout.starts_with("{\"schema\":\"soma.pages/7\""));
+    assert!(stdout.starts_with("{\"schema\":\"soma.pages/8\""));
     assert!(stdout.ends_with("}\n"));
 }
 
@@ -249,12 +249,19 @@ fn the_example_book_renders_cover_contents_and_chapters() {
     ]);
 
     assert!(ok, "stderr: {stderr}");
-    // Cover page, contents page, and one page per chapter (6 chapters, one of
-    // them spilling onto a second page): 9 pages today. The assertion is a
+    // Cover page, contents page, and one page per chapter (6 chapters, two of
+    // them spilling onto a second page): 10 pages today. The assertion is a
     // range so content edits do not need a test edit.
     assert!(stdout.contains("\"toc\":{\"passes\":"), "{stdout}");
     assert!(stdout.contains("\"stable\":true"), "the TOC converged");
-    assert!(stdout.contains("\"entries\":6"), "six chapters");
+    // Six chapters plus three level-2 sections at depth 2, one figure and one
+    // table.
+    assert!(
+        stdout.contains("\"entries\":9"),
+        "six chapters + three sections"
+    );
+    assert!(stdout.contains("\"figures\":1"), "one figure in the list");
+    assert!(stdout.contains("\"tables\":1"), "one table in the list");
     assert!(!stdout.contains("\"overflow\":true"), "no page overflows");
     assert!(
         !stdout.contains("\"stage\":\"emergency\"") && !stdout.contains("\"stage\":\"overfull\""),

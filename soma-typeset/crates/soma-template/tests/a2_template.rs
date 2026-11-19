@@ -1,6 +1,9 @@
 //! A2 template parsing: YAML subset behaviour, validation, hashing.
 
-use soma_template::{parse_template, FootnoteNumbering, PageSize, Property, Unit};
+use soma_template::{
+    parse_template, FootnoteNumbering, FrontMatterNumbering, HeadingNumbering, PageSize, Property,
+    Unit,
+};
 
 const FULL: &str = r##"
 # a book template
@@ -77,7 +80,7 @@ fn canonical_json_is_stable_and_namespaced() {
     let json = template.canonical_json();
 
     assert!(
-        json.starts_with("{\"schema\":\"soma.template/7\""),
+        json.starts_with("{\"schema\":\"soma.template/8\""),
         "{json}"
     );
     assert!(json.contains("\"size\":\"A4\""));
@@ -230,12 +233,12 @@ styles:
     let error = parse_template(&source.replace("within: cell", "within: celll")).expect_err("bad");
     assert_eq!(error.reason, "unknown within selector");
     assert!(
-        !rule.selector.matches("paragraph", None, &[], &[]),
+        !rule.selector.matches("paragraph", None, &[], &[], None),
         "within: cell must not match outside a cell"
     );
     assert!(
         rule.selector
-            .matches("paragraph", None, &[], &["table", "row", "cell"]),
+            .matches("paragraph", None, &[], &["table", "row", "cell"], None),
         "within: cell matches inside a cell"
     );
 }
@@ -393,10 +396,14 @@ styles:
     let toc = template.toc.as_ref().expect("toc");
     assert_eq!(toc.depth, 3);
     assert_eq!(toc.title.as_deref(), Some("目次"));
+    assert!(toc.leaders, "leaders default to on");
+    assert!(toc.figures.is_none());
 
     let json = template.canonical_json();
     assert!(
-        json.contains("\"toc\":{\"depth\":3,\"title\":\"目次\"}"),
+        json.contains(
+            "\"toc\":{\"depth\":3,\"title\":\"目次\",\"leaders\":true,\"figures\":null,\"tables\":null}"
+        ),
         "{json}"
     );
     assert_eq!(json, template.canonical_json());
@@ -414,6 +421,92 @@ styles:
     assert!(error.reason.contains("toc depth"));
     let error = parse_template(&source.replace("depth: 3", "entries: 3")).expect_err("unknown key");
     assert!(error.reason.contains("unknown"));
+}
+
+#[test]
+fn a_toc_can_print_figure_and_table_lists_and_drop_leaders() {
+    let source = r#"
+name: toc
+page:
+  size: A4
+  margin: 20mm
+toc:
+  depth: 2
+  leaders: false
+  figures: 图目录
+  tables: 表目录
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+"#;
+    let template = parse_template(source).expect("toc parses");
+    let toc = template.toc.as_ref().expect("toc");
+
+    assert!(!toc.leaders);
+    assert_eq!(toc.figures.as_deref(), Some("图目录"));
+    assert_eq!(toc.tables.as_deref(), Some("表目录"));
+
+    // A quoted empty title still emits the list, just without a heading.
+    let untitled = parse_template(&source.replace("figures: 图目录", "figures: \"\""))
+        .expect("empty list title");
+    assert_eq!(untitled.toc.unwrap().figures.as_deref(), Some(""));
+
+    let error =
+        parse_template(&source.replace("leaders: false", "leaders: maybe")).expect_err("bad flag");
+    assert!(error.reason.contains("leaders"));
+}
+
+#[test]
+fn numbering_and_front_matter_parse_and_round_trip() {
+    let source = r#"
+name: numbered
+page:
+  size: A4
+  margin: 20mm
+  front-matter: roman
+numbering:
+  headings: chinese-chapter
+  depth: 2
+  figures: "图 {n}"
+  tables: "表 {n}"
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+"#;
+    let template = parse_template(source).expect("numbering parses");
+
+    assert_eq!(
+        template.numbering.headings,
+        HeadingNumbering::ChineseChapter
+    );
+    assert_eq!(template.numbering.depth, 2);
+    assert_eq!(template.numbering.figures.as_deref(), Some("图 {n}"));
+    assert_eq!(template.page.front_matter, FrontMatterNumbering::Roman);
+    let json = template.canonical_json();
+    assert!(
+        json.contains(
+            "\"numbering\":{\"headings\":\"chinese-chapter\",\"depth\":2,\"figures\":\"图 {n}\",\"tables\":\"表 {n}\"}"
+        ),
+        "{json}"
+    );
+    assert!(json.contains("\"frontMatter\":\"roman\""), "{json}");
+
+    let error =
+        parse_template(&source.replace("图 {n}", "图")).expect_err("a label needs the placeholder");
+    assert!(error.reason.contains("{n}"));
+    let error =
+        parse_template(&source.replace("chinese-chapter", "roman")).expect_err("unknown numbering");
+    assert!(error.reason.contains("numbering.headings"));
+    let error = parse_template(&source.replace("front-matter: roman", "front-matter: greek"))
+        .expect_err("unknown front matter");
+    assert!(error.reason.contains("front-matter"));
+    let error = parse_template(&source.replace("depth: 2", "depth: 5"))
+        .expect_err("numbering depth is bounded");
+    assert!(error.reason.contains("numbering.depth"));
 }
 
 #[test]
@@ -439,4 +532,47 @@ styles:
     assert_eq!(template.page.start_master.as_deref(), Some("plain"));
     let json = template.canonical_json();
     assert!(json.contains("\"startMaster\":\"plain\""), "{json}");
+}
+
+#[test]
+fn a_selector_can_match_a_heading_level() {
+    let source = r#"
+name: levels
+page:
+  size: A4
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+  - selector:
+      element: heading
+      level: 1
+    declarations:
+      font-size: 20pt
+  - selector:
+      element: heading
+      level: 2
+    declarations:
+      font-size: 14pt
+"#;
+    let template = parse_template(source).expect("levels parse");
+    assert_eq!(template.styles[1].selector.level, Some(1));
+    assert_eq!(template.styles[2].selector.level, Some(2));
+    let json = template.canonical_json();
+    assert!(
+        json.contains(
+            "\"element\":\"heading\",\"role\":null,\"classes\":[],\"within\":null,\"level\":1"
+        ),
+        "{json}"
+    );
+
+    let error = parse_template(&source.replace("level: 2", "level: 0")).expect_err("zero level");
+    assert!(error.reason.contains("level must be"));
+    let error = parse_template(&source.replace("level: 2", "level: x")).expect_err("not a number");
+    assert!(error.reason.contains("level must be"));
+    // A selector may be level-only.
+    let level_only = source.replace("      element: heading\n      level: 2", "      level: 2");
+    let template = parse_template(&level_only).expect("level-only selector");
+    assert!(template.styles[2].selector.element.is_none());
 }
