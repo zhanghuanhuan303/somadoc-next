@@ -14,7 +14,7 @@
 
 ```yaml
 schema: soma.engine/1          # 必需
-preset: default-v1             # 可选；目前唯一 preset
+preset: publish-v1             # 可选；publish-v1（默认）或 default-v1
 window: paragraph              # 可选；目前只实现 paragraph
 max_kp_atoms: null             # null 或 1..=10000
 fallback:                      # 可选；覆盖 default-v1
@@ -38,7 +38,7 @@ vertical:                      # 可选；覆盖 default_v1
   格式 `line:column:path:reason`。
 - 标量可裸写或加引号；引号外的 `#` 起始注释。
 - 长度只接受整数 `em`（`3em`）；这是引擎几何，不是排版单位系统。
-- `fallback` / `vertical` 的值覆盖 `default-v1`，然后交给内核的
+- `fallback` / `vertical` 的值覆盖所选 preset（默认 `publish-v1`），然后交给内核的
   `ParamSet::validate` 与垂直模型自身的范围检查。
 
 ## 2. 默认值
@@ -88,7 +88,7 @@ let json = engine.canonical_json();
 
 因为配置解析成与手写参数**相同的** `ParamSet` / `VerticalParams`，
 页面 canonical 不需要新字段：`engineHash` 与 `verticalHash` 已经标识实际生效的模型。
-一份等于 `default-v1` 的配置会产出与 `layout(...)` 逐字节相同的页面
+一份等于所选 preset 的配置会产出与手写同参数 `layout_with` 逐字节相同的页面
 （`crates/soma-engine/tests/engine.rs` 锁住这条）。
 
 ## 4. 错误示例
@@ -102,7 +102,7 @@ let json = engine.canonical_json();
 
 ## 5. 当前边界
 
-- 只有 `default-v1`；新 preset 需要新 ADR 与代码。
+- 只有 `default-v1` 与 `publish-v1`（ADR-0023）；新 preset 需要新 ADR 与代码。
 - 只有 `paragraph` 窗口；`page` / `chapter` 在配置层就被拒绝。
 - 不暴露单项权重：preset 的意义就是让文档不能漂移到未复核的代价模型。
 - 解析器是固定形状实现，不复用模板的 YAML 子集（D65）。

@@ -13,7 +13,7 @@
 //!
 //! Neither is a quality-labeled corpus. A quality claim still needs Gate Q.
 
-use soma_core::{BreakConfig, Width};
+use soma_core::{BreakConfig, ParamSet, Width};
 use soma_doc::block::Paragraph;
 use soma_doc::meta::DocumentMeta;
 use soma_doc::node::NodeMeta;
@@ -273,7 +273,7 @@ pub fn scorecard(paragraphs: usize) -> Option<Scorecard> {
     let styled = resolve(&doc, &template).ok()?;
     let table = MetricsTable::embedded();
     let metrics = StyledMetrics::new(&table, &styled);
-    let engine = BreakConfig::default();
+    let engine = BreakConfig::from_params(ParamSet::publish_v1());
     let params = VerticalParams::default_v1();
 
     let optimal = layout_with(

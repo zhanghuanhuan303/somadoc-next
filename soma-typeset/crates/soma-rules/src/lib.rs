@@ -143,7 +143,7 @@ pub const RULES: &[RuleInfo] = &[
 /// font size may scale them before building the IR; the breaker only reads the
 /// resulting widths. Values follow [`params.md`](../../../docs/params.md)
 /// section 10.3 and are still `Tbd` against a cited `clreq` table.
-pub const OPEN_TRIM_LEFT: Width = Width::from_em_frac(1, 4);
+pub const OPEN_TRIM_LEFT: Width = Width::from_em_frac(1, 2);
 pub const CLOSE_TRIM_RIGHT: Width = Width::from_em_frac(1, 2);
 pub const MIDDLE_TRIM_LEFT: Width = Width::from_em_frac(1, 2);
 pub const MIDDLE_TRIM_RIGHT: Width = Width::from_em_frac(1, 2);

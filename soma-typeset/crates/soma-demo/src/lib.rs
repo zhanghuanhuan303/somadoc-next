@@ -169,7 +169,7 @@ pub fn blind_pairs(samples: &[&str], width: Width, seed: u64) -> Result<Vec<Blin
     };
     let table = MetricsTable::embedded();
     let metrics = TableMetrics::new(&table, 0, Width::EM);
-    let config = BreakConfig::default();
+    let config = BreakConfig::from_params(soma_core::ParamSet::publish_v1());
     let mut pairs = Vec::with_capacity(samples.len());
 
     for (index, sample) in samples.iter().enumerate() {

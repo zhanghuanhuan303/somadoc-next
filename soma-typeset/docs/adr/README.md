@@ -2,7 +2,7 @@
 
 Status: **frozen on 2026-11-20** with `docs/architecture-v2.md`.
 ADR-0010 amends §15.1 (one extra crate) and fixes shapes that
-architecture v2 left open; ADR-0012…0022 extend the implemented system
+architecture v2 left open; ADR-0012…0023 extend the implemented system
 (table metrics, line-level pagination, typography, page masters, engine
 configuration, table continuation, table rules and context selectors)
 without changing the layer contract.
@@ -34,6 +34,7 @@ with the already-implemented code; they do not change the frozen inline kernel.
 | [0020](0020-table-column-rules.md) | Table column rules, cell-border grids, dashed rules, rule color | Accepted |
 | [0021](0021-page-masters.md) | Named page masters selected by sections; shared content box | Accepted |
 | [0022](0022-bold-faces.md) | Bold faces in the metrics table; weight-based face selection | Accepted |
+| [0023](0023-publish-v1.md) | Chinese publishing defaults: `publish-v1`, half-em opening trim | Accepted (provisional) |
 
 ## Rules
 

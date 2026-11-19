@@ -347,8 +347,9 @@ pub struct ParamError {
 
 Preset 是数据，不是算法分支：
 
-- `default-v1`：当前推荐起点。
-- `publish-v1`：更紧的 tolerance、更保守的 emergency（质量优先）。
+- `default-v1`：冻结的 K-P 参考（`tolerance = 3000`）。
+- `publish-v1`：**引擎默认**（ADR-0023）：`default-v1` + `tolerance = 1500`，其余权重与回退完全相同；母语出版优先。
+- ~~更保守的 emergency~~：实测没有必要，回退阶梯保持 `default-v1`。
 - `mobile-v1`：更低 `max_lines`、更少 feature（延迟优先）。
 - `debug`：启用 trace、保留所有候选统计（不用于发布）。
 
@@ -492,6 +493,10 @@ pub struct EvalParams {
 | `badness_exponent` | 3 | 1..=5 | 否（高级） | 默认 3 |
 | `break_penalty` | 100 | 0..=1e9 | 是 | `penalty=100` 时 cost=100（10 行） |
 | `compress_amount` | 20 | 0..=1e9 | 是 | 每 1 em trim；0.25em = 5 |
+
+> `publish-v1` 只改 `tolerance`（1500）；`badness_scale=100`、权重、fallback 与
+> 短末行阈值都与 `default-v1` 相同，便于对照。`rules_version = 1` 对应
+> 开标点行首 trim 从 1/4 em 改为 1/2 em（ADR-0023）。
 | `compress_count` | 5 | 0..=1e9 | 是 | 每次裁剪；0.25em 事件合计约 10 |
 | `boundary_deviation` | 50 | 0..=1e9 | 是 | 每 1 个 ideal gap 的平均偏差；满 gap = 5 行 |
 | `short_last_scale` | 1_000_000 | 0..=1e9 | 是 | 短末行；0 宽末行的 cost |

@@ -139,10 +139,10 @@ Cumulative public test files:
 | `soma-rules` unit | 15 | segmentation, punctuation, pair trim, hyphen breaks, rule inventory |
 | `soma-metrics` unit | 9 | table round-trip, CJK/Latin widths, regular/bold faces, fallback, hash, truncation |
 | `soma-core` vertical unit | 1 | vertical cost model hash |
-| core unit | 23 | IR, units, breaker, result |
+| core unit | 24 | IR, units, breaker, result, presets |
 | layout unit | 2 | trim scaling at body and non-body sizes |
 
-Total: **359 tests**.
+Total: **360 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

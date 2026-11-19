@@ -46,8 +46,9 @@ use soma_core::{BreakConfig, ParamSet, VerticalParams, Width, Window};
 /// Canonical schema id.
 pub const SCHEMA: &str = "soma.engine/1";
 
-/// The only preset implemented by this model version.
-pub const DEFAULT_PRESET: &str = "default-v1";
+/// The preset the engine ships. `default-v1` stays selectable for frozen
+/// comparisons.
+pub const DEFAULT_PRESET: &str = "publish-v1";
 
 /// A validated engine configuration.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -188,9 +189,11 @@ impl EngineConfig {
         }
 
         let preset = preset.unwrap_or_else(|| DEFAULT_PRESET.to_string());
-        if preset != DEFAULT_PRESET {
-            return Err(EngineError::new(1, 1, "preset", "unknown preset"));
-        }
+        let mut params = match preset.as_str() {
+            "default-v1" => ParamSet::default_v1(),
+            "publish-v1" => ParamSet::publish_v1(),
+            _ => return Err(EngineError::new(1, 1, "preset", "unknown preset")),
+        };
         match window.as_deref() {
             None | Some("paragraph") => {}
             Some(_) => {
@@ -203,7 +206,6 @@ impl EngineConfig {
             }
         }
 
-        let mut params = ParamSet::default_v1();
         params.break_params.max_kp_atoms = max_atoms;
         let fallback_params = &mut params.break_params.fallback;
         if let Some(value) = fallback.allow_emergency {

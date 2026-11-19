@@ -8,7 +8,7 @@ data exists.
 
 Each sample paragraph is rendered twice by the demo/participant tool:
 
-- **A** — the candidate (Knuth-Plass with `default-v1`);
+- **A** — the candidate (Knuth-Plass with `publish-v1`);
 - **B** — the baseline (Greedy-F, furthest fit).
 
 The evaluator sees the two layouts without algorithm labels and chooses A or B.

@@ -1,6 +1,6 @@
 //! `soma.engine/1` parsing, validation, canonical form, and layout wiring.
 
-use soma_core::{BreakConfig, VerticalParams};
+use soma_core::{BreakConfig, ParamSet, VerticalParams};
 use soma_doc::block::Paragraph;
 use soma_doc::meta::DocumentMeta;
 use soma_doc::node::NodeMeta;
@@ -12,7 +12,7 @@ use soma_template::{parse_template, resolve};
 
 const DEFAULTS: &str = r#"
 schema: soma.engine/1
-preset: default-v1
+preset: publish-v1
 window: paragraph
 max_kp_atoms: null
 fallback:
@@ -68,8 +68,12 @@ fn documented_defaults_match_the_built_in_preset() {
     let config = EngineConfig::parse(DEFAULTS).expect("parse");
     let built_in = BreakConfig::default();
 
-    assert_eq!(config.preset(), "default-v1");
-    assert_eq!(config.break_config().param_hash(), built_in.param_hash());
+    assert_eq!(config.preset(), "publish-v1");
+    assert_eq!(
+        config.break_config().param_hash(),
+        BreakConfig::from_params(ParamSet::publish_v1()).param_hash()
+    );
+    let _ = built_in;
     assert_eq!(config.vertical(), VerticalParams::default_v1());
     assert_eq!(config.hash(), EngineConfig::parse(DEFAULTS).unwrap().hash());
     assert!(config.canonical_json().contains(SCHEMA));
@@ -80,7 +84,7 @@ fn a_minimal_document_is_enough() {
     let config = EngineConfig::parse("schema: soma.engine/1\n").expect("parse");
     assert_eq!(
         config.break_config().param_hash(),
-        BreakConfig::default().param_hash()
+        BreakConfig::from_params(ParamSet::publish_v1()).param_hash()
     );
     assert_eq!(config.vertical(), VerticalParams::default_v1());
 }
@@ -108,7 +112,7 @@ fn overrides_change_the_relevant_hash() {
     assert!(config.vertical().widow_penalty > 10_000);
     assert_eq!(
         config.break_config().param_hash(),
-        BreakConfig::default().param_hash(),
+        BreakConfig::from_params(ParamSet::publish_v1()).param_hash(),
         "vertical knobs must not change the inline parameter hash"
     );
 
@@ -116,7 +120,7 @@ fn overrides_change_the_relevant_hash() {
     let config = EngineConfig::parse(&source).expect("parse");
     assert_ne!(
         config.break_config().param_hash(),
-        BreakConfig::default().param_hash()
+        BreakConfig::from_params(ParamSet::publish_v1()).param_hash()
     );
 
     let source = DEFAULTS.replace("max_kp_atoms: null", "max_kp_atoms: 512");
@@ -237,7 +241,7 @@ fn an_engine_config_lays_out_exactly_like_the_hand_built_parameters() {
         &doc,
         &styled,
         &metrics,
-        &BreakConfig::default(),
+        &BreakConfig::from_params(ParamSet::publish_v1()),
         PaginationStrategy::VerticalKp,
         VerticalParams::default_v1(),
     )

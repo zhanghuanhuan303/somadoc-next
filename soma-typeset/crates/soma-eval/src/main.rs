@@ -452,7 +452,7 @@ fn score_command(args: &[String]) -> ExitCode {
 
 fn corpus_command(args: &[String]) -> ExitCode {
     let dir = option(args, "--dir").unwrap_or_else(|| String::from("corpus/zh"));
-    let mut params = ParamSet::default_v1();
+    let mut params = ParamSet::publish_v1();
     if let Some(value) = option(args, "--tolerance") {
         match value.parse::<u16>() {
             Ok(value) => params.break_params.tolerance = Permille(value),

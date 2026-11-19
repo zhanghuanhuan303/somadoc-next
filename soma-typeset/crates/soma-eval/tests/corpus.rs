@@ -8,7 +8,7 @@ use soma_eval::corpus::{
 #[test]
 fn the_corpus_is_present_and_every_document_lays_out() {
     let dir = repository_dir();
-    let report = evaluate_dir(&dir, &ParamSet::default_v1()).expect("evaluate");
+    let report = evaluate_dir(&dir, &ParamSet::publish_v1()).expect("evaluate");
     assert!(
         report.documents.len() >= 5,
         "the corpus must keep its five genres"
@@ -25,22 +25,22 @@ fn the_corpus_is_present_and_every_document_lays_out() {
 #[test]
 fn corpus_evaluation_is_deterministic() {
     let dir = repository_dir();
-    let first = evaluate_dir(&dir, &ParamSet::default_v1()).expect("evaluate");
-    let second = evaluate_dir(&dir, &ParamSet::default_v1()).expect("evaluate");
+    let first = evaluate_dir(&dir, &ParamSet::publish_v1()).expect("evaluate");
+    let second = evaluate_dir(&dir, &ParamSet::publish_v1()).expect("evaluate");
     assert_eq!(first, second);
     assert_eq!(first.csv(), second.csv());
 }
 
 #[test]
 fn the_corpus_has_no_widows_or_orphans() {
-    let report = evaluate_dir(&repository_dir(), &ParamSet::default_v1()).expect("evaluate");
+    let report = evaluate_dir(&repository_dir(), &ParamSet::publish_v1()).expect("evaluate");
     assert_eq!(report.metrics.widow_violations, 0);
     assert_eq!(report.metrics.orphan_violations, 0);
 }
 
 #[test]
 fn compression_past_the_shrink_limit_is_rare() {
-    let report = evaluate_dir(&repository_dir(), &ParamSet::default_v1()).expect("evaluate");
+    let report = evaluate_dir(&repository_dir(), &ParamSet::publish_v1()).expect("evaluate");
     let budget = (report.metrics.lines / 20).max(1);
     assert!(
         report.metrics.over_compress_lines <= budget,
@@ -68,7 +68,7 @@ fn calibration_finds_a_point_without_over_compression() {
 
 #[test]
 fn the_expanded_corpus_includes_long_form_footnotes_and_a_table() {
-    let report = evaluate_all(&repository_dir(), &ParamSet::default_v1()).expect("evaluate");
+    let report = evaluate_all(&repository_dir(), &ParamSet::publish_v1()).expect("evaluate");
     let names: Vec<&str> = report
         .documents
         .iter()
@@ -156,7 +156,7 @@ fn the_math_fixture_keeps_one_box_per_formula() {
 
 #[test]
 fn the_book_fixture_is_long_and_stable() {
-    let report = evaluate_all(&repository_dir(), &ParamSet::default_v1()).expect("evaluate");
+    let report = evaluate_all(&repository_dir(), &ParamSet::publish_v1()).expect("evaluate");
     let book = report
         .documents
         .iter()
@@ -165,7 +165,7 @@ fn the_book_fixture_is_long_and_stable() {
     assert!(book.pages >= 15, "book has {} pages", book.pages);
     assert!(book.metrics.lines > 300);
 
-    let again = evaluate_all(&repository_dir(), &ParamSet::default_v1()).expect("evaluate");
+    let again = evaluate_all(&repository_dir(), &ParamSet::publish_v1()).expect("evaluate");
     let second = again
         .documents
         .iter()

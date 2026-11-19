@@ -137,9 +137,12 @@ fn leading_open_bracket_is_trimmed_at_line_start() {
 
     assert_eq!(result.lines.len(), 1);
     let line = &result.lines[0];
-    assert_eq!(line.trim_left, soma_rules::OPEN_TRIM_LEFT);
+    // The line is only 1/4 em too wide, so the edge trim is limited by the
+    // deficit even though the cap is 1/2 em.
+    assert_eq!(line.trim_left, Width::from_em_frac(1, 4));
+    assert!(line.trim_left.0 <= soma_rules::OPEN_TRIM_LEFT.0);
     assert_eq!(line.trim_right, Width::ZERO);
-    assert_eq!(line.boxes[0].x, Width::ZERO - soma_rules::OPEN_TRIM_LEFT);
+    assert_eq!(line.boxes[0].x, Width::ZERO - line.trim_left);
     assert_eq!(
         line.boxes.last().unwrap().x.0 + line.boxes.last().unwrap().advance.0,
         line.indent.0 + line.target_width.0
