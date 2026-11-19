@@ -2688,7 +2688,15 @@ impl Builder<'_> {
                     align: Align::Left,
                 },
             )?;
+            let index = items.len();
             items.push(item);
+            // The index is a navigable destination too: it joins the running
+            // title, the contents and the bookmark tree as a level-1 heading.
+            self.headings.push(Heading {
+                item: index,
+                level: 1,
+                text: String::from(title),
+            });
         }
         let entries = self.index_entries.clone();
         for entry in &entries {

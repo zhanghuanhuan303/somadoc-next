@@ -307,6 +307,8 @@ fn write_style(out: &mut impl Write, styled: &StyledDoc) -> fmt::Result {
     out.write_str("{\"schema\":\"")?;
     out.write_str(STYLE_SCHEMA)?;
     write!(out, "\",\"templateHash\":{}", styled.template_hash().0)?;
+    out.write_str(",\"bodyPt\":")?;
+    write_rational(out, styled.body_pt())?;
 
     let page = styled.page();
     write!(out, ",\"page\":{{\"width\":{}", page.width.0)?;

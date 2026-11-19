@@ -254,11 +254,11 @@ fn the_example_book_renders_cover_contents_and_chapters() {
     // range so content edits do not need a test edit.
     assert!(stdout.contains("\"toc\":{\"passes\":"), "{stdout}");
     assert!(stdout.contains("\"stable\":true"), "the TOC converged");
-    // Six chapters plus three level-2 sections at depth 2, one figure and one
-    // table.
+    // Six chapters, three level-2 sections, and the generated index, plus one
+    // figure and one table.
     assert!(
-        stdout.contains("\"entries\":9"),
-        "six chapters + three sections"
+        stdout.contains("\"entries\":10"),
+        "chapters + sections + index"
     );
     assert!(stdout.contains("\"figures\":1"), "one figure in the list");
     assert!(stdout.contains("\"tables\":1"), "one table in the list");
@@ -274,4 +274,56 @@ fn the_example_book_renders_cover_contents_and_chapters() {
         .and_then(|value| value.parse().ok())
         .expect("pageCount");
     assert!((8..=12).contains(&pages), "page count {pages}");
+}
+
+#[test]
+fn pdf_output_embeds_a_font_and_bookmarks() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("workspace root");
+    let font = root.join("crates/soma-render-pdf/tests/fixtures/tiny.ttf");
+    let input = temp("pdf", "md", "# A中B\n\nA B 中\n");
+    let out = std::env::temp_dir().join(format!("soma-cli-{}-pdf-out.pdf", std::process::id()));
+
+    let (ok, stdout, stderr) = run(&[
+        "render",
+        "--input",
+        input.to_str().unwrap(),
+        "--format",
+        "pdf",
+        "--font",
+        font.to_str().unwrap(),
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+
+    assert!(ok, "stderr: {stderr}");
+    assert!(stdout.is_empty(), "the binary goes to the file");
+    let bytes = std::fs::read(&out).expect("pdf output");
+    assert!(bytes.starts_with(b"%PDF-1.7"), "header");
+    assert!(
+        bytes.windows(10).any(|window| window == b"/FontFile2"),
+        "embedded font"
+    );
+    assert!(
+        bytes.windows(9).any(|window| window == b"/Outlines"),
+        "bookmarks"
+    );
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
+fn pdf_without_a_font_is_an_error() {
+    let input = temp("pdf-no-font", "md", "一段正文。\n");
+    let (ok, _stdout, stderr) = run(&[
+        "render",
+        "--input",
+        input.to_str().unwrap(),
+        "--format",
+        "pdf",
+    ]);
+
+    assert!(!ok, "pdf needs a font");
+    assert!(stderr.contains("--font"), "stderr: {stderr}");
 }

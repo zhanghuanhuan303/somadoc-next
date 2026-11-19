@@ -20,4 +20,5 @@ soma-md = { path = "../soma-md" }
 soma-metrics = { path = "../soma-metrics" }
 soma-render-html = { path = "../soma-render-html" }
 soma-render-svg = { path = "../soma-render-svg" }
+soma-render-pdf = { path = "../soma-render-pdf" }
 soma-template = { path = "../soma-template" }

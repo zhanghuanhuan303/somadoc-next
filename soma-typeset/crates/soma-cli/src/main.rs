@@ -19,6 +19,7 @@ use soma_engine::EngineConfig;
 use soma_layout::{layout_with, PaginationStrategy, StyledMetrics};
 use soma_metrics::MetricsTable;
 use soma_render_html::render as render_html;
+use soma_render_pdf::{render as render_pdf, PdfFont, PdfFonts, PdfMetadata};
 use soma_render_svg::render as render_svg;
 use soma_template::{parse_template, resolve, StyledDoc, Template};
 
@@ -27,13 +28,18 @@ soma — deterministic Chinese-first typesetting
 
 usage:
   soma render --input <file> [--template <file>] [--engine <file>]
-              [--format html|svg|json] [--out <file>]
+              [--format html|svg|json|pdf] [--out <file>]
+              [--font <file[#index]>] [--font-bold <file[#index]>]
+              [--font-math <file[#index]>]
   soma check  --input <file> [--template <file>] [--engine <file>]
 
   --input     .md / .markdown, .html / .htm, .tex / .latex
   --template  pure-YAML template; omitted uses the built-in A4 default
   --engine    soma.engine/1 configuration; omitted uses publish-v1
-  --format    html (default), svg, or json (canonical page result)
+  --format    html (default), svg, json (canonical page result), or pdf
+  --font      TrueType font for PDF output (required by --format pdf)
+  --font-bold optional bold face; falls back to --font
+  --font-math optional math face; falls back to --font
   --out       output path; '-' or omitted writes to stdout
 
 exit codes:
@@ -77,6 +83,7 @@ enum Format {
     Html,
     Svg,
     Json,
+    Pdf,
 }
 
 #[derive(Debug)]
@@ -87,6 +94,9 @@ struct Options {
     format: Format,
     out: Option<String>,
     stats: bool,
+    font: Option<String>,
+    font_bold: Option<String>,
+    font_math: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -121,6 +131,9 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
     let mut format = Format::Html;
     let mut out = None;
     let mut stats = false;
+    let mut font = None;
+    let mut font_bold = None;
+    let mut font_math = None;
 
     let mut index = 0;
     while index < args.len() {
@@ -136,12 +149,16 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
             "--template" | "-t" => template = Some(value()?),
             "--engine" => engine = Some(value()?),
             "--out" | "-o" => out = Some(value()?),
+            "--font" => font = Some(value()?),
+            "--font-bold" => font_bold = Some(value()?),
+            "--font-math" => font_math = Some(value()?),
             "--stats" => stats = true,
             "--format" | "-f" if allow_format => {
                 format = match value()?.as_str() {
                     "html" => Format::Html,
                     "svg" => Format::Svg,
                     "json" => Format::Json,
+                    "pdf" => Format::Pdf,
                     other => return Err(format!("unknown format `{other}`")),
                 }
             }
@@ -157,6 +174,9 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
         format,
         out,
         stats,
+        font,
+        font_bold,
+        font_math,
     })
 }
 
@@ -164,16 +184,45 @@ fn render(args: &[String]) -> Result<(), String> {
     let options = parse_options(args, true)?;
     let (document, styled, engine, vertical) = pipeline(&options)?;
     let pages = layout(&document, &styled, &engine, vertical)?;
-    let output = match options.format {
-        Format::Html => render_html(&pages, styled.table(), &pages.text),
-        Format::Svg => render_svg(&pages, styled.table(), &pages.text),
+    match options.format {
+        Format::Html => write_output(&options, &render_html(&pages, styled.table(), &pages.text))?,
+        Format::Svg => write_output(&options, &render_svg(&pages, styled.table(), &pages.text))?,
         Format::Json => {
             let mut json = pages.canonical_json();
             json.push('\n');
-            json
+            write_output(&options, &json)?;
         }
-    };
-    write_output(&options, &output)?;
+        Format::Pdf => {
+            let (regular, bold, math) = load_pdf_fonts(&options)?;
+            let title = document.title_text();
+            let author = {
+                let names: Vec<&str> = document
+                    .meta
+                    .authors
+                    .iter()
+                    .map(|author| author.name.as_str())
+                    .collect();
+                if names.is_empty() {
+                    None
+                } else {
+                    Some(names.join(", "))
+                }
+            };
+            let metadata = PdfMetadata {
+                title: title.as_deref(),
+                author: author.as_deref(),
+                language: document.meta.language.as_deref(),
+            };
+            let fonts = PdfFonts {
+                regular: &regular,
+                bold: bold.as_ref(),
+                math: math.as_ref(),
+            };
+            let bytes = render_pdf(&pages, &styled, &pages.text, &fonts, &metadata)
+                .map_err(|error| format!("pdf: {error}"))?;
+            write_bytes(&options, &bytes)?;
+        }
+    }
     if options.stats {
         eprintln!(
             "pages={} blocks={} lines={} canonicalHash={:016x}",
@@ -280,6 +329,52 @@ fn layout(
         vertical,
     )
     .map_err(|error| error.to_string())
+}
+
+/// Load the fonts requested by `--format pdf`.
+fn load_pdf_fonts(
+    options: &Options,
+) -> Result<(PdfFont, Option<PdfFont>, Option<PdfFont>), String> {
+    let regular = options
+        .font
+        .as_deref()
+        .ok_or_else(|| String::from("--format pdf needs --font <path[#index]>"))?;
+    let regular = load_pdf_font(regular)?;
+    let bold = match options.font_bold.as_deref() {
+        Some(spec) => Some(load_pdf_font(spec)?),
+        None => None,
+    };
+    let math = match options.font_math.as_deref() {
+        Some(spec) => Some(load_pdf_font(spec)?),
+        None => None,
+    };
+    Ok((regular, bold, math))
+}
+
+fn load_pdf_font(spec: &str) -> Result<PdfFont, String> {
+    let (path, index) = match spec.rsplit_once('#') {
+        Some((path, index)) => (
+            path,
+            index
+                .parse::<u32>()
+                .map_err(|_| format!("{spec}: face index must be a number"))?,
+        ),
+        None => (spec, 0),
+    };
+    let bytes = std::fs::read(path).map_err(|error| format!("{path}: {error}"))?;
+    PdfFont::from_bytes(bytes, index).map_err(|error| format!("{path}: {error}"))
+}
+
+fn write_bytes(options: &Options, output: &[u8]) -> Result<(), String> {
+    match options.out.as_deref() {
+        None | Some("-") => {
+            use std::io::Write;
+            std::io::stdout()
+                .write_all(output)
+                .map_err(|error| format!("stdout: {error}"))
+        }
+        Some(path) => std::fs::write(path, output).map_err(|error| format!("{path}: {error}")),
+    }
 }
 
 fn write_output(options: &Options, output: &str) -> Result<(), String> {

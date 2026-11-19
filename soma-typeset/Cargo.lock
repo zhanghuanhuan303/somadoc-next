@@ -15,6 +15,7 @@ dependencies = [
  "soma-md",
  "soma-metrics",
  "soma-render-html",
+ "soma-render-pdf",
  "soma-render-svg",
  "soma-template",
 ]
@@ -119,6 +120,16 @@ version = "0.1.0"
 
 [[package]]
 name = "soma-render-html"
+version = "0.1.0"
+dependencies = [
+ "soma-core",
+ "soma-doc",
+ "soma-layout",
+ "soma-template",
+]
+
+[[package]]
+name = "soma-render-pdf"
 version = "0.1.0"
 dependencies = [
  "soma-core",

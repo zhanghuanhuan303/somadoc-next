@@ -265,6 +265,8 @@ pub struct StyledDoc {
     cover_styles: CoverStyles,
     /// Master index for pages that begin a section.
     start_master: Option<usize>,
+    /// Root font size in points. One em of `Width` equals this many points.
+    body_pt: Rational,
     template_hash: crate::TemplateHash,
 }
 
@@ -389,6 +391,11 @@ impl StyledDoc {
     /// Master index for the first page of a section.
     pub fn start_master(&self) -> Option<usize> {
         self.start_master
+    }
+
+    /// Root font size in points. `Width::EM` corresponds to this size.
+    pub fn body_pt(&self) -> Rational {
+        self.body_pt
     }
 
     pub fn template_hash(&self) -> crate::TemplateHash {
@@ -603,6 +610,7 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         header_text: template.page.header_text.clone(),
         folio: template.page.folio.clone(),
         start_master,
+        body_pt,
         template_hash: template.template_hash(),
     })
 }
