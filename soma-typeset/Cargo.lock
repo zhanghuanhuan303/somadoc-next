@@ -45,6 +45,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "soma-html"
+version = "0.1.0"
+dependencies = [
+ "soma-core",
+ "soma-doc",
+ "soma-layout",
+ "soma-render-html",
+ "soma-template",
+]
+
+[[package]]
 name = "soma-layout"
 version = "0.1.0"
 dependencies = [
