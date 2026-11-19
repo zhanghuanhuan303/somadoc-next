@@ -107,8 +107,15 @@ Cumulative public test files:
 | `a2_units.rs` | 7 | exact conversion, truncation, strict grammar |
 | `a2_resolve.rs` | 11 | cascade, inheritance, page geometry, style hash |
 | `a3_layout.rs` | 7 | paragraph boxes match the kernel, text index, stacking |
-| `a4_pagination.rs` | 12 | vertical K-P optimality, page breaks, keep-with-next, overflow |
+| `a4_pagination.rs` | 13 | vertical K-P optimality, page breaks, keep-with-next, splitting, overflow |
 | `a6_blocks.rs` | 10 | code, math, figures, tables, rules, raw, footnotes |
+| `metrics.rs` (layout) | 5 | table-backed metrics, per-style scaling, determinism |
+| `e2_split.rs` | 7 | line conservation, widows/orphans, footnote lines, glue, vertical hash |
+| `e3_typography.rs` | 2 | hanging punctuation is post-processing and respects the cap |
+| `e4_master.rs` | 6 | header/footer bands, folio, running title, margin limits |
+| `e5_grid.rs` | 3 | baseline grid alignment, unchanged text, wider grid leading |
+| `gate_r.rs` (svg) | 4 | Gate V/R: SVG golden, coordinates = layout, HTML/SVG atom parity |
+| `effect.rs` (eval) | 7 | Gate Q′ structural claims on the scorecard |
 | `a5_md.rs` | 11 | Markdown subset, inlines, spans, validity |
 | `a5_render.rs` | 6 | absolute positions, escaping, no re-breaking |
 | `capabilities.rs` (md) | 7 | Gate C matrix, degradation promise, docs parity |
@@ -120,14 +127,15 @@ Cumulative public test files:
 | `soma-demo` unit | 3 | HTML geometry and escaping |
 | `soma-wasm` unit | 1 | fixture determinism + forced end + DocIR |
 | `vertical_slice.rs` (rules) | 6 | end-to-end rules + trim + hard break |
-| `soma-rules` unit | 13 | segmentation, punctuation, trim caps, rule inventory |
+| `soma-rules` unit | 15 | segmentation, punctuation, pair trim, hyphen breaks, rule inventory |
+| `soma-metrics` unit | 8 | table round-trip, CJK/Latin widths, fallback, hash, truncation |
 | core unit | 23 | IR, units, breaker, result |
+| layout unit | 2 | trim scaling at body and non-body sizes |
 
-Total: **252 tests**.
+Total: **299 tests**.
 
-Still deferred: the `Overfull` fallback stage, a quality-labeled calibration
-corpus, the human blind-test run, Markdown syntax parsing, and calibrated trim
-ratios.
+Still deferred: a quality-labeled calibration corpus, the human blind-test run,
+kerning pairs, bold faces, tracking fallback, and calibrated trim ratios.
 
 ## Repository gates
 

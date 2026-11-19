@@ -2,10 +2,12 @@
 
 Status: **frozen on 2026-11-20** with `docs/architecture-v2.md`.
 ADR-0010 amends §15.1 (one extra crate) and fixes shapes that
-architecture v2 left open; it does not change any earlier decision.
+architecture v2 left open; ADR-0012…0015 extend the implemented system
+(table metrics, line-level pagination, typography, page masters) without
+changing the layer contract.
 
 These ADRs record the decisions that shape the next phase. They are aligned
-with the already-implemented K1–K8 code; they do not change it.
+with the already-implemented code; they do not change the frozen inline kernel.
 
 | ADR | Decision | Status |
 |---|---|---|
@@ -19,6 +21,11 @@ with the already-implemented K1–K8 code; they do not change it.
 | [0008](0008-docir-migration.md) | New `soma-doc`; retire legacy semantic module | Accepted |
 | [0009](0009-semantic-presentation-boundary.md) | DocIR semantics; template owns presentation | Accepted |
 | [0010](0010-borrow-first-and-parallel.md) | Borrow-first layer boundaries; optional parallelism outside the core | Accepted |
+| [0011](0011-inline-span-compiler.md) | Inline span compiler in the rules layer | Accepted |
+| [0012](0012-table-metrics.md) | Table-backed font metrics; `metricsHash` in the page result | Accepted |
+| [0013](0013-line-level-vertical-layout.md) | Line-level vertical layout; widows, orphans, vertical glue | Accepted |
+| [0014](0014-typography-refinements.md) | Trim scaling, pair compression, hanging punctuation | Accepted |
+| [0015](0015-page-masters.md) | Page masters: running header, footer, folio | Accepted |
 
 ## Rules
 

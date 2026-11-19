@@ -1,10 +1,10 @@
 # 模板规范（`soma-template`）
 
-状态：**A2 已落地**（schema `soma.template/1` / `soma.styles/1`）。
+状态：**A2 已落地，E4 扩展**（schema `soma.template/2` / `soma.styles/2`）。
 代码是权威，本文解释 DSL、单位与级联规则。
 
 参考：`docs/architecture-v2.md` §7、ADR-0003（纯 YAML）、ADR-0009（语义/呈现边界）、
-ADR-0010 §3（`StyledDoc` 为纯数据）。
+ADR-0010 §3（`StyledDoc` 为纯数据）、ADR-0014（标点/网格）、ADR-0015（页面母版）。
 
 ---
 
@@ -69,6 +69,10 @@ page:
   margin-bottom: 25mm
   margin-left: 20mm
   margin-right: 20mm
+  header: 6mm              # 页眉带高度，位于上边距内
+  footer: 8mm              # 页脚带高度，位于下边距内
+  header-text: running-title   # 或字面量字符串
+  folio: "第 {page} 页 / 共 {pages} 页"
 footnote:
   numbering: document      # document | page | section
 styles:                    # 必填，非空序列
@@ -97,7 +101,7 @@ styles:                    # 必填，非空序列
 
 | 继承 | 不继承（每个节点重置） |
 |---|---|
-| `font-size`、`line-height`、`align`、`family`、`color`、`weight`、`slant`、`small-caps` | `first-indent`、`indent-left`、`indent-right`、`space-before`、`space-after`、`underline`、`keep-with-next`、`page-break-before` |
+| `font-size`、`line-height`、`align`、`family`、`color`、`weight`、`slant`、`small-caps` | `first-indent`、`indent-left`、`indent-right`、`space-before`、`space-after`、`space-before-plus`、`space-before-minus`、`space-after-plus`、`space-after-minus`、`widow-lines`、`orphan-lines`、`hanging-punctuation`、`hanging-cap`、`baseline-grid`、`underline`、`keep-with-next`、`page-break-before` |
 
 ## 6. 属性白名单
 
@@ -108,6 +112,12 @@ styles:                    # 必填，非空序列
 | `first-indent` | length | 首行缩进 |
 | `indent-left` / `indent-right` | length | 块级左右缩进 |
 | `space-before` / `space-after` | length | 块间距 |
+| `space-before-plus` / `space-before-minus` | length | 可拉伸/可收缩的垂直胶水 |
+| `space-after-plus` / `space-after-minus` | length | 同上，块后 |
+| `widow-lines` / `orphan-lines` | `0`–`9` | 段末/段首至少保留的行数 |
+| `hanging-punctuation` | `true` / `false` | 行尾标点悬挂进右边距 |
+| `hanging-cap` | length | 悬挂上限（默认 `0.5em`） |
+| `baseline-grid` | length | 行高与间距量化到网格；`0` 关闭 |
 | `align` | `justify` | **model v1 只实现 justify**；其他值在 resolve 时报错 |
 | `family` | 文本 | 字体族 token，由渲染器解析 |
 | `color` | `#rrggbb` / `rrggbb` | 打包成 `0xRRGGBB` |
@@ -141,8 +151,8 @@ pub struct StyledDoc {
 
 | Hash | 覆盖 |
 |---|---|
-| `template_hash()` | `soma.template/1` canonical JSON：名称、版本、页面、脚注、全部规则与声明 |
-| `style_hash()` | `soma.styles/1` canonical JSON：模板 hash + 解析后的页面/样式/节点映射 |
+| `template_hash()` | `soma.template/2` canonical JSON：名称、版本、页面（含母版）、脚注、全部规则与声明 |
+| `style_hash()` | `soma.styles/2` canonical JSON：模板 hash + 解析后的页面/样式/节点映射 |
 
 两者都是 FNV-1a 64，与 `paramHash` / `docHash` 同一原语。
 

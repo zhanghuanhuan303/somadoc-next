@@ -157,8 +157,27 @@ gantt
    默认 A4。
 4. **脚注编号**：模板字段，默认全文连续。
 
-## 10. 下一步
+## 10. 效果阶段（E1–Q′，已完成）
 
-A1（`soma-doc`）与 A2（`soma-template`）已完成；ADR-0010 已采纳。
-当前开工项：**A3 `soma-layout`（单页）** —— 按 ADR-0010：`PagedLayout` 每行带
-来源 `NodeId`、渲染 seam `TextSource`、不深拷贝 `Document`。
+A1–A6 与 Gate C/垂直 K-P 全部落地后，按 `docs/proposal-effect-max.md`
+执行了效果优先路线。每个里程碑独立全绿。
+
+| 里程碑 | 内容 | 关闭的债务 | 验收 |
+|---|---|---|---|
+| E1 | 真实字体度量表（Noto CJK SC，仅数值） | D06 | `crates/soma-metrics` 8 测试；`metricsHash` 进 canonical |
+| E2 | 行级垂直排版、widow/orphan、垂直胶水、脚注随行 | D49、D58 | 行守恒、widow/orphan=0、单页等价 |
+| E3 | trim 随字号、叠标点压缩、悬挂标点 | D08 | 悬挂只改行尾、不改断点 |
+| E4 | 页面母版、页眉页脚、页码 | D46、D50 | 母版不改内容盒子 |
+| E5 | 基线网格（opt-in） | 新能力 | 所有正文行落在网格上 |
+| E6 | `-`/`/` 断点、SVG 渲染器、Gate V/R | D09 部分、D28 | SVG 坐标 = 布局坐标 |
+| Q′ | 效果记分卡（`soma-eval score`） | 新能力 | 7 个结构断言 |
+
+交付报告：`docs/e1-q-report.md`。当前测试数 **299**，全部门禁：
+fmt / clippy / tests / wasm 字节一致 / demo / 依赖边界 / Gate A / Gate C /
+Gate V/R / Gate Q′。
+
+## 11. 下一步
+
+效果阶段的代码与门禁已收口。仍开着的都是需要外部输入或新决策的项：
+Gate Q（真实语料 + 评审）、Tier A 标定（D04/D05）、`soma.engine/1`（D29/D59）、
+首页母版变体（D62）、tracking 兼底（D60）。见 `docs/debt.md`。

@@ -21,10 +21,10 @@
 | D03 | `FallbackStage::Overfull` | 字段保留但从未发射；长英文词走 `Emergency` | 语义上等价，报告口径少一档 | 未排期 | 否 |
 | D04 | trim/gap 比例 | 6 条 `ParamOnly`，比例值未标定 | Gate Q 不能引用这些数值 | A6 后标定窗口 | 否 |
 | D05 | Tier A 权重 | `default-v1` 是工程起点，未用真实语料拟合 | 质量上限未知；`sweep` 只给敏感度 | A6 后标定窗口 | 否 |
-| D06 | 真实字体度量 | 只有 `SyntheticMetrics`（确定性假度量） | 性能数字不含字形查询；视觉样张不可信 | A2/A3（`MetricsProvider` seam） | **是**（A3） |
+| D06 | ~~真实字体度量~~ | **已关闭（E1）**：`soma-metrics`（零依赖、no_std）+ `tools/metrics-gen` + Noto CJK SC 整数表；`TableMetrics`/`StyledMetrics` 按字号缩放；`metricsHash` 进入 `soma.pages/2`。覆盖范围与 bold 近似见 D61/D63 | — | ✅ 已关闭 | 否 |
 | D07 | wasm 执行时延 | 只证明了编译 + 字节一致，没测运行时间 | wasm 预算只有推算 | A5 | 否 |
-| D08 | 叠标点挤压 / 按字号缩放 trim | `pair_trim_table` 未做；trim 比例不随字号缩放 | 标点密集段落质量有上限 | A4 或 A6 | 否 |
-| D09 | 无 hyphenation | 长英文 run 不可断，只能 overfull（mixed 语料 4,000 atoms 有 266 行 overfull） | 英文长词/URL 排版差 | 未排期 | 否 |
+| D08 | ~~叠标点挤压 / 按字号缩放 trim~~ | **已关闭（E3）**：`trim.pair`（1/4em，ParamOnly）+ trim 按 atom 字号缩放 + 行尾悬挂标点（`hanging-punctuation`，opt-in） | — | ✅ 已关闭 | 否 |
+| D09 | 无 hyphenation | 长英文 run 只能在 `-`、`/` 后断（E6）；无词典、无 tracking | 英文长词/URL 仍可能超宽 | 未排期（跟踪见 D60） | 否 |
 | D10 | `boundary_deviation` 假设无自动告警 | `Line.boundary_deviation` 是比例分配近似，`LineTrace.boundary_deviation_exact` 是精确值；两者都在 `inspect` 输出，但 `bench` 只打近似值，没有相对误差门限 | 比例分配假设失效时不会报警 | A4 后加 P95 相对误差报告项 | 否 |
 | D11 | active-node 剪枝 | 未实现；atom 数窗口已够（4,000 atoms 最差 1.2 ms） | 无 | 未排期（等 wasm 实测） | 否 |
 | D12 | K7 fitness / rhythm | 相邻行松紧节奏不进代价 | 「松紧交替」无法优化 | 未排期（需 A4 页面上下文 + 评估证据） | 否 |
@@ -45,7 +45,7 @@
 | D25 | ~~正式 HTML 渲染器~~ | **已关闭（A5）**：`soma-render-html` 消费 `PagedLayout` + `TextSource`，不重排 | — | ✅ 已关闭 | 否 |
 | D26 | 脚注 / 图 / 表 / 公式适配 | **脚注整块移页 + 编号、图占位框、表格单元盒已做（A6）**；Math 适配器、表格行线/colspan 仍未做 | 复杂表格与公式质量受限 | 后续 | 否 |
 | D27 | ~~全管线 native/wasm 哈希~~ | **已关闭（A6）**：fixture 含 DocIR + 行内 + 页面，8,979 bytes 一致 | — | ✅ 已关闭 | 否 |
-| D28 | Gate A / C / R | **Gate A、Gate C 已建**（能力矩阵 + 降级承诺 + 渲染安全，见 `scripts/gate-c.sh`）；**Gate R 未建**（只有一个渲染器，没有跨渲染器坐标比对） | 渲染一致性无门禁 | 后续（等第二个渲染器） | 否 |
+| D28 | ~~Gate A / C / R~~ | **已关闭**：Gate A、Gate C、Gate V（SVG 字节锁）、Gate R（SVG 坐标 = 布局坐标；HTML/SVG 覆盖同一 atom 集）全部接入 `gates.sh` | — | ✅ 已关闭 | 否 |
 | D29 | `EngineConfig` YAML | 只有 Rust 结构（`ParamSet` + `BreakConfig`）；架构 §9 的 `soma.engine/1` 未实现 | 用户改不了引擎旋钮 | A3 | 否 |
 | D30 | ~~层哈希~~ | **已关闭（A3）**：`paramHash` + `docHash`/`contentHash` + `templateHash`/`styleHash` + 页面结果里的 `engineHash` | — | ✅ 已关闭 | 否 |
 | D31 | DocIR 没有 reader | canonical JSON 是 write-only；只有 writer 与 golden 测试 | 不能回读、不能做 round-trip fuzz，调试只能看输出 | 未排期（真需要的场景：跨进程传递 DocIR） | 否 |
@@ -63,14 +63,19 @@
 | D43 | 无模板继承 / `@import` | 每个模板必须自包含 | 多套模板重复声明 | 未排期 | 否 |
 | D44 | 不支持百分比长度 | 只支持 em/pt/mm/cm/in | 响应式或依赖容器宽度的尺寸写不了 | A4（分页需要相对页宽时再评估） | 否 |
 | D45 | 模板槽位与封面布局未接 | DocIR 有 `GeneratedBlock`，模板没有 `slot` 定义 | 封面/目录还不能由模板生成 | A6 | 否 |
-| D46 | 页面母版未定义 | `Section.page_template` 在 DocIR 里，模板与布局都没有页面母版 | 每章不同版式还不支持 | 未排期 | 否 |
+| D46 | ~~页面母版未定义~~ | **已关闭（E4）**：`page.header`/`page.footer`/`header-text`/`folio`；页眉页脚住在页边距内，不改变分页 | 每章不同版式仍未做（D62） | ✅ 已关闭 | 否 |
 | D47 | 选择器无组合子 | 只支持「element+role+classes 全部匹配」 | 无法表达「段落里的强调」这类关系 | 未排期 | 否 |
 
 | D48 | ~~垂直 K-P 未实现~~ | **已关闭**：垂直 K-P 为默认分页，末页免费、脚注参与 DP、强制断点与 keep-with-next 为硬约束；贪心保留为显式策略与回退 | — | ✅ 已关闭 | 否 |
-| D49 | 段落不跨页 | 一个段落整块放置；没有 widow/orphan 行级规则 | 超长段落会溢出整页 | 未排期 | 否 |
-| D58 | 垂直方向没有可拉伸胶水 | `space_before`/`space_after` 是固定长度；badness 只看剩余空间 | 不能像 TeX 那样拉开标题间距补页 | 未排期 | 否 |
-| D59 | 垂直代价参数不在 EngineConfig 里 | `VerticalParams` 是布局层常量 | 不能按文档调分页松紧 | 与 D29 一起做 | 否 |
-| D50 | 无页面母版 / 页眉页脚 / 页码 | 布局只产出内容块；渲染器不画页眉页脚 | 书籍版式不完整 | 未排期 | 否 |
+| D49 | ~~段落不跨页~~ | **已关闭（E2）**：垂直流原子降到行；段落跨页、`line_offset`/`lines_total` 行守恒、widow/orphan 硬可测 | — | ✅ 已关闭 | 否 |
+| D58 | ~~垂直方向没有可拉伸胶水~~ | **已关闭（E2）**：`space-before/after-plus/minus`；页面空白按行高归一化；拉伸量真实分配到块坐标 | — | ✅ 已关闭 | 否 |
+| D59 | 垂直代价参数不在 EngineConfig 里 | `VerticalParams` 是布局层常量；结果里有 `verticalHash`，但用户改不了 | 不能按文档调分页松紧 | 与 D29 一起做 | 否 |
+| D60 | 无 tracking 兼底 | E6 只做了 `-`/`/` 断点；未做字间 letter-spacing 兼底 | 长 run 仍可能压缩越界 | 未排期（需与内核 emergency 模型一起评估） | 否 |
+| D61 | bold 用 regular advance | 度量表只发行 Regular 面；Latin bold 宽度有轻微偏差，CJK bold 等宽所以无影响 | 强调文本的换行点可能偏差 | 需要 Bold 面时生成第二张表 | 否 |
+| D62 | 页面母版只有一套 | 无首页/封面变体、无按节切换母版；`Section.page_template` 仍未消费 | 书籍版式不完整 | 未排期（需模板 schema 再加一层选择器） | 否 |
+| D63 | 度量表是声明子集 | 覆盖 Latin/标点/假名/CJK 基本区与扩展 A；扩展 B+ 与少数字形回退到 1em | 生僻字宽度不准 | 需要时重新生成表 | 否 |
+| D64 | 页眉页脚只排一行 | running title 过长时溢出而不是换行/缩略 | 超长标题可能压到页边 | 未排期（需要字串截断策略） | 否 |
+| D50 | ~~无页面母版 / 页眉页脚 / 页码~~ | **已关闭（E4）**：页眉（running-title 或字面量）、页脚、`{page}`/`{pages}` 页码；两遍无重排 | 首页/封面变体未做（D62） | ✅ 已关闭 | 否 |
 | D51 | 盒子树是扁平的 | 没有嵌套 `VBox`/`HBox`；表格单元按列偏移摆放，无行线、无 colspan 网格、无表头重复 | 复杂表格与嵌套布局受限 | 未排期 | 否 |
 | D52 | 公式是文本占位 | `MathBlock` 渲染 `source`，没有 Math 适配器 | 公式不美观 | 未排期 | 否 |
 | D53 | Markdown 子集有限 | 无嵌套列表、setext 标题、表格、HTML 块、链接引用定义 | 复杂 Markdown 会退化为文本 | 未排期 | 否 |
@@ -104,4 +109,11 @@
 | A4 | **已完成**：D23；D08、D10 仍开 |
 | A5 | **已完成**：D25、D24（Markdown）；D02、D07、D28（C/R）仍开 |
 | A6 | **已完成**：D27、D26（脚注/图/表）；D04（标定）仍开 |
-| 未排期 | D01、D03、D05、D09、D11、D12、D13、N1–N6 |
+| E1 | **已完成**：D06、D28（metricsHash）；新增 D61、D63 |
+| E2 | **已完成**：D49、D58；新增 D60 |
+| E3 | **已完成**：D08；新增 test/pair 规则 |
+| E4 | **已完成**：D46、D50；新增 D62、D64 |
+| E5 | **已完成**：基线网格（`baseline-grid`，opt-in） |
+| E6 | **已完成**：D09 的断点部分、D28 的 Gate V/R |
+| Q′ | **已完成**：`soma-eval score` 效果记分卡与 `scripts/gate-q.sh` |
+| 未排期 | D01、D03、D04、D05、D10、D11、D12、D13、D60、N1–N6 |
