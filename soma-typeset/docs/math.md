@@ -1,0 +1,102 @@
+# Display math
+
+`soma-math` turns a TeX subset into an integer box: positioned symbols, rules, a
+width, an ascent and a depth. `soma-layout` places that box; renderers draw it.
+
+Design record: ADR-0026. Known gaps: `docs/debt.md` D71.
+
+## Pipeline
+
+```text
+MathBlock source
+  └─ soma_math::parse      → Vec<Node>          (syntax)
+  └─ soma_math::lay_out    → MathLayout          (integers, no font)
+  └─ soma_layout::math     → MathBox             (adds baseline, centring)
+  └─ soma_layout           → PlacedBlock.math    (one page box)
+  └─ renderers             → <text>/<rect>, <span>/<div>
+```
+
+`soma_math` knows nothing about pages, styles, or fonts. `soma-layout` supplies
+metrics through `MathMetrics`, implemented by `MathAdapter` over the same
+`soma_core::Metrics` face the paragraph uses.
+
+## Units and coordinates
+
+- Everything is `i32` in 1/4096 em (`Width`).
+- `MathItem.y` is measured from the **formula baseline**; negative is above.
+- `MathRule.y` is the top edge of the rule, also baseline-relative; a fraction
+  bar is above the baseline, a radical bar covers the body.
+- `MathBox.baseline` is the distance from the block top to the formula baseline.
+  `MathBox.height` is `ascent + depth` (`MathLayout::total_height`).
+- Placement: `x = (content_width - width) / 2`, `y = 0` inside the block.
+
+## Syntax
+
+| Form | Result |
+|---|---|
+| `x`, `中`, `\alpha` | one `MathItem`; ASCII letters are italic in print, this subset leaves posture to the renderer |
+| `{...}` | group (inherits the enclosing size) |
+| `x^2`, `x_1`, `x_i^2` | script to the right; superscript above, subscript below |
+| `\frac{a}{b}` | numerator/denominator at `script_scale`, one `MathRule` at `axis_height` |
+| `\sqrt{x}`, `\sqrt[3]{x}` | stretched `√` glyph plus a bar over the body; the degree is set at script size |
+| `\sum_{i=1}^{n}`, `\prod`, `\lim`, `\sup`, `\inf` | big operator at `big_scale`; limits stack above and below |
+| `\int_0^1`, `\oint` | big operator; limits stay to the right |
+| `\log \ln \exp \sin \cos \tan \max \min` | upright name |
+| `\text{...}` | raw text at the current size, no math spacing |
+| `\,` `\;` `\!` `\quad` `\qquad` | fixed spaces (167/278/-167/1000/2000 permille) |
+| `\left( ... \right)` | delimiters kept at the base size (no auto-sizing) |
+| `\left.`, `\right.` | null delimiter, draws nothing |
+
+Also mapped: Greek letters (lower and upper), `\le \ge \ne \equiv \approx \sim
+\propto`, arrows (`\to`, `\leftarrow`, `\Leftrightarrow`, …), set operators
+(`\in \subset \cup \cap \emptyset`, …), `\partial \nabla \infty`, `\cdots
+\ldots`, `\angle \perp \parallel`, `\cdot \times \div \pm \mp`.
+
+Unsupported commands are a hard error: `MathError::UnsupportedCommand`. Layout
+catches it and keeps the text placeholder, so a formula outside the subset is
+visible in output instead of silently wrong.
+
+## Style constants (`MathStyle`)
+
+| Field | Default | Meaning |
+|---|---|---|
+| `script_scale` | 700 | superscript/subscript/limit size |
+| `scriptscript_scale` | 500 | reserved for nested scripts |
+| `sup_shift` | 400 | minimum superscript raise |
+| `sub_shift` | 200 | minimum subscript drop |
+| `axis_height` | 250 | fraction bar position above the baseline |
+| `rule_thickness` | 40 | fraction/radical bar thickness |
+| `frac_gap` | 120 | gap between bar and numerator/denominator; also the limit gap |
+| `bin_gap` | 220 | space around `+ - × ·` |
+| `rel_gap` | 280 | space around `= < ≥` |
+| `punct_gap` | 170 | reserved for `, ;` |
+| `big_scale` | 1400 | big operator size relative to the base |
+
+All values are permille of the current size. `soma-layout::math::style_for`
+takes everything from `MathStyle::default()` and replaces `size` with the
+resolved `font_size`, so headings and 8 pt footnotes typeset at their own size
+with no extra configuration.
+
+## Placeholder fallback
+
+`math::display` returns `None` for a parse error. `Builder::math_item` then
+returns `None` and `flow_into` calls `object_item(BoxKind::Math, source, style)`
+— the source is laid out as one text line, exactly as before this ADR. The page
+never fails because of a formula.
+
+## Pagination
+
+A display formula is one indivisible flow item: it has glue before/after from
+the style, `keep_with_next` and `page_break_before` are honoured, and it never
+splits. If it does not fit on an empty page the page is marked `overflow` like
+any other tall box.
+
+## Tests
+
+| File | What it locks |
+|---|---|
+| `soma-math/tests/math.rs` | scripts, fractions, radicals, big operators, names, delimiters, spacing, errors |
+| `soma-layout/tests/e11_math.rs` | centring, baseline inside the box, line flow, canonical JSON |
+| `soma-render-svg/tests/math.rs` | exact `<text>`/`<rect>` coordinates |
+| `soma-render-html/tests/math.rs` | span/div preview, placeholder fallback |
+| `soma-layout/tests/a6_blocks.rs` | display box vs placeholder |

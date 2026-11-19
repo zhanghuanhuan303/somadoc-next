@@ -51,7 +51,7 @@ ADR-0009（语义/呈现边界）。
 | `ListItem` | `blocks`（可嵌套列表/段落） |
 | `BlockQuote` | `blocks` |
 | `CodeBlock` | `lang`、`value` |
-| `MathBlock` | `source`（交给 math 适配器，核心不解析） |
+| `MathBlock` | `source`（交给 `soma-math` 解析成数学盒，内核不解析） |
 | `Figure` | `image`、`caption`、`label` |
 | `Table` | `columns`、`rows`、`caption`、`label` |
 | `Column` | `align`（宽度是排版决定，不在 IR） |

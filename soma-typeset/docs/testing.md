@@ -109,7 +109,7 @@ Cumulative public test files:
 | `a2_cell_context.rs` | 1 | `within: cell` overrides body rules and sets cell padding |
 | `a3_layout.rs` | 7 | paragraph boxes match the kernel, text index, stacking |
 | `a4_pagination.rs` | 13 | vertical K-P optimality, page breaks, keep-with-next, splitting, overflow |
-| `a6_blocks.rs` | 11 | code, math, figures, tables (+colspan), rules, raw, footnotes |
+| `a6_blocks.rs` | 12 | code, display math box, figures, tables (+colspan), rules, raw, footnotes |
 | `metrics.rs` (layout) | 6 | table-backed metrics, per-style scaling, bold face, determinism |
 | `e2_split.rs` | 7 | line conservation, widows/orphans, footnote lines, glue, vertical hash |
 | `e3_typography.rs` | 2 | hanging punctuation is post-processing and respects the cap |
@@ -128,6 +128,10 @@ Cumulative public test files:
 | `a5_md.rs` | 11 | Markdown subset, inlines, spans, validity |
 | `html.rs` (html) | 9 | HTML subset shapes, table grid, degradation, recovery, pipeline |
 | `latex.rs` (latex) | 9 | LaTeX subset shapes, math source, table grid, metadata, recovery, pipeline |
+| `math.rs` (soma-math) | 17 | scripts, fractions, radicals, big operators, function names, delimiters, spacing, errors, determinism |
+| `e11_math.rs` (layout) | 8 | centring, baseline inside the box, flow, canonical `math` field |
+| `math.rs` (svg) | 4 | exact formula coordinates |
+| `math.rs` (html) | 4 | formula preview spans, placeholder fallback |
 | `a5_render.rs` | 6 | absolute positions, escaping, no re-breaking |
 | `capabilities.rs` (md) | 7 | Gate C matrix, degradation promise, docs parity |
 | `safety.rs` (render) | 3 | Gate C: no scripts, links, images, or URLs |
@@ -142,9 +146,9 @@ Cumulative public test files:
 | `soma-metrics` unit | 9 | table round-trip, CJK/Latin widths, regular/bold faces, fallback, hash, truncation |
 | `soma-core` vertical unit | 1 | vertical cost model hash |
 | core unit | 24 | IR, units, breaker, result, presets |
-| layout unit | 2 | trim scaling at body and non-body sizes |
+| layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 
-Total: **378 tests**.
+Total: **415 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

@@ -63,11 +63,11 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   (`docHash` for exact reproduction, `contentHash` for content identity). The
   crate has **zero dependencies** and no floats; Gate A enforces that.
 - A3–A6 pipeline: `soma-layout` builds paragraph boxes over the frozen kernel and
-  paginates with **line-level vertical K-P** by default (`soma.pages/4`):
+  paginates with **line-level vertical K-P** by default (`soma.pages/5`):
   paragraphs split across pages, widows/orphans are penalties, vertical glue can
   stretch, footnotes are charged to the marker's line, and page masters add a
   running header, footer, and folio. Figure boxes, table cell boxes,
-  code/math/rule boxes, and a `TextSource` seam complete the tree;
+  code/rule boxes, display-formula boxes, and a `TextSource` seam complete the tree;
   `soma-md`, `soma-html`, and `soma-latex` parse documented Markdown/HTML/LaTeX
   subsets into DocIR;
   `soma-render-html`
@@ -81,10 +81,16 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   `soma-eval score` prints the effect scorecard.
 - Real corpus: `corpus/zh/` holds nine prose documents (technical note,
   notice, abstract, essay, mixed-script notes, public-domain classics,
-  footnote-dense note) plus table (colspan/rowspan/repeated header), math-placeholder, and 30-page book fixtures.
+  footnote-dense note) plus table (colspan/rowspan/repeated header), real display-math, and 30-page book fixtures.
   `soma-eval corpus` measures them and `soma-eval calibrate` sweeps tolerance ×
   badness scale on a proxy objective; see
   [`docs/corpus-calibration.md`](docs/corpus-calibration.md).
+- Display math (`soma-math`, ADR-0026): a TeX subset (symbols, scripts,
+  fractions, radicals, `\sum`/`\int` with limits, function names,
+  `\left…\right`) laid out into integer glyphs and rules. `soma-layout`
+  centres one `MathBox` per `MathBlock`; both renderers paint it; a malformed
+  formula falls back to text instead of failing the page. See
+  [`docs/math.md`](docs/math.md).
 - Engine configuration: `soma-engine` parses `soma.engine/1` (preset, window,
   atom window, fallback switches, vertical cost model) into the same
   `BreakConfig`/`VerticalParams` the hand-built path uses. See
@@ -98,8 +104,8 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
 
 ## What is not here yet
 
-- HTML/LaTeX/Word front ends, browser WASM packaging, incremental layout, and the
-  human blind-test run. Gate Q remains `Inconclusive` until that run exists; the
+- Word import, browser WASM packaging, incremental layout, inline math layout,
+  and the human blind-test run. Gate Q remains `Inconclusive` until that run exists; the
   effect scorecard (Q′) is a structural report, not a quality claim. See
   [`docs/roadmap-v2.md`](docs/roadmap-v2.md) and
   [`docs/debt.md`](docs/debt.md).
@@ -133,6 +139,7 @@ crates/
   soma-md/     # Markdown subset -> DocIR
   soma-html/   # HTML subset (semantic whitelist) -> DocIR
   soma-latex/  # LaTeX subset (sections, inline, environments) -> DocIR
+  soma-math/   # TeX subset -> integer math boxes (symbols + rules)
   soma-render-html/ # PagedLayout -> absolutely positioned HTML
   soma-render-svg/  # PagedLayout -> SVG (Gate V/R)
   soma-rules/  # text -> ParaIR (Chinese punctuation + CJK/Latin segmentation)
@@ -159,14 +166,15 @@ scripts/
   kp-verify.sh # K-P closure: gates + bench budget + length policy
 docs/
   architecture-v2.md  # frozen architecture
-  adr/                # accepted decisions (ADR-0001 … 0016)
+  adr/                # accepted decisions (ADR-0001 … 0026)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
-  debt.md             # global not-done register (D01–D66, N1–N6)
+  debt.md             # global not-done register (D01–D71, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
   e1-q-report.md      # E1–Q′ delivery report
   engine.md           # soma.engine/1: shape, defaults, errors, usage
   corpus-calibration.md # real corpus: metrics and proxy calibration
   docir.md            # DocIR contract: nodes, canonical JSON, validation
+  math.md             # display math: TeX subset, box model, style constants
   template.md         # template DSL: YAML subset, units, cascade, hashes
   a1-report.md        # A1 milestone report (Gate A1 checklist)
   a2-report.md        # A2 milestone report (Gate A2 checklist)
