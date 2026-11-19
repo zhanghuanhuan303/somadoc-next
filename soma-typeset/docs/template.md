@@ -1,6 +1,7 @@
 # 模板规范（`soma-template`）
 
-状态：**A2 已落地，E4 扩展，表格规则与单元上下文已加**（schema `soma.template/5` / `soma.styles/2`）。
+状态：**A2 已落地，E4 扩展，表格规则、单元上下文、目录与章节起始母版已加**
+（schema `soma.template/6` / `soma.styles/3`）。
 代码是权威，本文解释 DSL、单位与级联规则。
 
 参考：`docs/architecture-v2.md` §7、ADR-0003（纯 YAML）、ADR-0009（语义/呈现边界）、
@@ -115,6 +116,16 @@ styles:                    # 必填，非空序列
 `masters:` 定义命名页母版；省略时只有 `page:` 这一套（名为 `default`）。
 每套母版自己写 `header` / `footer` / `header-text` / `folio`（没有隐式继承），
 名字唯一且不能叫 `default`，页眉/页脚高度必须能放进页边距。
+
+- `page.start-master: <name>` 指定**章节起始页**用的母版（名字或 `default`）；
+  页以一个 `Section` 标记后的第一个内容块、或一个一级标题开头时用它，正文版心不变。
+  章节页通常就是「去掉页眉」的那一套。
+- `toc:` 打开自动目录：`depth`（1–3，默认 2）决定收录到几级标题，
+  `title` 是目录标题（留空则没有标题）。条目样式用 `element: toc`，
+  标题样式用 `element: tocTitle`，默认继承正文。
+  目录占自己的页，之后强制分页；页码由布局反解，最多迭代 4 遍
+  （报告在页面结果的 `toc` 字段里，`stable: false` 表示未收敛）。
+
 DocIR 的 `Section.page_template: <name>` 选择母版；换母版会强制新页
 （节首不会和上一节挤在同一页），文档开头的节直接作用于第 1 页；未知名字是布局错误。
 母版只改页边带，**版心几何仍是全局一套**，所以不影响分页与页数。
@@ -191,8 +202,8 @@ pub struct StyledDoc {
 
 | Hash | 覆盖 |
 |---|---|
-| `template_hash()` | `soma.template/5` canonical JSON：名称、版本、页面（含母版）、脚注、表格线宽、全部规则与声明 |
-| `style_hash()` | `soma.styles/2` canonical JSON：模板 hash + 解析后的页面/样式/节点映射 |
+| `template_hash()` | `soma.template/6` canonical JSON：名称、版本、页面（含母版、起始母版）、脚注、目录、表格线宽、全部规则与声明 |
+| `style_hash()` | `soma.styles/3` canonical JSON：模板 hash + 解析后的页面/样式/目录设置/节点映射 |
 
 两者都是 FNV-1a 64，与 `paramHash` / `docHash` 同一原语。
 
@@ -210,5 +221,6 @@ pub struct StyledDoc {
 - 百分比长度（需要知道参照系，先不做）；
 - 模板继承 / `@import`；
 - 命名槽位与封面布局（`GeneratedBlock` 已有，模板侧待 A6）；
-- 每章切换页面的自动规则（`Section.page_template` 已存在，模板侧待 A4）；
+- 目录的引导点（dot leaders）、按级自定义编号格式、图目录/表目录/索引
+  （`GeneratedKind` 其余变体仍无生成器）（D73）；
 - 字体族映射到实际字体文件（渲染器/度量层职责）。

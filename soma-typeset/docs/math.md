@@ -55,8 +55,11 @@ metrics through `MathMetrics`, implemented by `MathAdapter` over the same
 | `\log \ln \exp \sin \cos \tan \max \min` | upright name |
 | `\text{...}` | raw text at the current size, no math spacing |
 | `\,` `\;` `\!` `\quad` `\qquad` | fixed spaces (167/278/-167/1000/2000 permille) |
-| `\left( ... \right)` | delimiters kept at the base size (no auto-sizing) |
+| `\left( ... \right)` | fences stretched to the body, centred on it; `()[]\{\}\|`, `\langle`, `\lfloor`, `\lceil` |
 | `\left.`, `\right.` | null delimiter, draws nothing |
+| `\begin{matrix}` / `pmatrix` / `bmatrix` / `vmatrix` | grid of cells; centred columns, fenced as named |
+| `\begin{cases}` | one left brace, left-aligned columns |
+| `\begin{aligned}` (`align`, `split`) | columns alternate right/left around `&`, no fences |
 
 Also mapped: Greek letters (lower and upper), `\le \ge \ne \equiv \approx \sim
 \propto`, arrows (`\to`, `\leftarrow`, `\Leftrightarrow`, …), set operators
@@ -88,9 +91,9 @@ is one text atom and `inline_math` stays empty. Inline formulas never split
 across lines, participate in justification only as fixed-width atoms, and raise
 the line box through their ascent/depth.
 
-Remaining inline limits (D72): text style reuses the display constants
-(`\frac` parts keep `script_scale`, `big_scale` does not shrink), and there is
-no italic math font or delimiter sizing.
+Text style has its own constants: fractions shrink to `text_frac_scale` with a
+tighter `text_frac_gap`, and big operators use `text_big_scale`. Remaining
+inline limits (D72): no italic math font and no per-script kerning.
 
 ## Style constants (`MathStyle`)
 
@@ -106,10 +109,15 @@ no italic math font or delimiter sizing.
 | `bin_gap` | 220 | space around `+ - × ·` |
 | `rel_gap` | 280 | space around `= < ≥` |
 | `punct_gap` | 170 | reserved for `, ;` |
-| `big_scale` | 1400 | big operator size relative to the base |
-| `display` | `true` | limits stack above/below (`false` for inline) |
+| `big_scale` | 1400 | big operator size, display style |
+| `text_frac_scale` | 700 | numerator/denominator size, text style |
+| `text_frac_gap` | 80 | fraction bar gap, text style |
+| `text_big_scale` | 1100 | big operator size, text style |
+| `display` | `true` | `false` = text style: limits to the right, smaller operators |
 
-All values are permille of the current size. `soma-layout::math::style_for`
+Display fractions use full-size parts (`1000`); text style uses
+`text_frac_scale`. All values are permille of the current size.
+`soma-layout::math::style_for`
 takes everything from `MathStyle::default()` and replaces `size` with the
 resolved `font_size`, so headings and 8 pt footnotes typeset at their own size
 with no extra configuration.
@@ -121,6 +129,15 @@ Display: `Builder::math_item` then returns `None` and `flow_into` calls
 `object_item(BoxKind::Math, source, style)` — the source is laid out as one
 text line. Inline: the atom text stays the source and is measured as text.
 Either way the page never fails because of a formula.
+
+## Metric source
+
+Formula symbols come from a dedicated **math face** (family `2`) in the metrics
+table, generated from Noto Sans Math. `Metrics::math_advance` and
+`Metrics::math_metrics` are the seam; `TableMetrics`/`StyledMetrics` answer from
+that face at the style's font size, so `∑`, `∫`, `√`, Greek and relations get
+their real advances and extents. Adapters without a math face keep the body
+font (the trait defaults), and their output is byte-identical to before.
 
 ## Pagination
 
@@ -134,7 +151,7 @@ next line with the rest of the line and never splits mid-formula.
 
 | File | What it locks |
 |---|---|
-| `soma-math/tests/math.rs` | scripts, fractions, radicals, big operators, names, delimiters, spacing, errors |
+| `soma-math/tests/math.rs` | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, names, spacing, errors |
 | `soma-layout/tests/e11_math.rs` | centring, baseline inside the box, line flow, canonical JSON |
 | `soma-layout/tests/e12_inline_math.rs` | marker atoms, line-box growth, text-style limits, placeholder, canonical `inlineMath` |
 | `soma-render-svg/tests/math.rs` | exact `<text>`/`<rect>` coordinates |

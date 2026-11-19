@@ -2,10 +2,11 @@
 
 Status: **frozen on 2026-11-20** with `docs/architecture-v2.md`.
 ADR-0010 amends §15.1 (one extra crate) and fixes shapes that
-architecture v2 left open; ADR-0012…0027 extend the implemented system
+architecture v2 left open; ADR-0012…0030 extend the implemented system
 (table metrics, line-level pagination, typography, page masters, engine
 configuration, table continuation, table rules and context selectors,
-frontends, display and inline math)
+frontends, display and inline math, contents pages, the CLI, math fences and
+matrices)
 without changing the layer contract.
 
 These ADRs record the decisions that shape the next phase. They are aligned
@@ -42,6 +43,9 @@ only).
 | [0025](0025-latex-frontend.md) | LaTeX frontend subset: sections, inline commands, environments, tables, math source | Accepted |
 | [0026](0026-math.md) | Display math: `soma-math` box model, metric adapter, `MathBox` in the page result | Accepted |
 | [0027](0027-inline-math.md) | Inline math as object atoms: kind-aware metrics hooks, markers, `inlineMath` in the page result | Accepted |
+| [0028](0028-toc-and-section-start.md) | Template-driven table of contents (fixed-point page numbers) and a section-start master | Accepted |
+| [0029](0029-cli.md) | `soma` CLI: one source + one template to HTML/SVG/canonical JSON | Accepted |
+| [0030](0030-math-completion.md) | Math completion: stretched fences, matrices/aligned, math metrics face, text-style constants | Accepted |
 
 ## Rules
 

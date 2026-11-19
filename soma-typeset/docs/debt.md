@@ -16,7 +16,7 @@
 
 | ID | 项 | 现状 | 影响 | 关闭点 | 阻塞 |
 |---|---|---|---|---|---|
-| D01 | Gate Q 质量宣称 | **Inconclusive**：`corpus/zh` 已建（5 篇、135 行、原创），但仍无人工盲测与偏好标注 | 不能对外宣称「比贪心好」 | 未排期（需 5 评审 + 标注协议） | 否 |
+| D01 | Gate Q 质量宣称 | **Inconclusive**：工具链已闭环（kit 生成 → `--key` 反解 → Wilson/Fleiss → `--out` 报告，见 `docs/blind-dry-run.md`），但没有人工评审数据；`corpus/blind/dry-run/` 是**模拟**面板，只证明机制通，不计质量 | 不能对外宣称「比贪心好」 | 需 30 段 × 5 评审按 `docs/blind-test.md` 的 runbook 采集 | 否 |
 | D02 | Gate D 交付指标 | **Partial**：无浏览器 wasm 包体积、无首段延迟实测 | 移动端预算无法承诺 | A5 | 否 |
 | D03 | `FallbackStage::Overfull` | 字段保留但从未发射；长英文词走 `Emergency` | 语义上等价，报告口径少一档 | 未排期 | 否 |
 | D04 | trim/gap 比例 | 6 条 `ParamOnly`，比例值未标定 | Gate Q 不能引用这些数值 | A6 后标定窗口 | 否 |
@@ -72,15 +72,17 @@
 | D59 | ~~垂直代价参数不在 EngineConfig 里~~ | **已关闭（ADR-0016）**：`vertical:` 段覆盖 `VerticalParams`；`verticalHash` 进页面结果 | — | ✅ 已关闭 | 否 |
 | D60 | 无 tracking 兼底 | E6 只做了 `-`/`/` 断点；未做字间 letter-spacing 兼底 | 长 run 仍可能压缩越界 | 未排期（需与内核 emergency 模型一起评估） | 否 |
 | D61 | 斜体仍用 upright advance | **粗体已关闭（ADR-0022）**：Serif/Sans 的 Regular+Bold 四面进表，按 `weight` 选面；CJK 没有斜体面，`slant: italic` 仍用正体宽度（斜体只影响渲染姿态） | 斜体拉丁的换行点可能偏差 | 有斜体字面时再生成表 | 否 |
-| D62 | 母版只有页边带可变 | **已支持命名母版与按节切换（ADR-0021）**：`masters:` + `Section.page_template`，换母版强制新页；母版只改页眉/页脚/folio，**版心几何仍全局一套**，也没有自动封面/首页变体 | 封面等特殊版心做不了 | 后续 | 否 |
+| D62 | 母版只有页边带可变 | **已支持命名母版、按节切换、章节起始母版（ADR-0021/0028）**：`masters:` + `Section.page_template` + `page.start-master`；母版只改页眉/页脚/folio，**版心几何仍全局一套**，也没有自动封面（`GeneratedKind::Cover` 无生成器） | 封面等特殊版心做不了 | 后续 | 否 |
 | D63 | 度量表是声明子集 | 覆盖 Latin/标点/假名/CJK 基本区与扩展 A；扩展 B+ 与少数字形回退到 1em | 生僻字宽度不准 | 需要时重新生成表 | 否 |
 | D64 | 页眉页脚只排一行 | running title 过长时溢出而不是换行/缩略 | 超长标题可能压到页边 | 未排期（需要字串截断策略） | 否 |
 | D65 | 引擎配置用固定形状解析器 | 不复用模板的 YAML 子集：无序列、无锚点、长度只支持整数 `em` | 配置 DSL 与模板 DSL 是两套错误面 | 有真实需求时再抽公共 YAML crate | 否 |
 | D66 | 引擎只支持 `paragraph` 窗口 | `window: page`/`chapter` 在配置层被拒绝；内核本来也报 `UnsupportedWindow` | 页级/章级搜索未实现 | 未排期（需要页级 DP 上下文） | 否 |
 | D67 | 语料规模仍有限 | `corpus/zh` 现有 12 个文档/1211 行：长篇（30 页）、脚注密集、访谈、科普、colspan/rowspan 表格、表头重复、三线表、真实行间公式已覆盖；仍缺目录/章节页与质量标注 | 代理标定的外推能力有限 | 持续补充 | 否 |
 | D70 | LaTeX 子集有边界 | `soma-latex` 不做宏/计数器/参考文献/`\includegraphics`/真实公式排版；表格单元只当纯文本；无 `\item[label]`、`description`；无源位置 | 复杂 LaTeX 会降级 | 有真实需求时扩 | 否 |
-| D71 | 数学子集有边界 | `soma-math` 覆盖符号/上下标/分式/根式/大型运算符/函数名/`\left\right`；未做：定界符自动伸缩（`\left(` 与分式等高）、`\begin{aligned}`/矩阵/多行对齐、数学字体表（`√`、`∑` 用正文字体）、`\overbrace`/`\underbrace`/`\color` | 复杂公式会回退为文本占位 | 按真实稿件补 | 否 |
-| D72 | 行内数学复用显示常量 | 行内只改了 `display: false`（上下限不堆叠）；`\frac` 的分子分母仍用 `script_scale`，`big_scale` 不缩小，没有数学斜体与字间微调 | 行内公式偏大、与正文节奏不完美 | 有真实稿件后加 `text_scale` 一组常量 | 否 |
+| D71 | 数学子集有边界 | **主要缺口已关闭（ADR-0030）**：定界符按内容伸缩、`matrix/pmatrix/bmatrix/vmatrix/cases/aligned`、数学字体表（Noto Sans Math 第 5 面）都已实现；仍缺 `\overbrace`/`\underbrace`、`\color`、`array` 列格式、`\substack`、多行公式编号 | 少见的复杂公式回退为文本占位 | 按真实稿件补 | 否 |
+| D72 | 行内数学复用显示常量 | **已关闭（ADR-0030）**：`text_frac_scale`/`text_frac_gap`/`text_big_scale` 三组常量；显示分式改为全尺寸分子分母；行内上下限不堆叠 | 仍无数学斜体与字间微调（并入 D71） | ✅ 已关闭 | 否 |
+| D73 | 目录能力有边界 | 目录只有条目 + 右对齐页码：无引导点（dot leaders）、无按级编号格式、无图目录/表目录/索引（`GeneratedKind` 其余变体无生成器）、目录本身不进书签 | 目录样式偏素 | 有排版需求时补 | 否 |
+| D74 | CLI 只做单文件 | 无目录批量、无 `--stdin`、无 watch、无模板外的元数据覆盖；格式只有 html/svg/json | 批量流程要自己写脚本 | 有自动化需求时补 | 否 |
 | D69 | HTML 子集有边界 | `soma-html` 只做语义白名单：无 CSS/脚本/表单/框架，无 `<caption>`/`<colgroup>`/脚注标记，实体集有限，`SourceSpan` 为空 | 复杂 HTML 会降级或丢表现 | 有真实需求时扩 | 否 |
 | D68 | 表格线只能整表配置 | **已关闭（ADR-0020）**：五条线宽、竖线/左右框、实线/虚线、颜色都进模板；剩余限制是 `table:` 只能全局一套，不能按表/按行覆盖 | 多套表格外观要多个模板 | ✅ 已关闭 | 否 |
 | D50 | ~~无页面母版 / 页眉页脚 / 页码~~ | **已关闭（E4）**：页眉（running-title 或字面量）、页脚、`{page}`/`{pages}` 页码；两遍无重排 | 首页/封面变体未做（D62） | ✅ 已关闭 | 否 |
@@ -127,4 +129,6 @@
 | Q′+ | **已完成**：`corpus/zh` 真实语料 + `soma-eval corpus/calibrate` + 代理标定报告；部分关闭 D05 的语料前提 |
 | E7 | **已完成**：D29、D59（`soma.engine/1`，ADR-0016）；新增 D65、D66 |
 | E7+ | **已完成**：D33、D51 的表格部分（ADR-0017：网格、rowspan、表头重复；ADR-0018：行带续排；ADR-0019：行线与 `within`）；新增 D68 |
-| 未排期 | D01、D03、D04、D05、D10、D11、D12、D13、D60、D69、D70、N1–N6 |
+| 数学 | **主要缺口已关闭（ADR-0026/0027/0030）**：D52 关闭；D54 收窄；D71 大部分关闭；D72 关闭 |
+| 工具链 | **已完成（ADR-0028/0029）**：目录与章节起始母版；`soma` CLI；盲测 dry run；新增 D73、D74 |
+| 未排期 | D01、D03、D04、D05、D10、D11、D12、D13、D60、D62、D69、D70、D71、D73、D74、N1–N6 |

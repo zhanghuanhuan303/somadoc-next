@@ -1,8 +1,9 @@
 # Blind-test protocol and tooling
 
-Status: the kit generator and the analysis are implemented; **no human blind
-test has been run**. Gate Q remains `Inconclusive` until real, pre-registered
-data exists.
+Status: the kit generator, the analysis, and a **simulated dry run** are
+implemented; **no human blind test has been run**. Gate Q remains
+`Inconclusive` until real, pre-registered data exists. See
+[`blind-dry-run.md`](blind-dry-run.md) for the mechanism check.
 
 ## What is compared
 
@@ -52,14 +53,38 @@ paragraph,evaluator,choice
 Run:
 
 ```sh
-cargo run -p soma-eval --release -- blind preferences.csv --key key.csv
+cargo run -p soma-eval --release -- blind preferences.csv --key key.csv \
+  --out corpus/blind/report.md
 ```
+
+`--out` writes a committable Markdown report (inputs, counts, interval, kappa,
+decision, the rule). Without it the tool prints the same numbers to stdout.
 
 `--key` is optional for hand-built matrices where A always means the candidate.
 When the kit placed the candidate on side B for a paragraph, the tool swaps that
 paragraph's A/B before computing the report.
 
 Exit codes: `0` pass, `1` fail, `2` inconclusive.
+
+## Runbook for the real panel
+
+1. **Freeze** `corpus/blind/samples.txt` and the seed. Regenerating the kit
+   after collecting ratings invalidates them.
+2. **Generate the kit** and hand `sheet.html` to evaluators; keep `key.csv`
+   away from them.
+3. **Pilot** with 5–8 evaluators × 8–10 paragraphs; measure kappa.
+   - kappa < 0.20: calibrate the judgment examples (what counts as "松紧不匀",
+     "行尾空洞", "标点挤压") and re-run the pilot.
+4. **Collect** 30 paragraphs × 5 evaluators into
+   `corpus/blind/kit/ratings.template.csv` (rename to `preferences.csv`).
+5. **Analyse** with the command above and `--out`.
+6. **Commit** the CSV, the key, and the generated report together. A report
+   without its CSV is not reproducible.
+7. If the Wilson interval still crosses 50% at 30 paragraphs, extend to the
+   pre-registered 60; if it still crosses, record **Inconclusive** and stop.
+
+The dry run (`corpus/blind/dry-run/`) exercises steps 2–5 mechanically; only
+steps 3–4 need people.
 
 ## Decision rule
 

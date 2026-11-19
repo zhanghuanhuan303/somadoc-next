@@ -92,13 +92,27 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   centres one `MathBox` per `MathBlock`; both renderers paint it; a malformed
   formula falls back to text instead of failing the page. Inline formulas are
   object atoms measured by their own box (ADR-0027), so they break and raise the
-  line box like any other inline object. See [`docs/math.md`](docs/math.md).
+  line box like any other inline object. Fences stretch to their body, and
+  `matrix`/`pmatrix`/`bmatrix`/`vmatrix`/`cases`/`aligned` are supported; symbols
+  come from a dedicated math face in the metrics table (ADR-0030). See
+  [`docs/math.md`](docs/math.md).
 - Engine configuration: `soma-engine` parses `soma.engine/1` (preset, window,
   atom window, fallback switches, vertical cost model) into the same
   `BreakConfig`/`VerticalParams` the hand-built path uses. See
   [`docs/engine.md`](docs/engine.md) and ADR-0016.
-- A2 template layer (`soma-template`, schemas `soma.template/2` and
-  `soma.styles/2`): a documented YAML subset with line/column errors, exact units
+- Contents pages and chapter openings (ADR-0028): `toc: {depth, title}` in the
+  template produces an automatically paginated contents page (page numbers are
+  a fixed point over at most four layout passes, reported as `toc.stable`), and
+  `page.start-master` selects a master for pages that open a section.
+- One command (ADR-0029): `soma render --input doc.tex --template book.yaml
+  --format html|svg|json` runs the whole pipeline; `soma check` prints layout
+  facts and the canonical hash. See [`docs/cli.md`](docs/cli.md).
+- Blind-test tooling: kit generation, key unmapping, Wilson interval, Fleiss'
+  kappa, and a committable Markdown report (`soma-eval blind --out`). A
+  **simulated** dry run proves the chain (`docs/blind-dry-run.md`); the human
+  panel (D01) is still open.
+- A2 template layer (`soma-template`, schemas `soma.template/6` and
+  `soma.styles/3`): a documented YAML subset with line/column errors, exact units
   (decimal → rational → 1/4096 em, truncation toward zero), a selector cascade
   with inheritance, a 25-property whitelist, `templateHash`, and `StyledDoc` as
   lifetime-free data with `styleHash`. Templates cannot write engine knobs; Gate A
@@ -141,6 +155,7 @@ crates/
   soma-md/     # Markdown subset -> DocIR
   soma-html/   # HTML subset (semantic whitelist) -> DocIR
   soma-latex/  # LaTeX subset (sections, inline, environments) -> DocIR
+  soma-cli/    # `soma`: source + template -> HTML/SVG/canonical JSON
   soma-math/   # TeX subset -> integer math boxes (symbols + rules)
   soma-render-html/ # PagedLayout -> absolutely positioned HTML
   soma-render-svg/  # PagedLayout -> SVG (Gate V/R)
@@ -148,6 +163,7 @@ crates/
   soma-eval/   # benchmark, sweeps, blind-test statistics, effect scorecard
   soma-demo/   # static HTML renderer consuming LayoutResult
   soma-wasm/   # native/WASI fixture for cross-target byte verification
+tools/dry-run-panel/ # simulated blind-test panel generator (not human data)
 tools/
   metrics-gen/ # offline OTF/TTC -> soma.metrics/1 (numbers only)
 corpus/
@@ -168,9 +184,9 @@ scripts/
   kp-verify.sh # K-P closure: gates + bench budget + length policy
 docs/
   architecture-v2.md  # frozen architecture
-  adr/                # accepted decisions (ADR-0001 … 0026)
+  adr/                # accepted decisions (ADR-0001 … 0030)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
-  debt.md             # global not-done register (D01–D71, N1–N6)
+  debt.md             # global not-done register (D01–D74, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
   e1-q-report.md      # E1–Q′ delivery report
   engine.md           # soma.engine/1: shape, defaults, errors, usage

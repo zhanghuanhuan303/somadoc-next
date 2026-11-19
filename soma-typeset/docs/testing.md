@@ -103,7 +103,7 @@ Cumulative public test files:
 | `a1_model.rs` | 9 | node coverage, renumbering, text projection |
 | `a1_raw.rs` | 4 | raw payload preservation |
 | `a1_validate.rs` | 26 | every DocIR invariant has a failing case (incl. table grid) |
-| `a2_template.rs` | 14 | YAML subset, validation, positions, hash, `within`, `table:`, `masters:` |
+| `a2_template.rs` | 16 | YAML subset, validation, positions, hash, `within`, `table:`, `masters:`, `toc:`, `start-master` |
 | `a2_units.rs` | 7 | exact conversion, truncation, strict grammar |
 | `a2_resolve.rs` | 11 | cascade, inheritance, page geometry, style hash |
 | `a2_cell_context.rs` | 1 | `within: cell` overrides body rules and sets cell padding |
@@ -128,9 +128,12 @@ Cumulative public test files:
 | `a5_md.rs` | 11 | Markdown subset, inlines, spans, validity |
 | `html.rs` (html) | 9 | HTML subset shapes, table grid, degradation, recovery, pipeline |
 | `latex.rs` (latex) | 9 | LaTeX subset shapes, math source, table grid, metadata, recovery, pipeline |
-| `math.rs` (soma-math) | 19 | scripts, fractions, radicals, big operators, function names, delimiters, spacing, styles, errors |
+| `math.rs` (soma-math) | 26 | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, spacing, styles, errors |
 | `e11_math.rs` (layout) | 8 | centring, baseline inside the box, flow, canonical `math` field |
 | `e12_inline_math.rs` (layout) | 11 | marker atoms, line-box growth, text style, placeholder, canonical `inlineMath` |
+| `e13_toc.rs` (layout) | 9 | TOC depth, page numbers, row shape, forced page, section-start master |
+| `cli.rs` (soma-cli) | 12 | render md/tex to html/svg/json, template geometry, TOC template, `--out`, check, error paths |
+| `blind_pipeline.rs` (eval) | 3 | dry-run fixture through key + statistics + decision |
 | `k7_object_metrics.rs` | 4 | object hooks vs text paths, default-hook equivalence |
 | `math.rs` (svg) | 4 | exact formula coordinates |
 | `inline_math.rs` (svg) | 2 | inline items on the line baseline, marker never drawn |
@@ -147,12 +150,12 @@ Cumulative public test files:
 | `soma-wasm` unit | 1 | fixture determinism + forced end + DocIR |
 | `vertical_slice.rs` (rules) | 6 | end-to-end rules + trim + hard break |
 | `soma-rules` unit | 15 | segmentation, punctuation, pair trim, hyphen breaks, rule inventory |
-| `soma-metrics` unit | 9 | table round-trip, CJK/Latin widths, regular/bold faces, fallback, hash, truncation |
+| `soma-metrics` unit | 10 | table round-trip, CJK/Latin widths, regular/bold/math faces, fallback, hash, truncation |
 | `soma-core` vertical unit | 1 | vertical cost model hash |
 | core unit | 24 | IR, units, breaker, result, presets |
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 
-Total: **436 tests**.
+Total: **470 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

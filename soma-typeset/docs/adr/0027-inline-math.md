@@ -85,8 +85,10 @@ source and it is measured as text. A malformed formula never fails layout, and
   Every existing test keeps its numbers; `k7_object_metrics.rs` locks the new
   behaviour and the default-hook equivalence.
 - New debt D72: text-style constants are not yet differentiated from display
-  ({`\\frac` parts keep `script_scale`, `big_scale` does not shrink), no italic
-  math font, no delimiter sizing.
+  (`\frac` parts kept `script_scale`, `big_scale` did not shrink), no italic
+  math font, no delimiter sizing. **Update (ADR-0030):** the text-style
+  constants and fences are in; D72 is closed and the remaining math gaps live
+  in D71.
 
 ## Alternatives rejected
 
