@@ -132,8 +132,8 @@ Cumulative public test files:
 | `pipeline.rs` (md) | 3 | Markdown -> DocIR -> pages -> HTML |
 | `spans.rs` (rules) | 6 | span compiler agrees with the text compiler |
 | `soma-doc` doc-test | 1 | crate-level usage example |
-| `soma-eval` unit | 10 | bench, sweep, Wilson, kappa, blind, `length_limited` share |
-| `soma-demo` unit | 3 | HTML geometry and escaping |
+| `soma-eval` unit | 11 | bench, sweep, Wilson, kappa, blind, kit key translation, `length_limited` share |
+| `soma-demo` unit | 6 | HTML geometry, escaping, anonymized blind sheet, deterministic sides |
 | `soma-wasm` unit | 1 | fixture determinism + forced end + DocIR |
 | `vertical_slice.rs` (rules) | 6 | end-to-end rules + trim + hard break |
 | `soma-rules` unit | 15 | segmentation, punctuation, pair trim, hyphen breaks, rule inventory |
@@ -142,7 +142,7 @@ Cumulative public test files:
 | core unit | 23 | IR, units, breaker, result |
 | layout unit | 2 | trim scaling at body and non-body sizes |
 
-Total: **355 tests**.
+Total: **359 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

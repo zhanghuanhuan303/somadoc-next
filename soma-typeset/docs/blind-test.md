@@ -1,7 +1,8 @@
 # Blind-test protocol and tooling
 
-Status: the tooling is implemented; **no human blind test has been run**. Gate Q
-remains `Inconclusive` until real, pre-registered data exists.
+Status: the kit generator and the analysis are implemented; **no human blind
+test has been run**. Gate Q remains `Inconclusive` until real, pre-registered
+data exists.
 
 ## What is compared
 
@@ -11,8 +12,27 @@ Each sample paragraph is rendered twice by the demo/participant tool:
 - **B** — the baseline (Greedy-F, furthest fit).
 
 The evaluator sees the two layouts without algorithm labels and chooses A or B.
-The ordering is randomized by the experiment runner; this repository only
-consumes the resulting choices.
+The sheet generator randomizes the side deterministically from a seed, and the
+analysis step undoes that mapping with the kit's key, so the report keeps
+counting A as the candidate.
+
+## Generating the kit
+
+```sh
+cargo run -p soma-demo -- --blind-kit corpus/blind/samples.txt \
+  --out corpus/blind/kit --seed 20261120 --width-em 40
+```
+
+`corpus/blind/samples.txt` is the frozen 30-paragraph set. The command writes:
+
+- `sheet.html` — 30 groups, each with two unlabeled renderings. Algorithm names
+  never appear in the file;
+- `key.csv` — `paragraph,kp_side`: which side (A or B) holds the K-P candidate.
+  Keep this away from evaluators;
+- `ratings.template.csv` — `paragraph,evaluator,choice` with 30 × 5 blank rows.
+
+The order is deterministic for a given seed. Do not change the samples or the
+seed after collecting ratings; if you must, regenerate the kit and re-run.
 
 ## CSV format
 
@@ -32,8 +52,12 @@ paragraph,evaluator,choice
 Run:
 
 ```sh
-cargo run -p soma-eval --release -- blind preferences.csv
+cargo run -p soma-eval --release -- blind preferences.csv --key key.csv
 ```
+
+`--key` is optional for hand-built matrices where A always means the candidate.
+When the kit placed the candidate on side B for a paragraph, the tool swaps that
+paragraph's A/B before computing the report.
 
 Exit codes: `0` pass, `1` fail, `2` inconclusive.
 
