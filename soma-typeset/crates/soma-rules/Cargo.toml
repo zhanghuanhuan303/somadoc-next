@@ -1,0 +1,11 @@
+[package]
+name = "soma-rules"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Chinese-first rule compiler: text -> typesetting ParaIR"
+
+[dependencies]
+soma-core = { path = "../soma-core" }

@@ -1,0 +1,322 @@
+//! Canonical JSON and hashes for templates and resolved styles.
+//!
+//! Same rules as every other layer: one hand-written writer, fixed field order,
+//! integers only, strings escaped by the JSON rules. `soma.template/1` for the
+//! template, `soma.styles/1` for the resolved style layer.
+
+use alloc::string::String;
+use core::fmt::{self, Write};
+
+use soma_core::Align;
+
+use crate::style::{ComputedStyle, StyledDoc};
+use crate::template::{Declaration, FontSlant, FontWeight, PropertyValue, Selector, Template};
+use crate::units::{LengthSpec, LineHeightSpec, Rational};
+use crate::StyleHash;
+use crate::TemplateHash;
+
+pub(crate) const STYLE_SCHEMA: &str = "soma.styles/1";
+
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+struct FnvWriter {
+    state: u64,
+}
+
+impl FnvWriter {
+    const fn new() -> Self {
+        Self { state: FNV_OFFSET }
+    }
+
+    const fn finish(self) -> u64 {
+        self.state
+    }
+}
+
+impl Write for FnvWriter {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        for byte in text.as_bytes() {
+            self.state ^= *byte as u64;
+            self.state = self.state.wrapping_mul(FNV_PRIME);
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn template_json(template: &Template) -> String {
+    let mut out = String::new();
+    write_template(&mut out, template).expect("writing into a String cannot fail");
+    out
+}
+
+pub(crate) fn template_hash(template: &Template) -> TemplateHash {
+    let mut writer = FnvWriter::new();
+    write_template(&mut writer, template).expect("hashing cannot fail");
+    TemplateHash(writer.finish())
+}
+
+pub(crate) fn style_json(styled: &StyledDoc) -> String {
+    let mut out = String::new();
+    write_style(&mut out, styled).expect("writing into a String cannot fail");
+    out
+}
+
+pub(crate) fn style_hash(styled: &StyledDoc) -> StyleHash {
+    let mut writer = FnvWriter::new();
+    write_style(&mut writer, styled).expect("hashing cannot fail");
+    StyleHash(writer.finish())
+}
+
+fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
+    out.write_str("{\"schema\":\"")?;
+    out.write_str(crate::template::SCHEMA)?;
+    out.write_str("\",\"name\":")?;
+    write_string(out, &template.name)?;
+    out.write_str(",\"version\":")?;
+    write_opt_string(out, template.version.as_deref())?;
+
+    out.write_str(",\"page\":{\"size\":\"")?;
+    out.write_str(template.page.size.as_str())?;
+    out.write_str("\",")?;
+    let (width, height) = template.page.size.dimensions();
+    out.write_str("\"width\":")?;
+    write_length(out, width)?;
+    out.write_str(",\"height\":")?;
+    write_length(out, height)?;
+    out.write_str(",\"marginTop\":")?;
+    write_length(out, template.page.margin_top)?;
+    out.write_str(",\"marginBottom\":")?;
+    write_length(out, template.page.margin_bottom)?;
+    out.write_str(",\"marginLeft\":")?;
+    write_length(out, template.page.margin_left)?;
+    out.write_str(",\"marginRight\":")?;
+    write_length(out, template.page.margin_right)?;
+    out.write_char('}')?;
+
+    out.write_str(",\"footnote\":{\"numbering\":\"")?;
+    out.write_str(template.footnote.numbering.as_str())?;
+    out.write_str("\"}")?;
+
+    out.write_str(",\"styles\":[")?;
+    for (index, rule) in template.styles.iter().enumerate() {
+        if index > 0 {
+            out.write_char(',')?;
+        }
+        out.write_str("{\"selector\":")?;
+        write_selector(out, &rule.selector)?;
+        out.write_str(",\"declarations\":[")?;
+        for (declaration_index, declaration) in rule.declarations.iter().enumerate() {
+            if declaration_index > 0 {
+                out.write_char(',')?;
+            }
+            write_declaration(out, declaration)?;
+        }
+        out.write_str("]}")?;
+    }
+    out.write_str("]}")
+}
+
+fn write_selector(out: &mut impl Write, selector: &Selector) -> fmt::Result {
+    out.write_str("{\"element\":")?;
+    write_opt_string(out, selector.element.as_deref())?;
+    out.write_str(",\"role\":")?;
+    write_opt_string(out, selector.role.as_deref())?;
+    out.write_str(",\"classes\":[")?;
+    for (index, class) in selector.classes.iter().enumerate() {
+        if index > 0 {
+            out.write_char(',')?;
+        }
+        write_string(out, class)?;
+    }
+    out.write_str("]}")
+}
+
+fn write_declaration(out: &mut impl Write, declaration: &Declaration) -> fmt::Result {
+    out.write_str("{\"property\":\"")?;
+    out.write_str(declaration.property.as_str())?;
+    out.write_str("\",\"value\":")?;
+    match &declaration.value {
+        PropertyValue::Length(length) => {
+            out.write_str("{\"type\":\"length\",")?;
+            write_length(out, *length)?;
+            out.write_char('}')?;
+        }
+        PropertyValue::LineHeight(LineHeightSpec::Multiple(value)) => {
+            out.write_str("{\"type\":\"multiple\",")?;
+            write_rational(out, *value)?;
+            out.write_char('}')?;
+        }
+        PropertyValue::LineHeight(LineHeightSpec::Length(length)) => {
+            out.write_str("{\"type\":\"length\",")?;
+            write_length(out, *length)?;
+            out.write_char('}')?;
+        }
+        PropertyValue::Align(align) => {
+            out.write_str("{\"type\":\"align\",\"value\":\"")?;
+            out.write_str(align_str(*align))?;
+            out.write_str("\"}")?;
+        }
+        PropertyValue::Bool(flag) => write!(out, "{{\"type\":\"bool\",\"value\":{flag}}}")?,
+        PropertyValue::Weight(weight) => {
+            out.write_str("{\"type\":\"weight\",\"value\":\"")?;
+            out.write_str(weight_str(*weight))?;
+            out.write_str("\"}")?;
+        }
+        PropertyValue::Slant(slant) => {
+            out.write_str("{\"type\":\"slant\",\"value\":\"")?;
+            out.write_str(slant_str(*slant))?;
+            out.write_str("\"}")?;
+        }
+        PropertyValue::Color(color) => {
+            out.write_str("{\"type\":\"color\",\"value\":\"")?;
+            write_color(out, Some(*color))?;
+            out.write_str("\"}")?;
+        }
+        PropertyValue::Text(text) => {
+            out.write_str("{\"type\":\"text\",\"value\":")?;
+            write_string(out, text)?;
+            out.write_char('}')?;
+        }
+    }
+    out.write_char('}')
+}
+
+fn write_length(out: &mut impl Write, length: LengthSpec) -> fmt::Result {
+    write_rational(out, length.value)?;
+    out.write_str(",\"unit\":\"")?;
+    out.write_str(length.unit.as_str())?;
+    out.write_char('"')
+}
+
+fn write_rational(out: &mut impl Write, value: Rational) -> fmt::Result {
+    write!(out, "\"num\":{},\"den\":{}", value.num(), value.den())
+}
+
+fn write_style(out: &mut impl Write, styled: &StyledDoc) -> fmt::Result {
+    out.write_str("{\"schema\":\"")?;
+    out.write_str(STYLE_SCHEMA)?;
+    write!(out, "\",\"templateHash\":{}", styled.template_hash().0)?;
+
+    let page = styled.page();
+    write!(out, ",\"page\":{{\"width\":{}", page.width.0)?;
+    write!(out, ",\"height\":{}", page.height.0)?;
+    write!(out, ",\"marginTop\":{}", page.margin_top.0)?;
+    write!(out, ",\"marginBottom\":{}", page.margin_bottom.0)?;
+    write!(out, ",\"marginLeft\":{}", page.margin_left.0)?;
+    write!(out, ",\"marginRight\":{}}}", page.margin_right.0)?;
+
+    out.write_str(",\"footnote\":{\"numbering\":\"")?;
+    out.write_str(styled.footnote_numbering().as_str())?;
+    out.write_str("\"}")?;
+
+    out.write_str(",\"styles\":[")?;
+    for (index, style) in styled.table().styles().iter().enumerate() {
+        if index > 0 {
+            out.write_char(',')?;
+        }
+        write_computed_style(out, style)?;
+    }
+    out.write_str("]")?;
+
+    out.write_str(",\"nodeStyle\":[")?;
+    for (index, (node, style)) in styled.node_style().iter().enumerate() {
+        if index > 0 {
+            out.write_char(',')?;
+        }
+        write!(out, "{{\"node\":{},\"style\":{}}}", node.0, style.0)?;
+    }
+    out.write_str("]}")
+}
+
+fn write_computed_style(out: &mut impl Write, style: &ComputedStyle) -> fmt::Result {
+    write!(out, "{{\"fontSize\":{}", style.font_size.0)?;
+    write!(out, ",\"lineHeight\":{}", style.line_height.0)?;
+    write!(out, ",\"firstIndent\":{}", style.first_indent.0)?;
+    write!(out, ",\"indentLeft\":{}", style.indent_left.0)?;
+    write!(out, ",\"indentRight\":{}", style.indent_right.0)?;
+    write!(out, ",\"spaceBefore\":{}", style.space_before.0)?;
+    write!(out, ",\"spaceAfter\":{}", style.space_after.0)?;
+    out.write_str(",\"align\":\"")?;
+    out.write_str(align_str(style.align))?;
+    out.write_str("\",\"family\":")?;
+    write_opt_string(out, style.family.as_deref())?;
+    out.write_str(",\"color\":")?;
+    match style.color {
+        Some(color) => {
+            out.write_char('"')?;
+            write_color(out, Some(color))?;
+            out.write_char('"')?;
+        }
+        None => out.write_str("null")?,
+    }
+    out.write_str(",\"weight\":\"")?;
+    out.write_str(weight_str(style.weight))?;
+    out.write_str("\",\"slant\":\"")?;
+    out.write_str(slant_str(style.slant))?;
+    write!(out, "\",\"underline\":{}", style.underline)?;
+    write!(out, ",\"smallCaps\":{}", style.small_caps)?;
+    write!(out, ",\"keepWithNext\":{}", style.keep_with_next)?;
+    write!(out, ",\"pageBreakBefore\":{}}}", style.page_break_before)
+}
+
+fn write_color(out: &mut impl Write, color: Option<u32>) -> fmt::Result {
+    let Some(color) = color else {
+        return Ok(());
+    };
+    write!(
+        out,
+        "#{:02x}{:02x}{:02x}",
+        color >> 16,
+        (color >> 8) & 0xff,
+        color & 0xff
+    )
+}
+
+fn align_str(align: Align) -> &'static str {
+    match align {
+        Align::Justify => "justify",
+        Align::Left => "left",
+        Align::Center => "center",
+        Align::Right => "right",
+    }
+}
+
+fn weight_str(weight: FontWeight) -> &'static str {
+    match weight {
+        FontWeight::Normal => "normal",
+        FontWeight::Bold => "bold",
+    }
+}
+
+fn slant_str(slant: FontSlant) -> &'static str {
+    match slant {
+        FontSlant::Normal => "normal",
+        FontSlant::Italic => "italic",
+    }
+}
+
+fn write_opt_string(out: &mut impl Write, value: Option<&str>) -> fmt::Result {
+    match value {
+        Some(value) => write_string(out, value),
+        None => out.write_str("null"),
+    }
+}
+
+fn write_string(out: &mut impl Write, value: &str) -> fmt::Result {
+    out.write_char('"')?;
+    for character in value.chars() {
+        match character {
+            '"' => out.write_str("\\\"")?,
+            '\\' => out.write_str("\\\\")?,
+            '\n' => out.write_str("\\n")?,
+            '\r' => out.write_str("\\r")?,
+            '\t' => out.write_str("\\t")?,
+            character if (character as u32) < 0x20 => {
+                write!(out, "\\u{:04x}", character as u32)?;
+            }
+            character => out.write_char(character)?,
+        }
+    }
+    out.write_char('"')
+}
