@@ -14,7 +14,8 @@ use soma_core::{
 };
 use soma_eval::{
     apply_key, bench, blind_report, build_paragraph, parse_key, parse_observations, peak_rss_kb,
-    sweep_tolerance, sweep_weight, AggregateMetrics, BlindDecision, CorpusKind, WeightParam,
+    sweep_tolerance, sweep_weight, AggregateMetrics, BlindDecision, BlindReport, CorpusKind,
+    WeightParam,
 };
 
 const DEFAULT_SIZES: &[usize] = &[100, 500, 1_000, 2_000, 4_000];
@@ -324,6 +325,7 @@ fn inspect_command(args: &[String]) -> ExitCode {
 fn blind_command(args: &[String]) -> ExitCode {
     let mut path: Option<&str> = None;
     let mut key_path: Option<&str> = None;
+    let mut out_path: Option<&str> = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -332,6 +334,13 @@ fn blind_command(args: &[String]) -> ExitCode {
                     return fail("missing value for --key");
                 };
                 key_path = Some(value);
+                index += 2;
+            }
+            "--out" => {
+                let Some(value) = args.get(index + 1) else {
+                    return fail("missing value for --out");
+                };
+                out_path = Some(value);
                 index += 2;
             }
             other if !other.starts_with('-') && path.is_none() => {
@@ -397,6 +406,14 @@ fn blind_command(args: &[String]) -> ExitCode {
     println!("sample_ok={}", report.sample_ok);
     println!("decision={}", report.decision.as_str());
 
+    if let Some(out_path) = out_path {
+        let markdown = blind_markdown(path, key_path, &report);
+        if let Err(error) = std::fs::write(out_path, markdown) {
+            eprintln!("cannot write {out_path}: {error}");
+            return ExitCode::FAILURE;
+        }
+    }
+
     match report.decision {
         BlindDecision::Pass => ExitCode::SUCCESS,
         BlindDecision::Inconclusive => ExitCode::from(2),
@@ -409,6 +426,44 @@ fn option(args: &[String], name: &str) -> Option<String> {
         .position(|arg| arg == name)
         .and_then(|index| args.get(index + 1))
         .cloned()
+}
+
+/// A committable report of one blind run: inputs, counts, statistics, decision.
+fn blind_markdown(preferences: &str, key: Option<&str>, report: &crate::BlindReport) -> String {
+    let kappa = report
+        .kappa
+        .map(|value| format!("{value:.4}"))
+        .unwrap_or_else(|| String::from("undefined"));
+    let mut out = String::new();
+    out.push_str("# Blind test report\n\n");
+    out.push_str(&format!("- preferences: `{preferences}`\n"));
+    out.push_str(&format!(
+        "- key: {}\n",
+        key.map(|path| format!("`{path}`"))
+            .unwrap_or_else(|| String::from("(none)"))
+    ));
+    out.push_str("- protocol: 30 paragraphs x 5 evaluators, majority per paragraph\n");
+    out.push_str("- candidate: A = Knuth-Plass `publish-v1`; baseline: B = Greedy-F\n\n");
+    out.push_str(&format!("**Decision: `{}`**\n\n", report.decision.as_str()));
+    out.push_str("| metric | value |\n|---|---|\n");
+    out.push_str(&format!("| paragraphs | {} |\n", report.paragraphs));
+    out.push_str(&format!("| evaluators | {} |\n", report.evaluators));
+    out.push_str(&format!("| A wins | {} |\n", report.a_wins));
+    out.push_str(&format!("| B wins | {} |\n", report.b_wins));
+    out.push_str(&format!("| ties | {} |\n", report.ties));
+    out.push_str(&format!("| unanimous B | {} |\n", report.unanimous_b));
+    out.push_str(&format!("| point | {:.4} |\n", report.point));
+    out.push_str(&format!(
+        "| Wilson 95% | [{:.4}, {:.4}] |\n",
+        report.wilson_low, report.wilson_high
+    ));
+    out.push_str(&format!("| Fleiss kappa | {kappa} |\n"));
+    out.push_str(&format!("| sample ok | {} |\n\n", report.sample_ok));
+    out.push_str("Rule: pass needs >= 30 paragraphs, no unanimous B, point >= 0.60,\n");
+    out.push_str("Wilson lower bound > 0.50, and kappa >= 0.20. Fail on a unanimous B\n");
+    out.push_str("paragraph or a Wilson upper bound below 0.50. Anything else is\n");
+    out.push_str("inconclusive and blocks only the public quality claim.\n");
+    out
 }
 
 fn flag(args: &[String], name: &str) -> bool {
