@@ -7,6 +7,7 @@
 
 use alloc::format;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::attrs::{Attrs, MAX_ATTR_LEN, MAX_CLASSES};
@@ -184,26 +185,64 @@ impl Context<'_> {
         }
         self.inlines(&table.caption, &format!("{path}.caption"), depth)?;
         check_optional_label(&table.label, &format!("{path}.label"))?;
-        for (index, row) in table.rows.iter().enumerate() {
-            self.row(
-                row,
-                &format!("{path}.rows[{index}]"),
-                depth,
-                expected_columns,
-            )?;
+
+        let rows = table.rows.len();
+        let mut occupied = vec![vec![false; expected_columns.max(1)]; rows];
+        for (row_index, row) in table.rows.iter().enumerate() {
+            let row_path = format!("{path}.rows[{row_index}]");
+            self.row_meta(row, &row_path, depth)?;
+            if expected_columns == 0 {
+                continue;
+            }
+
+            let mut column = 0usize;
+            for (cell_index, cell) in row.cells.iter().enumerate() {
+                let cell_path = format!("{row_path}.cells[{cell_index}]");
+                while column < expected_columns && occupied[row_index][column] {
+                    column += 1;
+                }
+                let colspan = cell.colspan as usize;
+                let rowspan = cell.rowspan as usize;
+                let end_column = column + colspan;
+                if end_column > expected_columns {
+                    return Err(DocError::new(
+                        format!("{cell_path}.colspan"),
+                        "cell exceeds the declared columns",
+                    ));
+                }
+                let end_row = row_index + rowspan;
+                if end_row > rows {
+                    return Err(DocError::new(
+                        format!("{cell_path}.rowspan"),
+                        "rowspan exceeds the table rows",
+                    ));
+                }
+                for occupied_row in occupied.iter_mut().take(end_row).skip(row_index) {
+                    for occupied_cell in occupied_row.iter_mut().take(end_column).skip(column) {
+                        if *occupied_cell {
+                            return Err(DocError::new(
+                                format!("{cell_path}.rowspan"),
+                                "cell overlaps another cell",
+                            ));
+                        }
+                        *occupied_cell = true;
+                    }
+                }
+                column = end_column;
+            }
+
+            if (0..expected_columns).any(|index| !occupied[row_index][index]) {
+                return Err(DocError::new(
+                    format!("{row_path}.cells"),
+                    "row does not fill the grid; colspan sum must equal the column count",
+                ));
+            }
         }
         Ok(())
     }
 
-    fn row(
-        &mut self,
-        row: &Row,
-        path: &str,
-        depth: u32,
-        expected_columns: usize,
-    ) -> Result<(), DocError> {
+    fn row_meta(&mut self, row: &Row, path: &str, depth: u32) -> Result<(), DocError> {
         self.node_meta(&row.meta, path, depth)?;
-        let mut spanned_columns = 0u32;
         for (index, cell) in row.cells.iter().enumerate() {
             let cell_path = format!("{path}.cells[{index}]");
             self.node_meta(&cell.meta, &cell_path, depth)?;
@@ -219,14 +258,7 @@ impl Context<'_> {
                     "rowspan must be >= 1",
                 ));
             }
-            spanned_columns += cell.colspan as u32;
             self.blocks(&cell.blocks, &format!("{cell_path}.blocks"), depth + 1)?;
-        }
-        if expected_columns > 0 && spanned_columns as usize != expected_columns {
-            return Err(DocError::new(
-                format!("{path}.cells"),
-                "row colspan sum must equal the column count",
-            ));
         }
         Ok(())
     }

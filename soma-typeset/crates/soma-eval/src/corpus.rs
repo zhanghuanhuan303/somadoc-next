@@ -231,11 +231,26 @@ pub fn table_document() -> Document {
         vec![wide, cell("说明")],
     ));
     for row in 1..=40 {
-        rows.push(Row::new(
-            NodeMeta::synthesized(),
-            false,
-            vec![cell(&format!("{row}")), cell("甲类"), cell("短说明")],
-        ));
+        if row == 1 {
+            rows.push(Row::new(
+                NodeMeta::synthesized(),
+                false,
+                vec![cell_spans("跨两行", 1, 2), cell("甲类"), cell("短说明")],
+            ));
+        } else if row == 2 {
+            // Column 0 is occupied by the rowspan that started in row 1.
+            rows.push(Row::new(
+                NodeMeta::synthesized(),
+                false,
+                vec![cell("乙类"), cell("短说明")],
+            ));
+        } else {
+            rows.push(Row::new(
+                NodeMeta::synthesized(),
+                false,
+                vec![cell(&format!("{row}")), cell("甲类"), cell("短说明")],
+            ));
+        }
     }
     document.push_block(Block::Table(Table::new(
         NodeMeta::synthesized(),
@@ -307,6 +322,13 @@ pub fn book_document() -> Document {
     }
     document.renumber();
     document
+}
+
+fn cell_spans(value: &str, colspan: u16, rowspan: u16) -> Cell {
+    let mut cell = cell(value);
+    cell.colspan = colspan;
+    cell.rowspan = rowspan;
+    cell
 }
 
 fn cell(value: &str) -> Cell {

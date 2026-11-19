@@ -51,6 +51,7 @@ fn push_item(out: &mut Vec<VItem>, index: usize, item: &FlowItem, params: Vertic
             notes: item.footnotes.clone(),
             penalty: 0,
             can_break: !item.keep_with_next,
+            table: item.table,
         });
         return;
     }
@@ -81,7 +82,17 @@ fn push_item(out: &mut Vec<VItem>, index: usize, item: &FlowItem, params: Vertic
             notes: part.notes.clone(),
             penalty,
             can_break: !(part_index == last && item.keep_with_next),
+            table: item.table,
         });
+    }
+}
+
+/// Header height that must be reserved at the top of a page that starts in the
+/// middle of a table.
+pub(crate) fn header_reserve(item: &VItem) -> Width {
+    match item.table {
+        Some(table) if table.row >= table.header_rows => table.header_height,
+        _ => Width::ZERO,
     }
 }
 
@@ -125,7 +136,7 @@ fn place_segment(
         let Some((base_cost, base_pages, _)) = best[offset] else {
             continue;
         };
-        let mut used: i64 = 0;
+        let mut used: i64 = header_reserve(&items[i]).0 as i64;
         let mut stretch: i64 = 0;
         let mut shrink: i64 = 0;
         let mut seen: Vec<usize> = Vec::new();
@@ -230,7 +241,9 @@ pub(crate) fn place_greedy(
             continue;
         }
         let mut page_start = start;
-        let mut used = items[start].height.0 as i64 + items[start].after.width.0 as i64;
+        let mut used = header_reserve(&items[start]).0 as i64
+            + items[start].height.0 as i64
+            + items[start].after.width.0 as i64;
         for (i, item) in items
             .iter()
             .enumerate()
@@ -247,7 +260,9 @@ pub(crate) fn place_greedy(
                 ends.push(i);
                 page_index += 1;
                 page_start = i;
-                used = item.height.0 as i64 + item.after.width.0 as i64;
+                used = header_reserve(item).0 as i64
+                    + item.height.0 as i64
+                    + item.after.width.0 as i64;
             } else {
                 used = next;
             }
@@ -404,7 +419,7 @@ pub(crate) fn score_pages(
     let mut total = 0i64;
     let mut previous = 0usize;
     for (index, &end) in ends.iter().enumerate() {
-        let mut used: i64 = 0;
+        let mut used: i64 = header_reserve(&items[previous]).0 as i64;
         let mut stretch: i64 = 0;
         let mut shrink: i64 = 0;
         let mut body = 1i64;
@@ -454,9 +469,21 @@ pub(crate) fn assemble_page_blocks(
     end: usize,
     capacity: Width,
     note_height: Width,
+    tables: &[TableHeader],
 ) -> (Vec<PlacedBlock>, Width) {
     let mut blocks: Vec<PlacedBlock> = Vec::new();
+    let reserve = header_reserve(&vertical[start]);
     let mut used = Width::ZERO;
+    if reserve.0 > 0 {
+        if let Some(table) = vertical[start].table {
+            if let Some(header) = tables.get(table.id as usize) {
+                for block in &header.blocks {
+                    blocks.push(block.clone());
+                }
+                used = header.height;
+            }
+        }
+    }
     let mut index = start;
 
     let (natural, stretch) = page_fill(&vertical[start..end]);

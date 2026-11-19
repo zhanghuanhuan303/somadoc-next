@@ -318,6 +318,7 @@ pub fn layout_with(
         text: TextIndex::default(),
         notes: NoteMap::build(doc),
         headings: Vec::new(),
+        tables: Vec::new(),
     };
     let items = builder.flow(&doc.blocks, ROOT_STYLE)?;
     builder.compile_notes(doc)?;
@@ -380,6 +381,7 @@ pub fn layout_with(
             end,
             page_height,
             footnote_height,
+            &builder.tables,
         );
         let overflow = vertical_items[previous..end]
             .iter()
@@ -515,6 +517,31 @@ struct Part {
     notes: Vec<usize>,
 }
 
+/// Table metadata carried by the flow item of a row group.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TableContext {
+    id: u16,
+    /// First row index of this group.
+    row: u32,
+    /// Number of leading header rows.
+    header_rows: u32,
+    header_height: Width,
+}
+
+/// A repeated header block set, stored once per table.
+struct TableHeader {
+    blocks: Vec<PlacedBlock>,
+    height: Width,
+}
+
+/// One laid-out table cell before row heights are resolved.
+struct TableCellLayout {
+    row: usize,
+    rowspan: usize,
+    blocks: Vec<PlacedBlock>,
+    height: Width,
+}
+
 struct FlowItem {
     blocks: Vec<PlacedBlock>,
     height: Width,
@@ -526,6 +553,8 @@ struct FlowItem {
     footnotes: Vec<usize>,
     /// Empty for atomic blocks; one entry per line for splittable blocks.
     parts: Vec<Part>,
+    /// Set for table row groups; drives header repetition.
+    table: Option<TableContext>,
 }
 
 /// One vertical item handed to the page breaker.
@@ -540,6 +569,8 @@ struct VItem {
     penalty: i64,
     /// `false` when `keep-with-next` forbids a break here.
     can_break: bool,
+    /// Table metadata, copied from the flow item.
+    table: Option<TableContext>,
 }
 
 struct NoteMap {
@@ -578,6 +609,8 @@ struct Builder<'a> {
     notes: NoteMap,
     /// `(flow item index, node, plain text)` for headings, in document order.
     headings: Vec<(usize, NodeId, String)>,
+    /// Repeated header templates, indexed by `TableContext::id`.
+    tables: Vec<TableHeader>,
 }
 
 impl Builder<'_> {
@@ -690,47 +723,196 @@ impl Builder<'_> {
                     let style = self.style(node.meta.id, fallback);
                     let columns = node.columns.len().max(1);
                     let column_width = Width(self.content_width.0 / columns as i32);
-                    for row in &node.rows {
+                    let row_count = node.rows.len();
+                    if row_count == 0 {
+                        continue;
+                    }
+                    let mut occupied = vec![vec![false; columns]; row_count];
+                    let mut cells: Vec<TableCellLayout> = Vec::new();
+
+                    for (row_index, row) in node.rows.iter().enumerate() {
                         let row_style = self.style(row.meta.id, style);
-                        let row_computed = self.computed(row_style);
-                        let mut row_blocks = Vec::new();
-                        let mut row_height = Width::ZERO;
-                        let mut cell_index = 0usize;
+                        let mut column = 0usize;
                         for cell in &row.cells {
-                            let cell_style = self.style(cell.meta.id, row_style);
-                            let span = (cell.colspan as usize)
+                            while column < columns && occupied[row_index][column] {
+                                column += 1;
+                            }
+                            let colspan = (cell.colspan as usize)
                                 .max(1)
-                                .min(columns.saturating_sub(cell_index).max(1));
-                            let x = Width(column_width.0 * cell_index as i32);
-                            let width = Width(column_width.0 * span as i32);
+                                .min(columns.saturating_sub(column).max(1));
+                            let rowspan = (cell.rowspan as usize)
+                                .max(1)
+                                .min(row_count.saturating_sub(row_index).max(1));
+                            let width = Width(column_width.0 * colspan as i32);
+                            let cell_style = self.style(cell.meta.id, row_style);
                             let mut cell_items = Vec::new();
                             let saved = self.content_width;
                             self.content_width = width;
                             self.flow_into(&cell.blocks, cell_style, &mut cell_items)?;
                             self.content_width = saved;
-                            let mut y = Width::ZERO;
+
+                            let mut blocks = Vec::new();
+                            let mut height = Width::ZERO;
                             for item in cell_items {
                                 for mut placed in item.blocks {
                                     placed.kind = BoxKind::TableCell;
-                                    placed.x = placed.x + x;
-                                    placed.y = y;
-                                    y = y + placed.height;
-                                    row_blocks.push(placed);
+                                    placed.x = placed.x + Width(column_width.0 * column as i32);
+                                    placed.y = height;
+                                    height = height + placed.height;
+                                    blocks.push(placed);
                                 }
                             }
-                            row_height = row_height.max(y);
-                            cell_index += span;
+                            for occupied_row in occupied
+                                .iter_mut()
+                                .take(row_index + rowspan)
+                                .skip(row_index)
+                            {
+                                for occupied_cell in
+                                    occupied_row.iter_mut().take(column + colspan).skip(column)
+                                {
+                                    *occupied_cell = true;
+                                }
+                            }
+                            cells.push(TableCellLayout {
+                                row: row_index,
+                                rowspan,
+                                blocks,
+                                height,
+                            });
+                            column += colspan;
+                        }
+                    }
+
+                    // Row gaps are part of the row height (except above row 0).
+                    let mut row_heights = vec![Width::ZERO; row_count];
+                    let mut leading_gap = Width::ZERO;
+                    for (row_index, row) in node.rows.iter().enumerate() {
+                        let row_style = self.style(row.meta.id, style);
+                        let computed = self.computed(row_style);
+                        if row_index == 0 {
+                            leading_gap = computed.space_before;
+                        } else {
+                            row_heights[row_index] = row_heights[row_index] + computed.space_before;
+                        }
+                    }
+                    for cell in cells.iter().filter(|cell| cell.rowspan == 1) {
+                        row_heights[cell.row] = row_heights[cell.row].max(cell.height);
+                    }
+                    for cell in cells.iter().filter(|cell| cell.rowspan > 1) {
+                        let span = row_heights[cell.row..cell.row + cell.rowspan]
+                            .iter()
+                            .fold(Width::ZERO, |sum, height| sum + *height);
+                        if cell.height > span {
+                            let deficit = Width(cell.height.0 - span.0);
+                            let per = Width(deficit.0 / cell.rowspan as i32);
+                            for height in row_heights
+                                .iter_mut()
+                                .take(cell.row + cell.rowspan - 1)
+                                .skip(cell.row)
+                            {
+                                *height = *height + per;
+                            }
+                            let last = cell.row + cell.rowspan - 1;
+                            row_heights[last] = row_heights[last]
+                                + Width(deficit.0 - per.0 * (cell.rowspan as i32 - 1));
+                        }
+                    }
+
+                    let mut row_offsets = Vec::with_capacity(row_count + 1);
+                    let mut offset = Width::ZERO;
+                    for height in &row_heights {
+                        row_offsets.push(offset);
+                        offset = offset + *height;
+                    }
+                    row_offsets.push(offset);
+
+                    // Leading header rows are repeated on continuation pages.
+                    let mut header_rows = 0usize;
+                    while header_rows < row_count && node.rows[header_rows].header {
+                        header_rows += 1;
+                    }
+                    let header_height = row_offsets[header_rows];
+                    let mut header_blocks = Vec::new();
+                    if header_rows > 0 {
+                        for cell in cells
+                            .iter()
+                            .filter(|cell| cell.row + cell.rowspan <= header_rows)
+                        {
+                            let cell_top = row_offsets[cell.row];
+                            for block in &cell.blocks {
+                                let mut placed = block.clone();
+                                placed.y = placed.y + cell_top;
+                                header_blocks.push(placed);
+                            }
+                        }
+                    }
+                    let table_id = self.tables.len().min(u16::MAX as usize) as u16;
+                    self.tables.push(TableHeader {
+                        blocks: header_blocks,
+                        height: header_height,
+                    });
+
+                    // A rowspan may not be split across pages: merge the rows
+                    // it covers into one atomic group.
+                    let mut groups: Vec<(usize, usize)> = Vec::new();
+                    let mut start = 0usize;
+                    while start < row_count {
+                        let mut end = start + 1;
+                        loop {
+                            let mut extended = end;
+                            for cell in &cells {
+                                if cell.row >= start && cell.row < end {
+                                    extended = extended.max(cell.row + cell.rowspan);
+                                }
+                            }
+                            if extended <= end {
+                                break;
+                            }
+                            end = extended.min(row_count);
+                        }
+                        groups.push((start, end));
+                        start = end;
+                    }
+
+                    for (group_start, group_end) in groups {
+                        let top = row_offsets[group_start];
+                        let bottom = row_offsets[group_end];
+                        let mut blocks = Vec::new();
+                        for cell in &cells {
+                            if cell.row < group_start || cell.row >= group_end {
+                                continue;
+                            }
+                            let cell_top = Width(row_offsets[cell.row].0 - top.0);
+                            for block in &cell.blocks {
+                                let mut placed = block.clone();
+                                placed.y = placed.y + cell_top;
+                                blocks.push(placed);
+                            }
                         }
                         items.push(FlowItem {
-                            blocks: row_blocks,
-                            height: row_height,
-                            before: self.before_glue(&row_computed),
+                            blocks,
+                            height: Width(bottom.0 - top.0),
+                            before: Glue {
+                                width: if group_start == 0 {
+                                    leading_gap
+                                } else {
+                                    Width::ZERO
+                                },
+                                plus: Width::ZERO,
+                                minus: Width::ZERO,
+                            },
                             after: Glue::ZERO,
                             keep_with_next: false,
                             page_break_before: false,
                             forced_break: false,
                             footnotes: Vec::new(),
                             parts: Vec::new(),
+                            table: Some(TableContext {
+                                id: table_id,
+                                row: group_start as u32,
+                                header_rows: header_rows as u32,
+                                header_height,
+                            }),
                         });
                     }
                 }
@@ -764,6 +946,7 @@ impl Builder<'_> {
                         forced_break: false,
                         footnotes: Vec::new(),
                         parts: Vec::new(),
+                        table: None,
                     });
                 }
                 Block::PageBreak(_) => items.push(FlowItem {
@@ -776,6 +959,7 @@ impl Builder<'_> {
                     forced_break: true,
                     footnotes: Vec::new(),
                     parts: Vec::new(),
+                    table: None,
                 }),
                 Block::Section(node) => {
                     let style = self.style(node.meta.id, fallback);
@@ -913,6 +1097,7 @@ impl Builder<'_> {
             forced_break: false,
             footnotes,
             parts,
+            table: None,
             blocks: vec![PlacedBlock {
                 node,
                 kind,
@@ -1079,6 +1264,7 @@ impl Builder<'_> {
             forced_break: false,
             footnotes: Vec::new(),
             parts: Vec::new(),
+            table: None,
             blocks: vec![PlacedBlock {
                 node,
                 kind: BoxKind::Code,
@@ -1144,6 +1330,7 @@ impl Builder<'_> {
             forced_break: false,
             footnotes: Vec::new(),
             parts: Vec::new(),
+            table: None,
             blocks: vec![PlacedBlock {
                 node,
                 kind,
@@ -1184,6 +1371,7 @@ impl Builder<'_> {
             forced_break: false,
             footnotes: Vec::new(),
             parts: Vec::new(),
+            table: None,
             blocks: vec![PlacedBlock {
                 node,
                 kind: BoxKind::Figure,

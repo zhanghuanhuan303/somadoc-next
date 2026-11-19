@@ -13,7 +13,7 @@ replace Gate Q's human review.
 | `mixed.md` | mixed-script note | URLs, code spans, hyphenated terms, percentages |
 | `classics.md` | classical prose (public domain) | long paragraphs, pagination, quotation |
 | `footnotes.md` | footnote-dense note | note area, marker-line coupling |
-| `table-page` (built-in) | table fixture | cell boxes, colspan column widths, row stacking |
+| `table-page` (built-in) | table fixture | cell boxes, colspan/rowspan, repeated header |
 | `math-page` (built-in) | formula placeholders | object boxes, order across pages |
 | `book` (built-in) | 30-chapter document | long-run pagination, 810 lines, 30 pages |
 

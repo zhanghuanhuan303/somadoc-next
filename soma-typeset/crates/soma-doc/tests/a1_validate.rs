@@ -421,3 +421,86 @@ fn valid_minimal_document_passes() {
 
     assert!(document.validate().is_ok());
 }
+
+#[test]
+fn rowspans_must_fit_the_table() {
+    let columns = vec![Column::new(NodeMeta::synthesized(), CellAlign::Default)];
+    let tall = Cell::new(NodeMeta::synthesized(), vec![]).with_spans(1, 3);
+    let rows = vec![
+        Row::new(NodeMeta::synthesized(), false, vec![tall]),
+        Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![Cell::new(NodeMeta::synthesized(), vec![])],
+        ),
+    ];
+    let table = Table::new(NodeMeta::synthesized(), columns, rows);
+
+    let mut document = Document::new(DocumentMeta::new());
+    document.push_block(Block::Table(table));
+    document.renumber();
+
+    assert_invalid(&document, "rowspan exceeds");
+}
+
+#[test]
+fn overlapping_cells_are_rejected() {
+    let columns = (0..3)
+        .map(|_| Column::new(NodeMeta::synthesized(), CellAlign::Default))
+        .collect::<Vec<_>>();
+    let rows = vec![
+        Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![
+                Cell::new(NodeMeta::synthesized(), vec![]).with_spans(1, 2),
+                Cell::new(NodeMeta::synthesized(), vec![]),
+                Cell::new(NodeMeta::synthesized(), vec![]).with_spans(1, 2),
+            ],
+        ),
+        // Columns 0 and 2 are occupied from above; a colspan-2 cell starting at
+        // column 1 would overlap column 2.
+        Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![Cell::new(NodeMeta::synthesized(), vec![]).with_spans(2, 1)],
+        ),
+    ];
+    let table = Table::new(NodeMeta::synthesized(), columns, rows);
+
+    let mut document = Document::new(DocumentMeta::new());
+    document.push_block(Block::Table(table));
+    document.renumber();
+
+    assert_invalid(&document, "overlaps");
+}
+
+#[test]
+fn a_rowspan_grid_is_accepted() {
+    let columns = vec![
+        Column::new(NodeMeta::synthesized(), CellAlign::Default),
+        Column::new(NodeMeta::synthesized(), CellAlign::Default),
+    ];
+    let rows = vec![
+        Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![
+                Cell::new(NodeMeta::synthesized(), vec![]).with_spans(1, 2),
+                Cell::new(NodeMeta::synthesized(), vec![]),
+            ],
+        ),
+        Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![Cell::new(NodeMeta::synthesized(), vec![])],
+        ),
+    ];
+    let table = Table::new(NodeMeta::synthesized(), columns, rows);
+
+    let mut document = Document::new(DocumentMeta::new());
+    document.push_block(Block::Table(table));
+    document.renumber();
+
+    assert!(document.validate().is_ok(), "{:?}", document.validate());
+}
