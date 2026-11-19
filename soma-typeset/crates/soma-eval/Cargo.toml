@@ -11,6 +11,7 @@ description = "Evaluation harness for soma-typeset: benchmarks, sensitivity swee
 soma-core = { path = "../soma-core" }
 soma-doc = { path = "../soma-doc" }
 soma-layout = { path = "../soma-layout" }
+soma-md = { path = "../soma-md" }
 soma-metrics = { path = "../soma-metrics" }
 soma-rules = { path = "../soma-rules" }
 soma-template = { path = "../soma-template" }

@@ -12,6 +12,7 @@
 
 use std::time::Instant;
 
+pub mod corpus;
 pub mod score;
 
 use soma_core::{

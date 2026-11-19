@@ -9,7 +9,9 @@
 
 use std::process::ExitCode;
 
-use soma_core::{break_paragraph_traced, BreakConfig, ParamSet, SyntheticMetrics, Width};
+use soma_core::{
+    break_paragraph_traced, BreakConfig, ParamSet, Permille, SyntheticMetrics, Weight, Width,
+};
 use soma_eval::{
     bench, blind_report, build_paragraph, parse_observations, peak_rss_kb, sweep_tolerance,
     sweep_weight, AggregateMetrics, BlindDecision, CorpusKind, WeightParam,
@@ -29,6 +31,8 @@ fn main() -> ExitCode {
         Some("blind") => blind_command(&args[1..]),
         Some("inspect") => inspect_command(&args[1..]),
         Some("score") => score_command(&args[1..]),
+        Some("corpus") => corpus_command(&args[1..]),
+        Some("calibrate") => calibrate_command(&args[1..]),
         Some("help") | Some("--help") | None => {
             print_help();
             ExitCode::SUCCESS
@@ -49,6 +53,8 @@ fn print_help() {
     println!("  blind <preferences.csv>");
     println!("  inspect [--kind pure-cjk|mixed|punct-dense] [--atoms N]");
     println!("  score [--paragraphs N]   (Q' effect scorecard, CSV)");
+    println!("  corpus [--dir PATH] [--tolerance N] [--badness-scale N]");
+    println!("  calibrate [--dir PATH] [--tolerances a,b,c] [--scales a,b,c]");
     println!();
     println!("weight names: line, break_penalty, compress_amount, compress_count,");
     println!("              boundary_deviation, short_last_scale");
@@ -404,6 +410,76 @@ fn score_command(args: &[String]) -> ExitCode {
         }
         None => {
             eprintln!("scorecard failed to lay out the corpus");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn corpus_command(args: &[String]) -> ExitCode {
+    let dir = option(args, "--dir").unwrap_or_else(|| String::from("corpus/zh"));
+    let mut params = ParamSet::default_v1();
+    if let Some(value) = option(args, "--tolerance") {
+        match value.parse::<u16>() {
+            Ok(value) => params.break_params.tolerance = Permille(value),
+            Err(_) => {
+                eprintln!("--tolerance must be a number");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    if let Some(value) = option(args, "--badness-scale") {
+        match value.parse::<u32>() {
+            Ok(value) => params.break_params.costs.badness_scale = Weight(value),
+            Err(_) => {
+                eprintln!("--badness-scale must be a number");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    match soma_eval::corpus::evaluate_dir(std::path::Path::new(&dir), &params) {
+        Ok(report) => {
+            print!("{}", report.csv());
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn calibrate_command(args: &[String]) -> ExitCode {
+    let dir = option(args, "--dir").unwrap_or_else(|| String::from("corpus/zh"));
+    let tolerances: Vec<u16> = match option(args, "--tolerances") {
+        Some(value) => match soma_eval::corpus::parse_list(&value) {
+            Ok(values) => values,
+            Err(error) => {
+                eprintln!("{error}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => vec![1_500, 2_000, 2_500, 3_000],
+    };
+    let scales: Vec<u32> = match option(args, "--scales") {
+        Some(value) => match soma_eval::corpus::parse_list(&value) {
+            Ok(values) => values,
+            Err(error) => {
+                eprintln!("{error}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => vec![50, 100, 200],
+    };
+    match soma_eval::corpus::calibrate(std::path::Path::new(&dir), &tolerances, &scales) {
+        Ok(rows) => {
+            println!("{}", soma_eval::corpus::SweepRow::csv_header());
+            for row in &rows {
+                println!("{}", row.csv());
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
             ExitCode::FAILURE
         }
     }

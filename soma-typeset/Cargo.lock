@@ -38,6 +38,7 @@ dependencies = [
  "soma-core",
  "soma-doc",
  "soma-layout",
+ "soma-md",
  "soma-metrics",
  "soma-rules",
  "soma-template",
