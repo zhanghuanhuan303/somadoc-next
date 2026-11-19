@@ -86,6 +86,23 @@ pub trait Metrics: Sync {
         Width::ZERO
     }
 
+    /// Advance of an unbreakable object atom (`AtomKind::InlineObject`).
+    ///
+    /// Hosts that typeset objects themselves (inline math, inline images with
+    /// known geometry) override this so the object's box — not the placeholder
+    /// text — enters line breaking. The default measures the text, which keeps
+    /// adapters without object support byte-identical.
+    fn object_advance(&self, text: &str, style: StyleId) -> Width {
+        self.advance(text, style)
+    }
+
+    /// Vertical metrics of an unbreakable object atom. The default mirrors
+    /// [`Self::glyph_metrics`], so the line box only changes when a host opts
+    /// in.
+    fn object_metrics(&self, text: &str, style: StyleId) -> GlyphMetrics {
+        self.glyph_metrics(text, style)
+    }
+
     /// Width of a space boundary. Defaults to the advance of `" "`.
     fn space_width(&self, style: StyleId) -> Width {
         self.advance(" ", style)

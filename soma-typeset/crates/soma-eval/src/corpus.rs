@@ -11,9 +11,10 @@ use std::path::{Path, PathBuf};
 
 use soma_core::{BreakConfig, ParamSet, Permille, Weight, Window};
 use soma_doc::block::{Cell, Column, Heading, MathBlock, Paragraph, Row, Table};
+use soma_doc::inline::MathInline;
 use soma_doc::meta::DocumentMeta;
 use soma_doc::node::NodeMeta;
-use soma_doc::{Block, CellAlign, Document, Text};
+use soma_doc::{Block, CellAlign, Document, Inline, Text};
 use soma_layout::{layout_with, PaginationStrategy, StyledMetrics, VerticalParams};
 use soma_md::parse_markdown;
 use soma_metrics::MetricsTable;
@@ -265,8 +266,8 @@ pub fn table_document() -> Document {
     document
 }
 
-/// Formula placeholders. `soma-layout` renders a `MathBlock` as one object atom
-/// until a math adapter exists (D52); this fixture measures that path.
+/// Display and inline formulas. Display blocks become one `MathBox` each;
+/// inline formulas become object atoms measured by `soma-math` (ADR-0026/0027).
 pub fn math_document() -> Document {
     let mut document = Document::new(DocumentMeta::new().with_language("zh-Hans"));
     document.push_block(Block::Paragraph(Paragraph::new(
@@ -274,6 +275,16 @@ pub fn math_document() -> Document {
         vec![text(
             "下面是一组行间公式。数学盒子由 soma-math 排成整数坐标的符号、分数线与根号横线，布局只消费它的宽高与基线。",
         )],
+    )));
+    document.push_block(Block::Paragraph(Paragraph::new(
+        NodeMeta::synthesized(),
+        vec![
+            text("行内公式也必须参与断行：勾股定理 "),
+            Inline::Math(MathInline::new(NodeMeta::synthesized(), "a^2+b^2=c^2")),
+            text(" 与圆的面积 "),
+            Inline::Math(MathInline::new(NodeMeta::synthesized(), "S=\\pi r^2")),
+            text(" 都是整块对象，不能被拆开；超过行宽时整式换行。"),
+        ],
     )));
     for source in [
         "E = mc^2",

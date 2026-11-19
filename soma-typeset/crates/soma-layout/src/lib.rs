@@ -37,7 +37,7 @@ use soma_doc::{Block, Document, Inline, NodeId};
 use soma_rules::{paragraph_from_spans, paragraph_from_text, InlineSpan, RuleError, SpanKind};
 use soma_template::{ComputedStyle, ResolvedPage, StyledDoc};
 
-pub const SCHEMA: &str = "soma.pages/5";
+pub const SCHEMA: &str = "soma.pages/6";
 
 /// Placeholder atom for a footnote marker. Renderers replace the marked atom
 /// with [`Mark::number`].
@@ -141,6 +141,8 @@ pub struct PlacedBlock {
     pub marks: Vec<Mark>,
     /// Display math content (only for `BoxKind::Math`).
     pub math: Option<MathBox>,
+    /// Inline formulas in this block, in atom order.
+    pub inline_math: Vec<InlineMathBox>,
     /// Index of the first line in this page slice. Non-zero means the block is
     /// continued from the previous page.
     pub line_offset: u32,
@@ -160,6 +162,21 @@ pub struct MathBox {
     pub baseline: Width,
     pub items: Vec<soma_math::MathItem>,
     pub rules: Vec<soma_math::MathRule>,
+}
+
+/// One inline formula inside a block's atom stream.
+///
+/// `atom` indexes the block's text stream (the same index used by
+/// `PlacedLine.line.boxes`). The atom's text is a private-use marker, so
+/// renderers must draw `math` instead of the atom text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InlineMathBox {
+    pub atom: u32,
+    /// Formula source, kept for diagnostics and text extraction.
+    pub source: String,
+    /// Geometry; `items`/`rules` are relative to the formula baseline, which
+    /// sits on the line's baseline.
+    pub math: MathBox,
 }
 
 /// One page.
@@ -662,6 +679,7 @@ fn table_rule(
         line_offset: 0,
         lines_total: 0,
         math: None,
+        inline_math: Vec::new(),
         stage: FallbackStage::Normal,
     }
 }
@@ -1242,6 +1260,7 @@ impl Builder<'_> {
                             line_offset: 0,
                             lines_total: 0,
                             math: None,
+                            inline_math: Vec::new(),
                             stage: FallbackStage::Normal,
                         }],
                         height,
@@ -1347,12 +1366,14 @@ impl Builder<'_> {
         let mut spans: Vec<OwnedSpan> = Vec::new();
         let mut footnotes: Vec<usize> = Vec::new();
         let mut marker_notes: Vec<Option<usize>> = Vec::new();
+        let mut objects = math::InlineMaths::new();
         self.collect(
             inlines,
             style_id,
             &mut spans,
             &mut footnotes,
             &mut marker_notes,
+            &mut objects,
         );
 
         let borrowed: Vec<InlineSpan<'_>> = spans
@@ -1371,8 +1392,25 @@ impl Builder<'_> {
         let mut paragraph = paragraph;
         scale_trim(&mut paragraph, |style| self.computed(style).font_size.0);
 
-        let result = break_paragraph(&paragraph, self.metrics, self.engine)
+        let object_metrics = math::ObjectMetrics::new(self.metrics, &objects);
+        let result = break_paragraph(&paragraph, &object_metrics, self.engine)
             .map_err(|_| LayoutError::new(Some(node), "line breaking failed"))?;
+
+        let inline_math: Vec<InlineMathBox> = objects
+            .resolve(&paragraph.atoms)
+            .into_iter()
+            .map(|(atom, source, layout)| InlineMathBox {
+                atom,
+                source,
+                math: MathBox {
+                    width: layout.width,
+                    height: layout.total_height(),
+                    baseline: layout.height,
+                    items: layout.items,
+                    rules: layout.rules,
+                },
+            })
+            .collect();
 
         let marks = marker_positions(&paragraph.atoms, &result.lines);
         self.text.insert(
@@ -1447,6 +1485,7 @@ impl Builder<'_> {
                 lines_total,
                 stage: result.fallback_stage,
                 math: None,
+                inline_math,
             }],
         }))
     }
@@ -1458,6 +1497,7 @@ impl Builder<'_> {
         out: &mut Vec<OwnedSpan>,
         footnotes: &mut Vec<usize>,
         marker_notes: &mut Vec<Option<usize>>,
+        objects: &mut math::InlineMaths,
     ) {
         for inline in inlines {
             let style = self.style(inline.meta().id, fallback);
@@ -1479,10 +1519,10 @@ impl Builder<'_> {
                 | Inline::SmallCaps(node)
                 | Inline::Superscript(node)
                 | Inline::Subscript(node) => {
-                    self.collect(&node.children, style, out, footnotes, marker_notes)
+                    self.collect(&node.children, style, out, footnotes, marker_notes, objects)
                 }
                 Inline::Link(node) => {
-                    self.collect(&node.children, style, out, footnotes, marker_notes)
+                    self.collect(&node.children, style, out, footnotes, marker_notes, objects)
                 }
                 Inline::Image(node) => out.push(OwnedSpan {
                     text: node
@@ -1493,11 +1533,27 @@ impl Builder<'_> {
                     style,
                     kind: SpanKind::Object,
                 }),
-                Inline::Math(node) => out.push(OwnedSpan {
-                    text: node.source.clone(),
-                    style,
-                    kind: SpanKind::Object,
-                }),
+                Inline::Math(node) => {
+                    // A parsable formula becomes an object atom measured by its
+                    // own box; a malformed one keeps the source text, exactly
+                    // as before ADR-0027.
+                    let computed = self.computed(style);
+                    match math::display_inline(&node.source, &computed, self.metrics, style) {
+                        Some(layout) => {
+                            let marker = objects.push(&node.source, layout);
+                            out.push(OwnedSpan {
+                                text: marker,
+                                style,
+                                kind: SpanKind::Object,
+                            });
+                        }
+                        None => out.push(OwnedSpan {
+                            text: node.source.clone(),
+                            style,
+                            kind: SpanKind::Object,
+                        }),
+                    }
+                }
                 Inline::FootnoteRef(node) => {
                     let index = self.notes.find(&node.target);
                     if let Some(index) = index {
@@ -1616,6 +1672,7 @@ impl Builder<'_> {
                 lines_total: 0,
                 stage,
                 math: None,
+                inline_math: Vec::new(),
             }],
         }))
     }
@@ -1684,6 +1741,7 @@ impl Builder<'_> {
                 lines_total: 0,
                 stage: result.fallback_stage,
                 math: None,
+                inline_math: Vec::new(),
             }],
         })
     }
@@ -1722,6 +1780,7 @@ impl Builder<'_> {
                 line_offset: 0,
                 lines_total: 0,
                 stage: FallbackStage::Normal,
+                inline_math: Vec::new(),
                 math: Some(MathBox {
                     width: box_width,
                     height,
@@ -1771,6 +1830,7 @@ impl Builder<'_> {
                 line_offset: 0,
                 lines_total: 0,
                 math: None,
+                inline_math: Vec::new(),
                 stage: FallbackStage::Normal,
             }],
         })
@@ -1897,6 +1957,7 @@ fn margin_block(
         lines_total: 1,
         stage,
         math: None,
+        inline_math: Vec::new(),
     })
 }
 

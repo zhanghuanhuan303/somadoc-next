@@ -110,7 +110,7 @@ grep -q 'pub const DOC_IR_VERSION: u16 = 1' crates/soma-doc/src/doc.rs
 grep -q 'soma.layout/6' crates/soma-core/src/result.rs
 grep -q '"soma.template/5"' crates/soma-template/src/template.rs
 grep -q '"soma.styles/2"' crates/soma-template/src/canonical.rs
-grep -q '"soma.pages/5"' crates/soma-layout/src/canonical.rs
+grep -q '"soma.pages/6"' crates/soma-layout/src/canonical.rs
 grep -q '"soma.engine/1"' crates/soma-engine/src/lib.rs
 
 echo "== gate A: DocIR and templates carry no physical style in content =="

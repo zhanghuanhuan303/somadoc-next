@@ -15,7 +15,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use soma_core::Width;
-use soma_layout::{BoxKind, PagedLayout, PlacedBlock, TextSource};
+use soma_layout::{BoxKind, MathBox, PagedLayout, PlacedBlock, TextSource};
 use soma_template::{ComputedStyle, FontSlant, FontWeight, StyleTable};
 
 const UNITS_PER_EM: i32 = 4096;
@@ -151,6 +151,14 @@ fn render_block(
 
     for placed in &block.lines {
         for atom in &placed.line.boxes {
+            // Inline formulas replace their marker atom: the box is drawn at
+            // the atom origin, on the line baseline.
+            if let Some(inline) = block.inline_math.iter().find(|m| m.atom == atom.atom) {
+                let left = left + atom.x.0;
+                let baseline = top + placed.y.0 + placed.line.ascent.0;
+                paint_math(html, style, left, baseline, &inline.math);
+                continue;
+            }
             let atom_text = text.atom_text(block.node, atom.atom);
             if atom_text.is_empty() {
                 continue;
@@ -203,7 +211,18 @@ fn render_math(
     let Some(math) = block.math.as_ref() else {
         return;
     };
-    let baseline = top + math.baseline.0;
+    paint_math(html, style, left, top + math.baseline.0, math);
+}
+
+/// Paint one formula whose baseline is at `baseline`. Shared by display math
+/// (block top + `MathBox.baseline`) and inline math (line top + line ascent).
+fn paint_math(
+    html: &mut String,
+    style: Option<&ComputedStyle>,
+    left: i32,
+    baseline: i32,
+    math: &MathBox,
+) {
     let paint = style
         .and_then(|style| style.color)
         .map(|color| format!("#{color:06x}"))

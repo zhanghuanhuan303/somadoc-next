@@ -39,6 +39,9 @@ pub trait MathMetrics {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MathStyle {
     pub size: Width,
+    /// Display style: big-operator limits stack above and below. Inline style
+    /// keeps them to the right, as TeX's text style does.
+    pub display: bool,
     pub script_scale: u16,
     pub scriptscript_scale: u16,
     pub sup_shift: u16,
@@ -58,6 +61,7 @@ impl Default for MathStyle {
     fn default() -> Self {
         Self {
             size: Width::EM,
+            display: true,
             script_scale: 700,
             scriptscript_scale: 500,
             sup_shift: 400,
@@ -764,7 +768,7 @@ impl Context<'_> {
                 let sup_box = sup.as_ref().map(|node| self.measure(node, script));
                 let sub_box = sub.as_ref().map(|node| self.measure(node, script));
 
-                if *stacked {
+                if *stacked && self.style.display {
                     let width = advance
                         .max(sup_box.map(|b| b.0).unwrap_or(0))
                         .max(sub_box.map(|b| b.0).unwrap_or(0));

@@ -161,6 +161,14 @@ fn the_math_fixture_keeps_one_box_per_formula() {
         .filter(|block| block.math.is_some())
         .count();
     assert_eq!(with_math, 6, "every fixture formula lays out as math");
+
+    let inline = layout
+        .pages
+        .iter()
+        .flat_map(|page| page.blocks.iter())
+        .map(|block| block.inline_math.len())
+        .sum::<usize>();
+    assert_eq!(inline, 2, "both inline formulas became object atoms");
 }
 
 #[test]

@@ -18,7 +18,7 @@ use alloc::format;
 use alloc::string::String;
 
 use soma_core::Width;
-use soma_layout::{BoxKind, PagedLayout, PlacedBlock, TextSource};
+use soma_layout::{BoxKind, MathBox, PagedLayout, PlacedBlock, TextSource};
 use soma_template::{ComputedStyle, StyleTable};
 
 const UNITS_PER_EM: i32 = 4096;
@@ -113,6 +113,26 @@ fn render_block_at(
 
     for placed in &block.lines {
         for atom in &placed.line.boxes {
+            // Inline formulas replace their marker atom and sit on the line
+            // baseline.
+            if let Some(inline) = block.inline_math.iter().find(|m| m.atom == atom.atom) {
+                let left = layout.page.margin_left.0 + block.x.0 + atom.x.0;
+                let baseline = layout.page.margin_top.0
+                    + block.y.0
+                    + extra_y
+                    + placed.y.0
+                    + placed.line.ascent.0;
+                paint_math(
+                    out,
+                    page,
+                    block.node.0,
+                    color(style.and_then(|style| style.color)),
+                    left,
+                    baseline,
+                    &inline.math,
+                );
+                continue;
+            }
             let atom_text = text.atom_text(block.node, atom.atom);
             if atom_text.is_empty() {
                 continue;
@@ -160,12 +180,31 @@ fn render_math(
     };
     let left = layout.page.margin_left.0 + block.x.0;
     let baseline = layout.page.margin_top.0 + block.y.0 + extra_y + math.baseline.0;
-    let paint = color(style.and_then(|style| style.color));
+    paint_math(
+        out,
+        page,
+        block.node.0,
+        color(style.and_then(|style| style.color)),
+        left,
+        baseline,
+        math,
+    );
+}
 
+/// Paint one formula whose baseline is at `baseline`. Shared by display math
+/// (block top + `MathBox.baseline`) and inline math (line top + line ascent).
+fn paint_math(
+    out: &mut String,
+    page: u32,
+    node: u32,
+    paint: String,
+    left: i32,
+    baseline: i32,
+    math: &MathBox,
+) {
     for item in &math.items {
         out.push_str(&format!(
-            "<text data-page=\"{page}\" data-node=\"{}\" data-math=\"{}\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>\n",
-            block.node.0,
+            "<text data-page=\"{page}\" data-node=\"{node}\" data-math=\"{}\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>\n",
             escape(&item.text),
             em(Width(left + item.x.0)),
             em(Width(baseline + item.y.0)),
@@ -176,8 +215,7 @@ fn render_math(
     }
     for rule in &math.rules {
         out.push_str(&format!(
-            "<rect data-page=\"{page}\" data-node=\"{}\" data-rule=\"1\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>\n",
-            block.node.0,
+            "<rect data-page=\"{page}\" data-node=\"{node}\" data-rule=\"1\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>\n",
             em(Width(left + rule.x.0)),
             em(Width(baseline + rule.y.0)),
             em(rule.width),

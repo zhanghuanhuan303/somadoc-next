@@ -8,7 +8,7 @@
 
 use alloc::vec::Vec;
 
-use crate::ir::{Align, BoundaryKind, BoundaryRole, Breakability, IrError, Paragraph};
+use crate::ir::{Align, AtomKind, BoundaryKind, BoundaryRole, Breakability, IrError, Paragraph};
 use crate::metrics::Metrics;
 use crate::params::{ParamError, ParamHash, ParamSet, BADNESS_RATIO_CLAMP};
 use crate::result::{AtomBox, BreakerKind, CjkLatinAdjust, FallbackStage, LayoutResult, Line};
@@ -412,7 +412,13 @@ impl<'a> Shaped<'a> {
 
         let mut atom_width = Vec::with_capacity(atom_count);
         for atom in &paragraph.atoms {
-            atom_width.push(metrics.advance(&atom.text, atom.style).0 as i64);
+            // Object atoms have host-supplied geometry (inline math); text atoms
+            // go through the font path.
+            let width = match atom.kind {
+                AtomKind::InlineObject => metrics.object_advance(&atom.text, atom.style),
+                _ => metrics.advance(&atom.text, atom.style),
+            };
+            atom_width.push(width.0 as i64);
         }
 
         let mut glue = Vec::with_capacity(boundary_count);
@@ -533,7 +539,10 @@ impl<'a> Shaped<'a> {
 
         for index in start..end {
             let atom = &self.paragraph.atoms[index];
-            let glyph = self.metrics.glyph_metrics(&atom.text, atom.style);
+            let glyph = match atom.kind {
+                AtomKind::InlineObject => self.metrics.object_metrics(&atom.text, atom.style),
+                _ => self.metrics.glyph_metrics(&atom.text, atom.style),
+            };
             ascent = ascent.max(glyph.ascent.0 as i64 + glyph.baseline_shift.0 as i64);
             descent = descent.max(glyph.descent.0 as i64 - glyph.baseline_shift.0 as i64);
             leading = leading.max(glyph.leading.0 as i64);

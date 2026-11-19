@@ -9,7 +9,7 @@ use core::fmt::{self, Write};
 
 use crate::PagedLayout;
 
-pub(crate) const SCHEMA: &str = "soma.pages/5";
+pub(crate) const SCHEMA: &str = "soma.pages/6";
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -161,15 +161,31 @@ fn write_block(out: &mut impl Write, block: &crate::PlacedBlock) -> fmt::Result 
 
     out.write_str("],\"math\":")?;
     write_math(out, block.math.as_ref())?;
+    out.write_str(",\"inlineMath\":[")?;
+    for (index, inline) in block.inline_math.iter().enumerate() {
+        if index > 0 {
+            out.write_char(',')?;
+        }
+        write!(out, "{{\"atom\":{},\"source\":", inline.atom)?;
+        write_string(out, &inline.source)?;
+        out.write_str(",\"math\":")?;
+        write_math_payload(out, &inline.math)?;
+        out.write_char('}')?;
+    }
+    out.write_char(']')?;
     out.write_char('}')
 }
 
 /// `null` or the display-formula geometry. Item and rule `y` are relative to
 /// `baseline`, which is measured from the block top.
 fn write_math(out: &mut impl Write, math: Option<&crate::MathBox>) -> fmt::Result {
-    let Some(math) = math else {
-        return out.write_str("null");
-    };
+    match math {
+        Some(math) => write_math_payload(out, math),
+        None => out.write_str("null"),
+    }
+}
+
+fn write_math_payload(out: &mut impl Write, math: &crate::MathBox) -> fmt::Result {
     write!(
         out,
         "{{\"width\":{},\"height\":{},\"baseline\":{},\"items\":[",

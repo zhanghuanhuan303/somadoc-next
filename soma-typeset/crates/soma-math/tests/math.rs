@@ -242,3 +242,51 @@ fn an_unknown_big_operator_still_errors() {
         Err(MathError::UnsupportedCommand(_))
     ));
 }
+
+#[test]
+fn inline_style_keeps_big_operator_limits_to_the_right() {
+    let inline = MathStyle {
+        display: false,
+        ..MathStyle::default()
+    };
+    let nodes = parse(r"\sum_{i=1}^{n} i").expect("parse");
+    let result = lay_out(&nodes, inline.size, &inline, &TestMetrics);
+
+    let operator = result
+        .items
+        .iter()
+        .find(|item| item.text == "∑")
+        .expect("operator");
+    let upper = result
+        .items
+        .iter()
+        .find(|item| item.text == "n")
+        .expect("upper limit");
+    let lower = result
+        .items
+        .iter()
+        .find(|item| item.text == "i" && item.y.0 > 0)
+        .expect("lower limit");
+
+    assert!(
+        upper.x.0 >= operator.x.0 + TestMetrics.advance("∑", operator.size).0,
+        "inline limits follow the operator"
+    );
+    assert!(lower.x.0 >= operator.x.0 + TestMetrics.advance("∑", operator.size).0);
+    assert!(upper.y.0 < operator.y.0, "the upper limit is raised");
+    assert!(lower.y.0 > operator.y.0, "the lower limit is dropped");
+    assert!(result.total_height().0 < formula(r"\sum_{i=1}^{n} i").total_height().0);
+}
+
+#[test]
+fn an_integral_is_unchanged_by_the_style() {
+    let inline = MathStyle {
+        display: false,
+        ..MathStyle::default()
+    };
+    let nodes = parse(r"\int_0^1 x").expect("parse");
+    let inline_result = lay_out(&nodes, inline.size, &inline, &TestMetrics);
+    let display_result = lay_out(&nodes, inline.size, &MathStyle::default(), &TestMetrics);
+
+    assert_eq!(inline_result, display_result);
+}
