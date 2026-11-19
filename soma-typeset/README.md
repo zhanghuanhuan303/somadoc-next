@@ -116,14 +116,21 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   `\index{term}` in LaTeX or `[[index:term]]` in Markdown, plus `index: {title}`
   in the template, produces a sorted index with merged page lists.
 - One command (ADR-0029): `soma render --input doc.tex --template book.yaml
-  --format html|svg|json` runs the whole pipeline; `soma check` prints layout
-  facts and the canonical hash. See [`docs/cli.md`](docs/cli.md).
+  --format html|svg|json|pdf` runs the whole pipeline; `soma check` prints
+  layout facts and the canonical hash. See [`docs/cli.md`](docs/cli.md).
+- PDF output (`soma-render-pdf`, ADR-0034): `--format pdf --font book.ttf`
+  embeds a sparse TrueType subset (Identity-H + ToUnicode), writes integer
+  glyph positions, table rules, display math, a nested bookmark tree from
+  `outline`, and `/PageLabels` from the printed labels. The same layout and
+  fonts produce identical bytes. CFF/OTF fonts are rejected; figures are
+  placeholder frames (D82).
 - First-release artifact (`examples/book`, ADR-0031/ADR-0032/ADR-0033): `scripts/book.sh`
   renders an eleven-page book from `examples/book/book.tex` + `book.yaml` — generated
   cover, roman-numbered front matter, contents with leaders plus figure/table
   lists, numbered chapters and sections, a figure with a caption, a formula, a
-  three-line table with a caption, a footnote, and a seven-entry index; the JSON
-  result also lists nine bookmarks. Alignment
+  three-line table with a caption, a footnote, a seven-entry index, and a PDF
+  with ten bookmarks; `scripts/book.sh` also writes `book.pdf` when a TrueType
+  font is available. Alignment
   (`left`/`center`/`right`) is a layout pass, so titles and cover lines can be
   centred. The build has 0 overflow pages and 0 degraded lines;
   `docs/first-release.md` lists the remaining design gaps.
@@ -175,10 +182,11 @@ crates/
   soma-md/     # Markdown subset -> DocIR
   soma-html/   # HTML subset (semantic whitelist) -> DocIR
   soma-latex/  # LaTeX subset (sections, inline, environments) -> DocIR
-  soma-cli/    # `soma`: source + template -> HTML/SVG/canonical JSON
+  soma-cli/    # `soma`: source + template -> HTML/SVG/PDF/canonical JSON
   soma-math/   # TeX subset -> integer math boxes (symbols + rules)
   soma-render-html/ # PagedLayout -> absolutely positioned HTML
   soma-render-svg/  # PagedLayout -> SVG (Gate V/R)
+  soma-render-pdf/  # PagedLayout -> PDF (TrueType subset, bookmarks)
   soma-rules/  # text -> ParaIR (Chinese punctuation + CJK/Latin segmentation)
   soma-eval/   # benchmark, sweeps, blind-test statistics, effect scorecard
   soma-demo/   # static HTML renderer consuming LayoutResult
@@ -206,7 +214,7 @@ scripts/
   kp-verify.sh # K-P closure: gates + bench budget + length policy
 docs/
   architecture-v2.md  # frozen architecture
-  adr/                # accepted decisions (ADR-0001 … 0033)
+  adr/                # accepted decisions (ADR-0001 … 0034)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
   debt.md             # global not-done register (D01–D77, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
@@ -266,9 +274,10 @@ cargo run -p soma-eval --release -- blind preferences.csv
 scripts/gates.sh
 ```
 
-The gate runs format, clippy, 527 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 534 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-template`,
-`soma-layout`, `soma-md`, `soma-render-html`, and `soma-render-svg`, a
+`soma-layout`, `soma-md`, `soma-render-html`, `soma-render-svg`, and
+`soma-render-pdf`, a
 native/`wasm32-wasip1` canonical-byte comparison (DocIR + inline layout + pages),
 a demo smoke render, the `soma-core` dependency-boundary check, Gate A, Gate C,
 Gate V/R (SVG visual lock + cross-renderer atom parity), and Gate Q′ (effect

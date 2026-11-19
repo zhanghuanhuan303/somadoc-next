@@ -129,8 +129,9 @@ pinyin or stroke count.
 ## Consequences
 
 - The example book is 11 pages: cover, contents (chapters, sections, figure and
-  table lists), eight body pages, one index page; 7 index entries; 9 bookmarks;
-  0 overflow and 0 degraded lines.
+  table lists), eight body pages, one index page; 7 index entries; 10 bookmarks;
+  0 overflow and 0 degraded lines. The index title joins the contents and the
+  bookmark tree as a level-1 heading.
 - A template can style captions and the index independently of body text.
 - Long chapter titles no longer overflow the contents box.
 - Adding an index costs one extra layout pass only when markers exist.

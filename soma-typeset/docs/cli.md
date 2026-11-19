@@ -10,7 +10,9 @@ Design record: ADR-0029.
 
 ```sh
 soma render --input <file> [--template <file>] [--engine <file>] \
-            [--format html|svg|json] [--out <file>]
+            [--format html|svg|json|pdf] [--out <file>] \
+            [--font <file[#index]>] [--font-bold <file[#index]>] \
+            [--font-math <file[#index]>]
 soma check  --input <file> [--template <file>] [--engine <file>]
 soma --help
 ```
@@ -20,7 +22,9 @@ soma --help
 | `--input`, `-i` | Source document. Extension picks the frontend. |
 | `--template`, `-t` | Pure-YAML template. Omitted: a built-in A4 template (20 mm margins, 10.5 pt / 1.6, justified). |
 | `--engine` | `soma.engine/1` file. Omitted: `publish-v1` defaults. |
-| `--format`, `-f` | `html` (default), `svg`, or `json` (canonical page result). |
+| `--format`, `-f` | `html` (default), `svg`, `json` (canonical page result), or `pdf`. |
+| `--font` | TrueType font for `--format pdf`; `path#index` selects a TTC face. Required for PDF. |
+| `--font-bold`, `--font-math` | Optional bold/math faces; fall back to `--font`. |
 | `--out`, `-o` | Output path; `-` or omitted writes to stdout. |
 | `--stats` | Print `pages`, `blocks`, `lines`, and the canonical hash to stderr. |
 
@@ -46,6 +50,10 @@ soma render --input note.md > note.html
 
 # LaTeX article with a book template, SVG output.
 soma render --input paper.tex --template book.yaml --format svg --out paper.svg
+
+# PDF with an embedded TrueType subset and bookmarks.
+soma render --input book.tex --template book.yaml --format pdf \
+  --font /usr/share/fonts/misan/MiSans-Normal.ttf --out book.pdf
 
 # Canonical JSON for a diff or a golden test.
 soma render --input note.md --format json
