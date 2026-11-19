@@ -241,6 +241,8 @@ pub struct StyledDoc {
     folio: Option<String>,
     /// Table of contents settings, when the template asks for one.
     toc: Option<crate::template::TocSpec>,
+    /// Index settings, when the template asks for an index.
+    index: Option<crate::template::IndexSpec>,
     /// Cover settings, when the template asks for a cover page.
     cover: Option<crate::template::CoverSpec>,
     /// Automatic numbering scheme.
@@ -251,6 +253,14 @@ pub struct StyledDoc {
     toc_style: StyleId,
     /// Style for the TOC heading (`element: tocTitle`).
     toc_title_style: StyleId,
+    /// Style for generated figure captions (`element: figureCaption`).
+    figure_caption_style: StyleId,
+    /// Style for generated table captions (`element: tableCaption`).
+    table_caption_style: StyleId,
+    /// Style for generated index entries (`element: indexEntry`).
+    index_style: StyleId,
+    /// Style for the index heading (`element: indexTitle`).
+    index_title_style: StyleId,
     /// Styles for the generated cover lines.
     cover_styles: CoverStyles,
     /// Master index for pages that begin a section.
@@ -329,6 +339,31 @@ impl StyledDoc {
     /// Style of the TOC heading.
     pub fn toc_title_style(&self) -> StyleId {
         self.toc_title_style
+    }
+
+    /// Style of generated figure captions.
+    pub fn figure_caption_style(&self) -> StyleId {
+        self.figure_caption_style
+    }
+
+    /// Style of generated table captions.
+    pub fn table_caption_style(&self) -> StyleId {
+        self.table_caption_style
+    }
+
+    /// Style of generated index entries.
+    pub fn index_style(&self) -> StyleId {
+        self.index_style
+    }
+
+    /// Style of the index heading.
+    pub fn index_title_style(&self) -> StyleId {
+        self.index_title_style
+    }
+
+    /// Index settings, when the template asks for an index.
+    pub fn index(&self) -> Option<&crate::template::IndexSpec> {
+        self.index.as_ref()
     }
 
     /// Cover settings, when the template asks for a cover page.
@@ -506,6 +541,10 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         &[],
     )?;
     let toc_title_style_id = resolver.table.intern(toc_title_style);
+    let figure_caption_style = intern_element(&mut resolver, "figureCaption", &root)?;
+    let table_caption_style = intern_element(&mut resolver, "tableCaption", &root)?;
+    let index_style = intern_element(&mut resolver, "indexEntry", &root)?;
+    let index_title_style = intern_element(&mut resolver, "indexTitle", &root)?;
 
     // Table rules carry their own color; when the template does not set one
     // they inherit the document color (and renderers fall back to black).
@@ -537,11 +576,16 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         page,
         footnote: template.footnote.numbering,
         toc: template.toc.clone(),
+        index: template.index.clone(),
         cover: template.cover.clone(),
         numbering: template.numbering.clone(),
         front_matter: template.page.front_matter,
         toc_style: toc_style_id,
         toc_title_style: toc_title_style_id,
+        figure_caption_style,
+        table_caption_style,
+        index_style,
+        index_title_style,
         cover_styles,
         table_rules: TableRules {
             rule: template.table.rule.resolve(root.font_size, body_pt),
@@ -664,7 +708,7 @@ impl Resolver<'_> {
                 )?;
                 let id = self.table.intern(image_style.clone());
                 self.node_style.push((meta.id, id));
-                self.inlines(&node.caption, style, ancestors)
+                self.caption(&node.caption, style, "figureCaption", ancestors)
             }
             Block::Table(node) => {
                 for column in &node.columns {
@@ -680,7 +724,7 @@ impl Resolver<'_> {
                     let id = self.table.intern(column_style);
                     self.node_style.push((meta.id, id));
                 }
-                self.inlines(&node.caption, style, ancestors)?;
+                self.caption(&node.caption, style, "tableCaption", ancestors)?;
                 for row in &node.rows {
                     let meta = &row.meta;
                     let row_style = self.compute(
@@ -727,6 +771,29 @@ impl Resolver<'_> {
             | Block::PageBreak(_)
             | Block::Raw(_) => Ok(()),
         }
+    }
+
+    /// Caption inlines resolve under their generated element (ADR-0033), so a
+    /// template can style captions without touching the block they belong to.
+    fn caption(
+        &mut self,
+        caption: &[Inline],
+        parent: &ComputedStyle,
+        element: &'static str,
+        ancestors: &mut Vec<&'static str>,
+    ) -> Result<(), TemplateError> {
+        let style = self.compute(
+            element,
+            None,
+            &[],
+            None,
+            ComputedStyle::inherited_from(parent),
+            ancestors,
+        )?;
+        ancestors.push(element);
+        let result = self.inlines(caption, &style, ancestors);
+        ancestors.pop();
+        result
     }
 
     fn inlines(
@@ -924,6 +991,7 @@ fn inline_element(inline: &Inline) -> &'static str {
         Inline::Math(_) => "math",
         Inline::FootnoteRef(_) => "footnoteRef",
         Inline::Ruby(_) => "ruby",
+        Inline::Index(_) => "indexRef",
         Inline::LineBreak(_) => "lineBreak",
         Inline::Raw(_) => "rawInline",
     }

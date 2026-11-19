@@ -9,7 +9,7 @@ use core::fmt::{self, Write};
 
 use crate::PagedLayout;
 
-pub(crate) const SCHEMA: &str = "soma.pages/8";
+pub(crate) const SCHEMA: &str = "soma.pages/9";
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -126,6 +126,27 @@ fn write_layout(out: &mut impl Write, layout: &PagedLayout) -> fmt::Result {
             toc.passes, toc.stable, toc.entries, toc.figures, toc.tables
         )?,
     }
+    out.write_str(",\"index\":")?;
+    match &layout.index {
+        None => out.write_str("null")?,
+        Some(index) => write!(
+            out,
+            "{{\"passes\":{},\"stable\":{},\"entries\":{}}}",
+            index.passes, index.stable, index.entries
+        )?,
+    }
+    out.write_str(",\"outline\":[")?;
+    for (position, entry) in layout.outline.iter().enumerate() {
+        if position > 0 {
+            out.write_char(',')?;
+        }
+        write!(out, "{{\"level\":{},\"text\":", entry.level)?;
+        write_string(out, &entry.text)?;
+        write!(out, ",\"page\":{},\"printed\":", entry.page)?;
+        write_string(out, &entry.printed)?;
+        out.write_char('}')?;
+    }
+    out.write_str("]")?;
     out.write_char('}')
 }
 

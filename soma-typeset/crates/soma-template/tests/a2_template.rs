@@ -80,7 +80,7 @@ fn canonical_json_is_stable_and_namespaced() {
     let json = template.canonical_json();
 
     assert!(
-        json.starts_with("{\"schema\":\"soma.template/8\""),
+        json.starts_with("{\"schema\":\"soma.template/9\""),
         "{json}"
     );
     assert!(json.contains("\"size\":\"A4\""));
@@ -575,4 +575,45 @@ styles:
     let level_only = source.replace("      element: heading\n      level: 2", "      level: 2");
     let template = parse_template(&level_only).expect("level-only selector");
     assert!(template.styles[2].selector.element.is_none());
+}
+
+#[test]
+fn an_index_section_parses_and_round_trips() {
+    let source = r#"
+name: indexed
+page:
+  size: A4
+  margin: 20mm
+index:
+  title: 索引
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+"#;
+    let template = parse_template(source).expect("index parses");
+    assert_eq!(
+        template
+            .index
+            .as_ref()
+            .and_then(|index| index.title.as_deref()),
+        Some("索引")
+    );
+    let json = template.canonical_json();
+    assert!(json.contains("\"index\":{\"title\":\"索引\"}"), "{json}");
+
+    let untitled = parse_template(&source.replace("  title: 索引\n", "")).expect("empty index");
+    assert!(
+        untitled.index.is_some(),
+        "an empty section still asks for an index"
+    );
+    assert!(untitled.index.unwrap().title.is_none());
+
+    let absent = parse_template(&source.replace("index:\n  title: 索引\n", "")).expect("no index");
+    assert!(absent.index.is_none());
+
+    let error =
+        parse_template(&source.replace("title: 索引", "entries: 3")).expect_err("unknown key");
+    assert!(error.reason.contains("unknown"));
 }

@@ -254,7 +254,7 @@ fn parsing_is_deterministic() {
     let first = parse_latex(source).canonical_json();
     let second = parse_latex(source).canonical_json();
     assert_eq!(first, second);
-    assert!(first.starts_with("{\"schema\":\"soma.doc/1\""));
+    assert!(first.starts_with("{\"schema\":\"soma.doc/2\""));
 }
 
 #[test]
@@ -316,4 +316,28 @@ fn a_subtitle_reaches_the_cover_data() {
     let cover = doc.meta.cover.as_ref().expect("cover data");
     assert_eq!(cover.subtitle.as_deref(), Some("副标题"));
     assert!(doc.meta.title.is_some());
+}
+
+#[test]
+fn index_commands_become_markers() {
+    let document = parse_latex("正文\\index{排版}后文");
+    let Block::Paragraph(paragraph) = &document.blocks[0] else {
+        panic!("paragraph")
+    };
+    assert!(
+        paragraph
+            .inlines
+            .iter()
+            .any(|inline| matches!(inline, Inline::Index(node) if node.term == "排版")),
+        "the marker is in the inline sequence"
+    );
+    assert_eq!(paragraph_text(&document.blocks[0]), "正文后文");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn an_empty_index_command_is_dropped() {
+    let document = parse_latex("正文\\index{}后文");
+    assert_eq!(paragraph_text(&document.blocks[0]), "正文后文");
+    document.validate().expect("valid DocIR");
 }

@@ -38,7 +38,7 @@ use soma_doc::{Block, Document, Inline, NodeId};
 use soma_rules::{paragraph_from_spans, paragraph_from_text, InlineSpan, RuleError, SpanKind};
 use soma_template::{ComputedStyle, ResolvedPage, StyledDoc};
 
-pub const SCHEMA: &str = "soma.pages/8";
+pub const SCHEMA: &str = "soma.pages/9";
 
 /// Placeholder atom for a footnote marker. Renderers replace the marked atom
 /// with [`Mark::number`].
@@ -210,12 +210,33 @@ pub struct TocEntry {
     pub page: String,
 }
 
-/// Front-matter lists gathered by one pass: headings, figures, tables.
+/// Generated lists gathered by one pass: headings, figures, tables, index.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct FrontMatter {
+struct Generated {
     headings: Vec<TocEntry>,
     figures: Vec<TocEntry>,
     tables: Vec<TocEntry>,
+    index: Vec<TocEntry>,
+}
+
+/// One bookmark: a heading and the page it opens.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutlineEntry {
+    /// Heading level, `1..=5`.
+    pub level: u8,
+    pub text: String,
+    /// Physical page index, 1-based.
+    pub page: u32,
+    /// Printed label (`"3"`, `"ii"`, or empty).
+    pub printed: String,
+}
+
+/// What the index did during layout.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexReport {
+    pub passes: u8,
+    pub stable: bool,
+    pub entries: u32,
 }
 
 /// One caption waiting for its page number.
@@ -263,6 +284,11 @@ pub struct PagedLayout {
     pub pagination_cost: i64,
     /// Present when the template asks for a table of contents.
     pub toc: Option<TocReport>,
+    /// Present when the template asks for an index.
+    pub index: Option<IndexReport>,
+    /// One entry per heading, in document order. A PDF backend can turn this
+    /// into the bookmark tree without re-reading the document.
+    pub outline: Vec<OutlineEntry>,
 }
 
 impl PagedLayout {
@@ -395,9 +421,11 @@ struct Pass<'a> {
     strategy: PaginationStrategy,
     vertical: VerticalParams,
     /// Entries printed by this pass (from the previous pass's pagination).
-    front: &'a FrontMatter,
+    front: &'a Generated,
     /// Template TOC settings; `None` disables TOC generation.
     toc: Option<&'a soma_template::TocSpec>,
+    /// Index entries from the previous pass (term + page labels).
+    index: &'a [TocEntry],
 }
 
 /// Lay out with an explicit strategy and vertical cost model.
@@ -413,7 +441,9 @@ pub fn layout_with(
     strategy: PaginationStrategy,
     vertical: VerticalParams,
 ) -> Result<PagedLayout, LayoutError> {
-    let Some(spec) = styled.toc() else {
+    let toc = styled.toc();
+    let index = styled.index();
+    if toc.is_none() && index.is_none() {
         let (pages, _) = layout_once(&Pass {
             doc,
             styled,
@@ -421,13 +451,14 @@ pub fn layout_with(
             engine,
             strategy,
             vertical,
-            front: &FrontMatter::default(),
+            front: &Generated::default(),
             toc: None,
+            index: &[],
         })?;
         return Ok(pages);
-    };
+    }
 
-    let mut front = FrontMatter::default();
+    let mut front = Generated::default();
     let mut passes: u8 = 0;
     loop {
         passes += 1;
@@ -439,17 +470,27 @@ pub fn layout_with(
             strategy,
             vertical,
             front: &front,
-            toc: Some(spec),
+            toc,
+            index: &front.index,
         })?;
         let stable = found == front;
         if stable || passes >= TOC_MAX_PASSES {
-            pages.toc = Some(TocReport {
-                passes,
-                stable,
-                entries: front.headings.len() as u32,
-                figures: front.figures.len() as u32,
-                tables: front.tables.len() as u32,
-            });
+            if toc.is_some() {
+                pages.toc = Some(TocReport {
+                    passes,
+                    stable,
+                    entries: front.headings.len() as u32,
+                    figures: front.figures.len() as u32,
+                    tables: front.tables.len() as u32,
+                });
+            }
+            if index.is_some() {
+                pages.index = Some(IndexReport {
+                    passes,
+                    stable,
+                    entries: front.index.len() as u32,
+                });
+            }
             return Ok(pages);
         }
         front = found;
@@ -460,7 +501,7 @@ pub fn layout_with(
 /// document is reported as unstable instead of looping.
 const TOC_MAX_PASSES: u8 = 4;
 
-fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, FrontMatter), LayoutError> {
+fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError> {
     let Pass {
         doc,
         styled,
@@ -470,6 +511,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, FrontMatter), LayoutErro
         vertical,
         front,
         toc,
+        index,
     } = *pass;
     let page = styled.page();
     let content_width = page.content_width();
@@ -497,6 +539,9 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, FrontMatter), LayoutErro
         figure_count: 0,
         table_count: 0,
         front_matter_items: 0,
+        pending_index: Vec::new(),
+        index_terms: Vec::new(),
+        index_entries: index.to_vec(),
         figure_refs: Vec::new(),
         table_refs: Vec::new(),
     };
@@ -508,8 +553,11 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, FrontMatter), LayoutErro
         builder.toc_rows(spec, front, &mut items)?;
     }
     builder.front_matter_items = items.len();
-    builder.flow_into(&doc.blocks, ROOT_STYLE, &mut items)?;
+    builder.flow_into(&doc.blocks, ROOT_STYLE, &mut items, true)?;
     builder.compile_notes(doc)?;
+    if let Some(spec) = styled.index() {
+        builder.index_rows(spec, &mut items)?;
+    }
 
     let page_height = page.content_height();
     let (vertical_items, segments) = pagination::build_stream(&items, vertical);
@@ -733,11 +781,25 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, FrontMatter), LayoutErro
             })
             .collect()
     };
-    let found = FrontMatter {
+    let found = Generated {
         headings: toc_found,
         figures: captions(&builder.figure_refs),
         tables: captions(&builder.table_refs),
+        index: builder.index_entries_found(&label_of),
     };
+    let outline: Vec<OutlineEntry> = builder
+        .headings
+        .iter()
+        .map(|heading| {
+            let page = page_of_item.get(heading.item).copied().unwrap_or(1).max(1);
+            OutlineEntry {
+                level: heading.level,
+                text: heading.text.clone(),
+                page,
+                printed: printed.get(page as usize - 1).cloned().unwrap_or_default(),
+            }
+        })
+        .collect();
 
     Ok((
         PagedLayout {
@@ -753,6 +815,8 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, FrontMatter), LayoutErro
             footnote_passes: passes,
             pagination_cost,
             toc: None,
+            index: None,
+            outline,
         },
         found,
     ))
@@ -1026,6 +1090,12 @@ struct Builder<'a> {
     /// Generated items at the head of the flow (cover + contents). Pages that
     /// only hold these are front matter.
     front_matter_items: usize,
+    /// Index terms seen while compiling the current block.
+    pending_index: Vec<String>,
+    /// Index terms with the flow item they occur in, in document order.
+    index_terms: Vec<(String, usize)>,
+    /// Entries from the previous index pass; empty on the first pass.
+    index_entries: Vec<TocEntry>,
     /// Figure and table captions found in this pass, with their flow item.
     figure_refs: Vec<CaptionRef>,
     table_refs: Vec<CaptionRef>,
@@ -1064,6 +1134,7 @@ impl Builder<'_> {
         blocks: &[Block],
         fallback: StyleId,
         items: &mut Vec<FlowItem>,
+        collect_index: bool,
     ) -> Result<(), LayoutError> {
         for block in blocks {
             let before = items.len();
@@ -1101,12 +1172,12 @@ impl Builder<'_> {
                     let style = self.style(node.meta.id, fallback);
                     for item in &node.items {
                         let item_style = self.style(item.meta.id, style);
-                        self.flow_into(&item.blocks, item_style, items)?;
+                        self.flow_into(&item.blocks, item_style, items, collect_index)?;
                     }
                 }
                 Block::BlockQuote(node) => {
                     let style = self.style(node.meta.id, fallback);
-                    self.flow_into(&node.blocks, style, items)?;
+                    self.flow_into(&node.blocks, style, items, collect_index)?;
                 }
                 Block::CodeBlock(node) => {
                     let style = self.style(node.meta.id, fallback);
@@ -1141,10 +1212,14 @@ impl Builder<'_> {
                         let pattern = self.numbering.figures.clone();
                         let label = self.caption_label(pattern.as_deref(), self.figure_count);
                         let inlines = self.prefixed_inlines(&node.caption, &label);
+                        let caption_style = self.styled.figure_caption_style();
                         let index = items.len();
-                        if let Some(item) =
-                            self.paragraph_item(caption_node, BoxKind::Paragraph, &inlines, style)?
-                        {
+                        if let Some(item) = self.paragraph_item(
+                            caption_node,
+                            BoxKind::Paragraph,
+                            &inlines,
+                            caption_style,
+                        )? {
                             items.push(item);
                             self.figure_refs.push(CaptionRef {
                                 item: index,
@@ -1182,7 +1257,7 @@ impl Builder<'_> {
                             let mut cell_items = Vec::new();
                             let saved = self.content_width;
                             self.content_width = width;
-                            self.flow_into(&cell.blocks, cell_style, &mut cell_items)?;
+                            self.flow_into(&cell.blocks, cell_style, &mut cell_items, false)?;
                             self.content_width = saved;
 
                             let mut blocks = Vec::new();
@@ -1497,6 +1572,7 @@ impl Builder<'_> {
                     } else {
                         Vec::new()
                     };
+                    let table_index = items.len();
                     items.push(FlowItem {
                         blocks,
                         height: table_height,
@@ -1531,13 +1607,19 @@ impl Builder<'_> {
                         let pattern = self.numbering.tables.clone();
                         let label = self.caption_label(pattern.as_deref(), self.table_count);
                         let inlines = self.prefixed_inlines(&node.caption, &label);
-                        let index = items.len();
-                        if let Some(item) =
-                            self.paragraph_item(caption_node, BoxKind::Paragraph, &inlines, style)?
-                        {
-                            items.push(item);
+                        let caption_style = self.styled.table_caption_style();
+                        if let Some(mut item) = self.paragraph_item(
+                            caption_node,
+                            BoxKind::Paragraph,
+                            &inlines,
+                            caption_style,
+                        )? {
+                            // A table caption sits above its table; keep the
+                            // pair together across a page break.
+                            item.keep_with_next = true;
+                            items.insert(table_index, item);
                             self.table_refs.push(CaptionRef {
-                                item: index,
+                                item: table_index,
                                 text: inline_text(&inlines),
                             });
                         }
@@ -1639,7 +1721,7 @@ impl Builder<'_> {
                 }
                 Block::Generated(node) => {
                     let style = self.style(node.meta.id, fallback);
-                    self.flow_into(&node.blocks, style, items)?;
+                    self.flow_into(&node.blocks, style, items, false)?;
                 }
                 Block::Raw(node) => {
                     let style = self.style(node.meta.id, fallback);
@@ -1652,6 +1734,21 @@ impl Builder<'_> {
                         )?);
                     }
                 }
+            }
+
+            // Index markers belong to the block that was just compiled; the
+            // last item is the caption when a float added one.
+            if collect_index {
+                if items.len() > before && !self.pending_index.is_empty() {
+                    let item = items.len() - 1;
+                    for term in self.pending_index.drain(..) {
+                        self.index_terms.push((term, item));
+                    }
+                } else {
+                    self.pending_index.clear();
+                }
+            } else {
+                self.pending_index.clear();
             }
 
             // The first content item after a section marker opens a chapter
@@ -1899,6 +1996,7 @@ impl Builder<'_> {
                     style,
                     kind: SpanKind::Text,
                 }),
+                Inline::Index(node) => self.pending_index.push(node.term.clone()),
                 Inline::LineBreak(_) => out.push(OwnedSpan {
                     text: String::new(),
                     style,
@@ -2036,6 +2134,31 @@ impl Builder<'_> {
         style_id: StyleId,
         slot: Slot,
     ) -> Result<FlowItem, LayoutError> {
+        self.placed_item_at(node, kind, text, style_id, slot, true)
+    }
+
+    /// Like [`Self::object_item_at`], but the text is segmented and may wrap.
+    /// TOC titles use this so a long heading breaks inside its box (ADR-0033).
+    fn text_item_at(
+        &mut self,
+        node: NodeId,
+        kind: BoxKind,
+        text: &str,
+        style_id: StyleId,
+        slot: Slot,
+    ) -> Result<FlowItem, LayoutError> {
+        self.placed_item_at(node, kind, text, style_id, slot, false)
+    }
+
+    fn placed_item_at(
+        &mut self,
+        node: NodeId,
+        kind: BoxKind,
+        text: &str,
+        style_id: StyleId,
+        slot: Slot,
+        object: bool,
+    ) -> Result<FlowItem, LayoutError> {
         let computed = self.computed(style_id);
         let paragraph_style = ParagraphStyle {
             width: slot.width,
@@ -2043,7 +2166,11 @@ impl Builder<'_> {
             line_height: computed.line_height,
             align: kernel_align(slot.align),
         };
-        let spans = [InlineSpan::object(text, style_id)];
+        let spans = [if object {
+            InlineSpan::object(text, style_id)
+        } else {
+            InlineSpan::text(text, style_id)
+        }];
         let paragraph = paragraph_from_spans(&spans, paragraph_style)
             .map_err(|_| LayoutError::new(Some(node), "object compilation failed"))?;
         let mut result = break_paragraph(&paragraph, self.metrics, self.engine)
@@ -2263,7 +2390,7 @@ impl Builder<'_> {
     fn toc_rows(
         &mut self,
         spec: &soma_template::TocSpec,
-        front: &FrontMatter,
+        front: &Generated,
         items: &mut Vec<FlowItem>,
     ) -> Result<(), LayoutError> {
         let entry_style = self.styled.toc_style();
@@ -2371,15 +2498,38 @@ impl Builder<'_> {
         // Reserve four digits so a growing page count never reflows the rows.
         let reserve = self.metrics.advance("0000", entry_style).0.max(Width::EM.0);
         let gap = Width::from_em_frac(1, 2);
-        let title_width = Width(self.content_width.0 - indent.0 - reserve - gap.0);
+        let number_width = self.metrics.advance(page, entry_style);
+        let number_x = Width(self.content_width.0 - number_width.0);
+        // A page list wider than a third of the measure becomes an ordinary
+        // paragraph (`term  pages`) instead of a leader row: there is no room
+        // left for a title box, and overlapping boxes are worse than no leaders.
+        if number_width.0 * 3 > self.content_width.0 {
+            let node = self.generated_id();
+            let text = alloc::format!("{text}  {page}");
+            let mut row = self.text_item_at(
+                node,
+                BoxKind::Paragraph,
+                &text,
+                entry_style,
+                Slot {
+                    x: indent,
+                    width: Width(self.content_width.0 - indent.0),
+                    align: Align::Left,
+                },
+            )?;
+            row.before = Glue::ZERO;
+            items.push(row);
+            return Ok(());
+        }
+        let reserved = self.content_width.0 - indent.0 - reserve - gap.0;
+        let actual = number_x.0 - indent.0 - gap.0;
+        let title_width = Width(reserved.min(actual));
         if title_width.0 <= Width::EM.0 {
             return Ok(());
         }
-        let number_width = self.metrics.advance(page, entry_style);
-        let number_x = Width(self.content_width.0 - number_width.0);
 
         let title_node = self.generated_id();
-        let mut row = self.object_item_at(
+        let mut row = self.text_item_at(
             title_node,
             BoxKind::Paragraph,
             text,
@@ -2390,19 +2540,34 @@ impl Builder<'_> {
                 align: Align::Left,
             },
         )?;
-        let single_line = row.blocks.iter().all(|block| block.lines.len() == 1);
-        if leaders && single_line {
-            let used = row
-                .blocks
-                .iter()
-                .flat_map(|block| block.lines.iter())
-                .map(|placed| placed.line.natural_width.0)
-                .max()
-                .unwrap_or(0);
-            let start = indent.0 + used + gap.0 / 2;
+
+        // The page number and the leaders sit on the title's last line, so a
+        // wrapped title keeps its number at the end of its final line.
+        let last_line = row
+            .blocks
+            .iter()
+            .rev()
+            .find_map(|block| block.lines.last().map(|placed| (block, placed)));
+        let line_y = last_line.map(|(_, placed)| placed.y).unwrap_or(Width::ZERO);
+        let line_used = last_line
+            .map(|(_, placed)| {
+                let line = &placed.line;
+                line.natural_width.0 - line.trim_left.0 - line.trim_right.0
+            })
+            .unwrap_or(0)
+            .max(0)
+            .min(title_width.0);
+
+        if leaders {
+            let start = indent.0 + line_used + gap.0 / 2;
             let end = number_x.0 - gap.0 / 2;
-            if let Some(mut leader) = self.leader_row(entry_style, start, end) {
-                row.blocks.append(&mut leader.blocks);
+            if start < end {
+                if let Some(mut leader) = self.leader_row(entry_style, start, end) {
+                    for block in &mut leader.blocks {
+                        block.y = block.y + line_y;
+                    }
+                    row.blocks.append(&mut leader.blocks);
+                }
             }
         }
 
@@ -2418,7 +2583,10 @@ impl Builder<'_> {
                 align: Align::Left,
             },
         )?;
-        row.height = row.height.max(number_item.height);
+        for block in &mut number_item.blocks {
+            block.y = block.y + line_y;
+        }
+        row.height = row.height.max(Width(line_y.0 + number_item.height.0));
         row.blocks.append(&mut number_item.blocks);
         row.before = Glue::ZERO;
         items.push(row);
@@ -2465,6 +2633,79 @@ impl Builder<'_> {
         item.before = Glue::ZERO;
         item.after = Glue::ZERO;
         Some(item)
+    }
+
+    /// Sorted, de-duplicated index entries with their page labels.
+    fn index_entries_found(&self, label_of: &dyn Fn(usize) -> String) -> Vec<TocEntry> {
+        let mut terms: Vec<&String> = self.index_terms.iter().map(|(term, _)| term).collect();
+        terms.sort();
+        terms.dedup();
+        let mut found = Vec::new();
+        for term in terms {
+            let mut pages: Vec<String> = Vec::new();
+            for (candidate, item) in &self.index_terms {
+                if candidate != term {
+                    continue;
+                }
+                let label = label_of(*item);
+                if !label.is_empty() && !pages.contains(&label) {
+                    pages.push(label);
+                }
+            }
+            if !pages.is_empty() {
+                found.push(TocEntry {
+                    level: 0,
+                    text: term.clone(),
+                    page: pages.join(", "),
+                });
+            }
+        }
+        found
+    }
+
+    /// Emit the index at the tail of the flow.
+    fn index_rows(
+        &mut self,
+        spec: &soma_template::IndexSpec,
+        items: &mut Vec<FlowItem>,
+    ) -> Result<(), LayoutError> {
+        if self.index_entries.is_empty() {
+            return Ok(());
+        }
+        let entry_style = self.styled.index_style();
+        let title_style = self.styled.index_title_style();
+        let first = items.len();
+        if let Some(title) = spec.title.as_deref().filter(|title| !title.is_empty()) {
+            let node = self.generated_id();
+            let item = self.text_item_at(
+                node,
+                BoxKind::Paragraph,
+                title,
+                title_style,
+                Slot {
+                    x: Width::ZERO,
+                    width: self.content_width,
+                    align: Align::Left,
+                },
+            )?;
+            items.push(item);
+        }
+        let entries = self.index_entries.clone();
+        for entry in &entries {
+            self.toc_entry_row(
+                entry_style,
+                &entry.text,
+                &entry.page,
+                Width::ZERO,
+                true,
+                items,
+            )?;
+        }
+        if items.len() > first {
+            // An index starts on its own page unless it is empty.
+            items[first].page_break_before = true;
+        }
+        Ok(())
     }
 
     /// Place a display formula centred in the content box.
@@ -2564,7 +2805,7 @@ impl Builder<'_> {
         for definition in &doc.footnotes {
             let style = self.style(definition.meta.id, ROOT_STYLE);
             let mut items = Vec::new();
-            self.flow_into(&definition.blocks, style, &mut items)?;
+            self.flow_into(&definition.blocks, style, &mut items, false)?;
             let mut blocks = Vec::new();
             let mut y = Width::ZERO;
             for item in items {
@@ -2618,7 +2859,7 @@ fn inline_text(inlines: &[Inline]) -> String {
                 }
             }
             Inline::Raw(node) => out.push_str(&node.content.fallback),
-            Inline::LineBreak(_) | Inline::FootnoteRef(_) => {}
+            Inline::LineBreak(_) | Inline::FootnoteRef(_) | Inline::Index(_) => {}
             other => out.push_str(&inline_text(other.children())),
         }
     }

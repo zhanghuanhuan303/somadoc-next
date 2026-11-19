@@ -62,7 +62,7 @@ fn json_is_the_canonical_page_result() {
     ]);
 
     assert!(ok, "stderr: {stderr}");
-    assert!(stdout.starts_with("{\"schema\":\"soma.pages/8\""));
+    assert!(stdout.starts_with("{\"schema\":\"soma.pages/9\""));
     assert!(stdout.ends_with("}\n"));
 }
 

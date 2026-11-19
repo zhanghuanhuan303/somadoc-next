@@ -188,7 +188,7 @@ fn parsing_is_deterministic() {
     let first = parse_html(html).canonical_json();
     let second = parse_html(html).canonical_json();
     assert_eq!(first, second);
-    assert!(first.starts_with("{\"schema\":\"soma.doc/1\""));
+    assert!(first.starts_with("{\"schema\":\"soma.doc/2\""));
 }
 
 #[test]

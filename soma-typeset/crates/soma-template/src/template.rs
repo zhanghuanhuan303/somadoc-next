@@ -14,7 +14,7 @@ use crate::units::{LengthSpec, LineHeightSpec, Rational, Unit};
 use crate::yaml::{Key, Value, ValueKind};
 use crate::TemplateError;
 
-pub const SCHEMA: &str = "soma.template/8";
+pub const SCHEMA: &str = "soma.template/9";
 
 /// Element names a selector may target. Derived from DocIR node kinds; a typo is
 /// an error instead of silently matching nothing.
@@ -52,12 +52,19 @@ pub const ELEMENTS: &[&str] = &[
     "image",
     "math",
     "footnoteRef",
+    "indexRef",
     "ruby",
     "lineBreak",
     "rawInline",
     // Generated content: table of contents entries and their heading.
     "toc",
     "tocTitle",
+    // Generated captions; the document inlines inherit from these.
+    "figureCaption",
+    "tableCaption",
+    // Generated index entries and their heading.
+    "indexEntry",
+    "indexTitle",
     // Generated cover page.
     "coverTitle",
     "coverSubtitle",
@@ -73,6 +80,7 @@ pub struct Template {
     pub page: PageSpec,
     pub footnote: FootnoteSpec,
     pub toc: Option<TocSpec>,
+    pub index: Option<IndexSpec>,
     pub cover: Option<CoverSpec>,
     pub numbering: NumberingSpec,
     pub table: TableSpec,
@@ -288,6 +296,14 @@ impl Default for NumberingSpec {
             tables: None,
         }
     }
+}
+
+/// Index settings. The *entries* come from `\index{...}` markers in the
+/// document; the template decides that an index exists and what it is called.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexSpec {
+    /// Heading above the entries; `None` prints no heading.
+    pub title: Option<String>,
 }
 
 /// Cover page settings. The *content* comes from the document metadata; the
@@ -594,6 +610,7 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
         "page",
         "footnote",
         "toc",
+        "index",
         "cover",
         "numbering",
         "table",
@@ -613,6 +630,12 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
     let toc = match fields.optional("toc") {
         Some(value) if !value.is_null() => Some(parse_toc(value, "toc")?),
         _ => None,
+    };
+    let index = match fields.optional("index") {
+        Some(value) if !value.is_null() => Some(parse_index(value, "index")?),
+        // `index:` with an empty value asks for an untitled index.
+        Some(_) => Some(IndexSpec { title: None }),
+        None => None,
     };
     let numbering = match fields.optional("numbering") {
         Some(value) if !value.is_null() => parse_numbering(value, "numbering")?,
@@ -645,6 +668,7 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
         page,
         footnote,
         toc,
+        index,
         cover,
         numbering,
         table,
@@ -865,6 +889,14 @@ fn parse_numbering(value: &Value, path: &str) -> Result<NumberingSpec, TemplateE
         depth,
         figures: label("figures")?,
         tables: label("tables")?,
+    })
+}
+
+fn parse_index(value: &Value, path: &str) -> Result<IndexSpec, TemplateError> {
+    let fields = Fields::new(value, path)?;
+    fields.reject_unknown(&["title"])?;
+    Ok(IndexSpec {
+        title: fields.optional_str("title")?,
     })
 }
 

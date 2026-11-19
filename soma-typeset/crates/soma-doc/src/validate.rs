@@ -348,6 +348,11 @@ impl Context<'_> {
                 require_non_empty(&node.base, &format!("{path}.base"))?;
                 require_non_empty(&node.annotation, &format!("{path}.annotation"))
             }
+            Inline::Index(node) => require_non_empty_reason(
+                &node.term,
+                &format!("{path}.term"),
+                "index term must not be empty",
+            ),
             Inline::LineBreak(_) => Ok(()),
             Inline::Raw(node) => check_token(
                 &node.content.format,

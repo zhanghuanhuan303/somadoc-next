@@ -209,15 +209,14 @@ fn captions_are_captured_as_boxes_after_the_contents() {
     assert_eq!(report.tables, 1, "one table list entry");
     let text = page_text(&layout, 0);
     assert!(text.contains("目录"), "{text}");
-    // TOC rows are single object runs, so the number gap is a literal space.
     assert!(
-        text.contains("第一章 绪论"),
+        text.contains("第一章绪论"),
         "TOC entry carries the number: {text}"
     );
     assert!(text.contains("图目录"), "{text}");
-    assert!(text.contains("图 1 架构"), "{text}");
+    assert!(text.contains("图1架构"), "{text}");
     assert!(text.contains("表目录"), "{text}");
-    assert!(text.contains("表 1 参数"), "{text}");
+    assert!(text.contains("表1参数"), "{text}");
 }
 
 #[test]

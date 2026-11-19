@@ -322,6 +322,41 @@ fn figure_and_table_lists_follow_the_chapter_entries() {
     );
 }
 
+#[test]
+fn a_long_entry_wraps_and_keeps_its_number_on_the_last_line() {
+    let long = "这是一个非常长的章节标题，用来验证目录条目会在标题盒内换行而不是溢出".repeat(2);
+    let blocks = vec![heading(1, &long), paragraph("正文。")];
+    let layout = build(blocks, &with_toc("toc:\n  depth: 1\n  title: 目录\n"));
+
+    let entry = layout.pages[0]
+        .blocks
+        .iter()
+        .find(|block| block.kind == BoxKind::Paragraph && block.lines.len() > 1)
+        .expect("the long entry wraps");
+    let last = entry.lines.last().expect("last line");
+    let number = layout.pages[0]
+        .blocks
+        .iter()
+        .find(|block| {
+            let text = block_text(&layout, block);
+            !text.is_empty() && text.chars().all(|character| character.is_ascii_digit())
+        })
+        .expect("page number box");
+
+    let last_y = soma_core::Width(entry.y.0 + last.y.0);
+    assert_eq!(number.y, last_y, "the number sits on the last line");
+    let leader = layout.pages[0]
+        .blocks
+        .iter()
+        .find(|block| block_text(&layout, block).starts_with('·'))
+        .expect("leaders on the last line");
+    assert_eq!(leader.y, last_y, "leaders sit on the last line");
+    assert!(
+        !layout.pages[0].overflow,
+        "a wrapped entry must not overflow its box"
+    );
+}
+
 fn sample_figure(caption: &str) -> Block {
     let mut figure = soma_doc::block::Figure::new(
         NodeMeta::synthesized(),

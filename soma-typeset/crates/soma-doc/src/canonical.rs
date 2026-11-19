@@ -350,6 +350,10 @@ fn write_inline(out: &mut impl Write, inline: &Inline, mode: CanonicalMode) -> f
             out.write_str(",\"label\":")?;
             write_opt_str(out, node.label.as_deref())?;
         }
+        Inline::Index(node) => {
+            out.write_str(",\"term\":")?;
+            write_string(out, &node.term)?;
+        }
         Inline::Ruby(node) => {
             out.write_str(",\"base\":")?;
             write_string(out, &node.base)?;

@@ -30,7 +30,9 @@ use soma_doc::block::{
     Paragraph, Row, Table,
 };
 use soma_doc::inline::FootnoteRef;
-use soma_doc::inline::{Container, Image, Inline, LineBreak, LineBreakKind, Link, MathInline};
+use soma_doc::inline::{
+    Container, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link, MathInline,
+};
 use soma_doc::meta::{Author, CoverData, Date, DocumentMeta, ImageRef};
 use soma_doc::node::NodeMeta;
 use soma_doc::{Block, Code, Document, FootnoteDef, Text};
@@ -1200,7 +1202,15 @@ impl<'a> Parser<'a> {
                     label,
                 )))
             }
-            "label" | "index" | "cite" | "ref" | "pageref" => {
+            "index" => {
+                let term = self.read_group().unwrap_or("").trim();
+                if term.is_empty() {
+                    Command::None
+                } else {
+                    Command::One(Inline::Index(IndexRef::new(NodeMeta::synthesized(), term)))
+                }
+            }
+            "label" | "cite" | "ref" | "pageref" => {
                 let _ = self.read_group();
                 Command::None
             }

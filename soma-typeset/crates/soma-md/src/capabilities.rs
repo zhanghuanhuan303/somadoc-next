@@ -117,6 +117,11 @@ pub const CAPABILITIES: &[Capability] = &[
         note: "`[^label]: text` becomes `FootnoteDef`",
     },
     Capability {
+        syntax: "index_marker",
+        status: CapabilityStatus::Supported,
+        note: "`[[index:term]]` becomes `Inline::Index`",
+    },
+    Capability {
         syntax: "footnote_ref",
         status: CapabilityStatus::Supported,
         note: "`[^label]` becomes `FootnoteRef`",

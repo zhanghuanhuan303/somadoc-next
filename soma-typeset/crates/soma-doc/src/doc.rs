@@ -14,11 +14,11 @@ use crate::text;
 use crate::validate::{self, DocError};
 
 /// Canonical schema id. Changing the emitted shape requires a new id.
-pub const SCHEMA: &str = "soma.doc/1";
+pub const SCHEMA: &str = "soma.doc/2";
 
 /// Structural version of the DocIR model. Additive node kinds keep the version;
 /// changing the meaning of an existing field does not.
-pub const DOC_IR_VERSION: u16 = 1;
+pub const DOC_IR_VERSION: u16 = 2;
 
 /// A footnote definition. Referenced by [`crate::FootnoteRef::target`].
 #[derive(Clone, Debug, PartialEq, Eq)]

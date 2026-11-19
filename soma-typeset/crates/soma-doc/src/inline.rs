@@ -27,6 +27,7 @@ pub enum Inline {
     Image(Image),
     Math(MathInline),
     FootnoteRef(FootnoteRef),
+    Index(IndexRef),
     Ruby(Ruby),
     LineBreak(LineBreak),
     Raw(RawInline),
@@ -48,6 +49,7 @@ impl Inline {
             Self::Image(node) => &node.meta,
             Self::Math(node) => &node.meta,
             Self::FootnoteRef(node) => &node.meta,
+            Self::Index(node) => &node.meta,
             Self::Ruby(node) => &node.meta,
             Self::LineBreak(node) => &node.meta,
             Self::Raw(node) => &node.meta,
@@ -69,6 +71,7 @@ impl Inline {
             Self::Image(node) => &mut node.meta,
             Self::Math(node) => &mut node.meta,
             Self::FootnoteRef(node) => &mut node.meta,
+            Self::Index(node) => &mut node.meta,
             Self::Ruby(node) => &mut node.meta,
             Self::LineBreak(node) => &mut node.meta,
             Self::Raw(node) => &mut node.meta,
@@ -91,6 +94,7 @@ impl Inline {
             Self::Image(_) => "image",
             Self::Math(_) => "math",
             Self::FootnoteRef(_) => "footnoteRef",
+            Self::Index(_) => "index",
             Self::Ruby(_) => "ruby",
             Self::LineBreak(_) => "lineBreak",
             Self::Raw(_) => "raw",
@@ -234,6 +238,25 @@ pub struct FootnoteRef {
     pub label: Option<String>,
 }
 
+/// An index marker: it occupies no space, it records that `term` occurs at this
+/// position. Layout collects the positions and the template decides whether an
+/// index is printed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexRef {
+    pub meta: NodeMeta,
+    /// Display term. Sorting and cross-references are not part of DocIR.
+    pub term: String,
+}
+
+impl IndexRef {
+    pub fn new(meta: NodeMeta, term: impl Into<String>) -> Self {
+        Self {
+            meta,
+            term: term.into(),
+        }
+    }
+}
+
 impl FootnoteRef {
     pub fn new(meta: NodeMeta, target: impl Into<String>) -> Self {
         Self {
@@ -340,6 +363,12 @@ impl From<Image> for Inline {
 impl From<MathInline> for Inline {
     fn from(node: MathInline) -> Self {
         Self::Math(node)
+    }
+}
+
+impl From<IndexRef> for Inline {
+    fn from(value: IndexRef) -> Self {
+        Self::Index(value)
     }
 }
 

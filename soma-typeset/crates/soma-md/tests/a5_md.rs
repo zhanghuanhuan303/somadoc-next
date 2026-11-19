@@ -188,3 +188,20 @@ fn parsing_is_deterministic() {
     assert_eq!(first.canonical_json(), second.canonical_json());
     assert_eq!(first.doc_hash(), second.doc_hash());
 }
+
+#[test]
+fn an_index_extension_becomes_a_marker() {
+    let document = parse_markdown("正文 [[index:排版]] 后文\n");
+    let Block::Paragraph(paragraph) = &document.blocks[0] else {
+        panic!("paragraph")
+    };
+    assert!(
+        paragraph
+            .inlines
+            .iter()
+            .any(|inline| matches!(inline, Inline::Index(node) if node.term == "排版")),
+        "the marker is in the inline sequence"
+    );
+    assert_eq!(document.plain_text().trim(), "正文  后文");
+    document.validate().expect("valid DocIR");
+}

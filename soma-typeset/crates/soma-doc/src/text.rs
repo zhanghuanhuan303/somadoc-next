@@ -42,8 +42,8 @@ fn write_inline(out: &mut String, inline: &Inline) {
             }
         }
         Inline::Math(node) => out.push_str(&node.source),
-        // A reference marker is not text; numbering is generated later.
-        Inline::FootnoteRef(_) => {}
+        // Reference markers are not text; numbering is generated later.
+        Inline::FootnoteRef(_) | Inline::Index(_) => {}
         // A ruby annotation is a pronunciation hint, not part of the base text.
         Inline::Ruby(node) => out.push_str(&node.base),
         Inline::LineBreak(_) => out.push(' '),
