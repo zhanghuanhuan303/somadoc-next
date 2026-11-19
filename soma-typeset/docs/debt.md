@@ -45,7 +45,7 @@
 | D25 | ~~正式 HTML 渲染器~~ | **已关闭（A5）**：`soma-render-html` 消费 `PagedLayout` + `TextSource`，不重排 | — | ✅ 已关闭 | 否 |
 | D26 | 脚注 / 图 / 表 / 公式适配 | **脚注整块移页 + 编号、图占位框、表格单元盒已做（A6）**；Math 适配器、表格行线/colspan 仍未做 | 复杂表格与公式质量受限 | 后续 | 否 |
 | D27 | ~~全管线 native/wasm 哈希~~ | **已关闭（A6）**：fixture 含 DocIR + 行内 + 页面，8,979 bytes 一致 | — | ✅ 已关闭 | 否 |
-| D28 | Gate A / C / R | Gate A 已覆盖 4 个 no_std 层与依赖方向；**Gate C/R 仍未建**（Markdown 降级只靠测试，渲染器没有跨端坐标比对） | 内容能力矩阵与渲染一致性无门禁 | 后续 | 否 |
+| D28 | Gate A / C / R | **Gate A、Gate C 已建**（能力矩阵 + 降级承诺 + 渲染安全，见 `scripts/gate-c.sh`）；**Gate R 未建**（只有一个渲染器，没有跨渲染器坐标比对） | 渲染一致性无门禁 | 后续（等第二个渲染器） | 否 |
 | D29 | `EngineConfig` YAML | 只有 Rust 结构（`ParamSet` + `BreakConfig`）；架构 §9 的 `soma.engine/1` 未实现 | 用户改不了引擎旋钮 | A3 | 否 |
 | D30 | ~~层哈希~~ | **已关闭（A3）**：`paramHash` + `docHash`/`contentHash` + `templateHash`/`styleHash` + 页面结果里的 `engineHash` | — | ✅ 已关闭 | 否 |
 | D31 | DocIR 没有 reader | canonical JSON 是 write-only；只有 writer 与 golden 测试 | 不能回读、不能做 round-trip fuzz，调试只能看输出 | 未排期（真需要的场景：跨进程传递 DocIR） | 否 |
@@ -53,7 +53,7 @@
 | D33 | `rowspan > 1` 未做网格占位校验 | 只校验每行 `colspan` 之和；跨行占位重叠/越界不报错 | 复杂表格可能产出不一致网格 | 未排期 | 否 |
 | D34 | `Date` 不校验月份天数 | 接受 2 月 30 日；只检查 year/month/day 范围 | 无法发现源侧的非法日期 | 未排期（来源已经是日期文本） | 否 |
 | D35 | DocIR 两条平行遍历 | `for_each_meta` / `for_each_meta_mut` 是两份手写 match，靠测试锁同步 | 加字段时两处都可能漏 | 用宏/visitor 合并 | 否 |
-| D36 | Raw 内容未做安全白名单 | `RawBlock`/`RawInline` 原样保留 `html`/`latex` 载荷；布局只画 fallback 文本 | 真渲染 raw 前必须 sanitize | 未排期（Gate C） | 否 |
+| D36 | ~~Raw 内容未做安全白名单~~ | **已关闭（Gate C）**：渲染器只画 fallback 文本，输出转义且不含 `href`/`src`/脚本；内容侧无执行路径 | — | ✅ 已关闭 | 否 |
 | D37 | Ruby 只有数据没有行为 | IR 保留 `base`/`annotation`，模板与布局还没有 ruby 策略 | 注音不会渲染 | A4/A6 | 否 |
 | D38 | `Atom.text: String` 每 atom 一次分配 | 冻结内核里 `Atom` 拥有 `String`；`DocIR -> ParaIR` 必然物化 | 4,000 atoms ≈ 4,000 次分配，是当前 0.5 ms 的一部分 | A3 先测量；改内核需 ADR-0007 + modelVersion | 否 |
 | D39 | wasm/FFI 边界形状未实现 | ADR-0010 §7 已定原则（句柄表或 JSON 进出，不用 `Arc`），但无代码 | wasm 宿主拿不到文档/结果 | A5 | 否 |
@@ -66,8 +66,10 @@
 | D46 | 页面母版未定义 | `Section.page_template` 在 DocIR 里，模板与布局都没有页面母版 | 每章不同版式还不支持 | 未排期 | 否 |
 | D47 | 选择器无组合子 | 只支持「element+role+classes 全部匹配」 | 无法表达「段落里的强调」这类关系 | 未排期 | 否 |
 
-| D48 | 垂直 K-P 未实现 | 分页只用确定性贪心（ADR-0005 允许的回退路径） | 页面松紧不可全局优化 | 未排期 | 否 |
+| D48 | ~~垂直 K-P 未实现~~ | **已关闭**：垂直 K-P 为默认分页，末页免费、脚注参与 DP、强制断点与 keep-with-next 为硬约束；贪心保留为显式策略与回退 | — | ✅ 已关闭 | 否 |
 | D49 | 段落不跨页 | 一个段落整块放置；没有 widow/orphan 行级规则 | 超长段落会溢出整页 | 未排期 | 否 |
+| D58 | 垂直方向没有可拉伸胶水 | `space_before`/`space_after` 是固定长度；badness 只看剩余空间 | 不能像 TeX 那样拉开标题间距补页 | 未排期 | 否 |
+| D59 | 垂直代价参数不在 EngineConfig 里 | `VerticalParams` 是布局层常量 | 不能按文档调分页松紧 | 与 D29 一起做 | 否 |
 | D50 | 无页面母版 / 页眉页脚 / 页码 | 布局只产出内容块；渲染器不画页眉页脚 | 书籍版式不完整 | 未排期 | 否 |
 | D51 | 盒子树是扁平的 | 没有嵌套 `VBox`/`HBox`；表格单元按列偏移摆放，无行线、无 colspan 网格、无表头重复 | 复杂表格与嵌套布局受限 | 未排期 | 否 |
 | D52 | 公式是文本占位 | `MathBlock` 渲染 `source`，没有 Math 适配器 | 公式不美观 | 未排期 | 否 |

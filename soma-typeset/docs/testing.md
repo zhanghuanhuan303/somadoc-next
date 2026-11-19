@@ -107,10 +107,12 @@ Cumulative public test files:
 | `a2_units.rs` | 7 | exact conversion, truncation, strict grammar |
 | `a2_resolve.rs` | 11 | cascade, inheritance, page geometry, style hash |
 | `a3_layout.rs` | 7 | paragraph boxes match the kernel, text index, stacking |
-| `a4_pagination.rs` | 7 | page breaks, keep-with-next, overflow, determinism |
+| `a4_pagination.rs` | 12 | vertical K-P optimality, page breaks, keep-with-next, overflow |
 | `a6_blocks.rs` | 10 | code, math, figures, tables, rules, raw, footnotes |
 | `a5_md.rs` | 11 | Markdown subset, inlines, spans, validity |
 | `a5_render.rs` | 6 | absolute positions, escaping, no re-breaking |
+| `capabilities.rs` (md) | 7 | Gate C matrix, degradation promise, docs parity |
+| `safety.rs` (render) | 3 | Gate C: no scripts, links, images, or URLs |
 | `pipeline.rs` (md) | 3 | Markdown -> DocIR -> pages -> HTML |
 | `spans.rs` (rules) | 6 | span compiler agrees with the text compiler |
 | `soma-doc` doc-test | 1 | crate-level usage example |
@@ -121,7 +123,7 @@ Cumulative public test files:
 | `soma-rules` unit | 13 | segmentation, punctuation, trim caps, rule inventory |
 | core unit | 23 | IR, units, breaker, result |
 
-Total: **237 tests**.
+Total: **252 tests**.
 
 Still deferred: the `Overfull` fallback stage, a quality-labeled calibration
 corpus, the human blind-test run, Markdown syntax parsing, and calibrated trim
@@ -146,7 +148,9 @@ The script runs:
 6. a demo smoke render (`soma-demo` → temporary HTML, check `data-algorithm`)
 7. `cargo tree -p soma-core` dependency-boundary check
 8. clean-room reference check: active files must not mention the deleted prior project
-9. Gate A (`scripts/gate-a.sh`): layer dependencies, `soma-doc` dependency-free and
+9. Gate C (`scripts/gate-c.sh`): capability matrix parity, degradation promise,
+   renderer safety
+10. Gate A (`scripts/gate-a.sh`): layer dependencies, `soma-doc` dependency-free and
    `no_std`, `soma-template` dependency whitelist, no legacy semantic exports, no
    floats, schema constants, no physical style fields in DocIR, no engine knobs in
    templates
@@ -159,6 +163,7 @@ CI calls the same script, so a local pass and CI pass mean the same thing.
 |---|---|---|
 | Gate T | Technical tests and invariants: brute force, `K-P ≤ Greedy-C`, canonical bytes, params, fixtures, wasm | K1–K8 |
 | Gate A | Architecture: layer dependencies, DocIR purity, schema constants, `no_std`, no floats | A1–A6 |
+| Gate C | Content: capability matrix, degradation keeps text, renderer emits no active content | A5+ |
 | Gate Q | Quality claim: guard/target metrics, pre-experiment κ, 30×5 blind test, CI; may be Inconclusive | Only the public quality claim |
 | Gate D | Delivery: WASM size/latency, demo, reproducible scripts, provenance | Release |
 

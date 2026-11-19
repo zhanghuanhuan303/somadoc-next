@@ -62,9 +62,10 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   payload preservation, structural validation, canonical JSON, and two hashes
   (`docHash` for exact reproduction, `contentHash` for content identity). The
   crate has **zero dependencies** and no floats; Gate A enforces that.
-- A3–A6 pipeline: `soma-layout` builds paragraph boxes over the frozen kernel
-  and paginates greedily (`soma.pages/1`), with footnote areas, figure boxes,
-  table cell boxes, code/math/rule boxes, and a `TextSource` seam;
+- A3–A6 pipeline: `soma-layout` builds paragraph boxes over the frozen kernel and
+  paginates with **vertical K-P** by default (`soma.pages/1`), with footnote
+  areas participating in the page DP, figure boxes, table cell boxes,
+  code/math/rule boxes, and a `TextSource` seam;
   `soma-md` parses a documented Markdown subset into DocIR; `soma-render-html`
   paints absolutely positioned HTML. The WASI fixture now hashes DocIR, inline
   layout, and pages together.
@@ -118,6 +119,7 @@ crates/
 scripts/
   gates.sh     # fmt, clippy, tests, wasm hash, demo smoke, dependency guard, Gate A
   gate-a.sh    # architecture gate: layer boundaries, DocIR purity, schema versions
+  gate-c.sh    # content gate: capability matrix, degradation, renderer safety
   bench.sh     # P50/P95 budget check
   sweep.sh     # tolerance x badness sweep
   demo.sh      # target/demo.html
@@ -133,6 +135,8 @@ docs/
   a1-report.md        # A1 milestone report (Gate A1 checklist)
   a2-report.md        # A2 milestone report (Gate A2 checklist)
   a3-a6-report.md     # A3–A6 report: layout, pagination, Markdown, HTML, footnotes
+  gate-c-and-vertical-kp.md # Gate C and vertical K-P report
+  capabilities.md     # content capability matrix (Gate C)
   kp-closure.md       # K1–K6/K8 closure report (Gate T checklist)
   archive/            # historical, non-normative
 ```
@@ -178,11 +182,11 @@ cargo run -p soma-eval --release -- blind preferences.csv
 scripts/gates.sh
 ```
 
-The gate runs format, clippy, 237 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 252 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-template`, `soma-layout`, `soma-md`, and
 `soma-render-html`, a native/`wasm32-wasip1` canonical-byte comparison (DocIR +
 inline layout + pages), a demo smoke render, the `soma-core`
-dependency-boundary check, and Gate A. `scripts/kp-verify.sh` additionally runs
+dependency-boundary check, Gate A, and Gate C. `scripts/kp-verify.sh` additionally runs
 the benchmark budget and the deterministic length policy. The individual
 commands are still available:
 
