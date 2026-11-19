@@ -59,11 +59,21 @@ fn push_item(out: &mut Vec<VItem>, index: usize, item: &FlowItem, params: Vertic
     let last = item.parts.len() - 1;
     for (part_index, part) in item.parts.iter().enumerate() {
         let mut penalty = 0i64;
-        if part_index == 0 && last > 0 {
-            penalty += params.club_penalty;
-        }
-        if part_index + 1 == last && last > 0 {
-            penalty += params.widow_penalty;
+        match item.table {
+            // A table band starting at row zero that ends on the page leaves
+            // the repeated header alone: charge the club penalty for it.
+            Some(table) if table.header_rows > 0 && part_index == 0 && last > 0 => {
+                penalty += params.club_penalty;
+            }
+            Some(_) => {}
+            None => {
+                if part_index == 0 && last > 0 {
+                    penalty += params.club_penalty;
+                }
+                if part_index + 1 == last && last > 0 {
+                    penalty += params.widow_penalty;
+                }
+            }
         }
         out.push(VItem {
             item: index,
@@ -82,7 +92,10 @@ fn push_item(out: &mut Vec<VItem>, index: usize, item: &FlowItem, params: Vertic
             notes: part.notes.clone(),
             penalty,
             can_break: !(part_index == last && item.keep_with_next),
-            table: item.table,
+            table: item.table.map(|mut table| {
+                table.row = part.row;
+                table
+            }),
         });
     }
 }
@@ -487,7 +500,9 @@ pub(crate) fn assemble_page_blocks(
     let mut index = start;
 
     let (natural, stretch) = page_fill(&vertical[start..end]);
-    let free = (capacity.0 - note_height.0 - natural.0).max(0) as i64;
+    // A repeated header sits above the block stream, so it is not part of the
+    // natural fill; subtract it here or the stretch would overshoot the box.
+    let free = (capacity.0 - note_height.0 - reserve.0 - natural.0).max(0) as i64;
     let delta = free.min(stretch);
     let mut cumulative = 0i64;
 
@@ -514,6 +529,48 @@ pub(crate) fn assemble_page_blocks(
             cumulative += plus;
             used = used + vertical[index].after.width;
             index += 1;
+            continue;
+        }
+
+        // A table is one flow item split into row bands. Every break falls on
+        // a row boundary that no cell spans, so the continuation can be built
+        // by shifting whole cell blocks instead of clipping lines.
+        if item.table.is_some() {
+            let first_part = vertical[index].part;
+            let cut = item
+                .parts
+                .iter()
+                .take(first_part)
+                .fold(Width::ZERO, |sum, part| sum + part.height);
+            let top = used;
+            let mut run = index;
+            while run < end && vertical[run].item == item_index {
+                if run > index {
+                    let plus = vertical[run].before.plus.0 as i64;
+                    used = used + vertical[run].before.width;
+                    used = used + Width(stretch_share(delta, stretch, cumulative, plus));
+                    cumulative += plus;
+                }
+                used = used + vertical[run].height;
+                let plus = vertical[run].after.plus.0 as i64;
+                used = used + Width(stretch_share(delta, stretch, cumulative, plus));
+                cumulative += plus;
+                used = used + vertical[run].after.width;
+                run += 1;
+            }
+            let cut_end = cut + Width((used.0 - top.0).max(0));
+            for block in &item.blocks {
+                if block.y.0 + block.height.0 <= cut.0 {
+                    continue;
+                }
+                if block.y.0 >= cut_end.0 {
+                    continue;
+                }
+                let mut placed = block.clone();
+                placed.y = placed.y - cut + top;
+                blocks.push(placed);
+            }
+            index = run;
             continue;
         }
 

@@ -515,6 +515,8 @@ struct Part {
     height: Width,
     /// Footnotes whose marker sits on this line.
     notes: Vec<usize>,
+    /// For table bands: the row index this part starts at. Zero elsewhere.
+    row: u32,
 }
 
 /// Table metadata carried by the flow item of a row group.
@@ -852,69 +854,89 @@ impl Builder<'_> {
                         height: header_height,
                     });
 
-                    // A rowspan may not be split across pages: merge the rows
-                    // it covers into one atomic group.
-                    let mut groups: Vec<(usize, usize)> = Vec::new();
-                    let mut start = 0usize;
-                    while start < row_count {
-                        let mut end = start + 1;
-                        loop {
-                            let mut extended = end;
-                            for cell in &cells {
-                                if cell.row >= start && cell.row < end {
-                                    extended = extended.max(cell.row + cell.rowspan);
-                                }
+                    // A page break may fall between rows unless a rowspan
+                    // cell crosses that boundary. The repeated header is kept
+                    // whole for the same reason.
+                    let mut safe = vec![true; row_count];
+                    let mut header_split = false;
+                    for cell in &cells {
+                        if cell.rowspan > 1 {
+                            if cell.row < header_rows && cell.row + cell.rowspan > header_rows {
+                                // A spanning header cell cannot be repeated
+                                // without duplicating part of the body.
+                                header_split = true;
                             }
-                            if extended <= end {
-                                break;
+                            for slot in safe
+                                .iter_mut()
+                                .take(cell.row + cell.rowspan - 1)
+                                .skip(cell.row)
+                            {
+                                *slot = false;
                             }
-                            end = extended.min(row_count);
                         }
-                        groups.push((start, end));
-                        start = end;
+                    }
+                    for slot in safe.iter_mut().take(header_rows.saturating_sub(1)) {
+                        *slot = false;
                     }
 
-                    for (group_start, group_end) in groups {
-                        let top = row_offsets[group_start];
-                        let bottom = row_offsets[group_end];
-                        let mut blocks = Vec::new();
-                        for cell in &cells {
-                            if cell.row < group_start || cell.row >= group_end {
-                                continue;
-                            }
-                            let cell_top = Width(row_offsets[cell.row].0 - top.0);
-                            for block in &cell.blocks {
-                                let mut placed = block.clone();
-                                placed.y = placed.y + cell_top;
-                                blocks.push(placed);
+                    // Maximal runs of rows that no cell spans across. Each run
+                    // becomes one part, so the page breaker can continue the
+                    // table without cutting through a cell.
+                    let mut units: Vec<(usize, usize)> = Vec::new();
+                    if header_split {
+                        units.push((0, row_count));
+                    } else {
+                        let mut start = 0usize;
+                        for (row, slot) in safe.iter().enumerate() {
+                            if *slot || row + 1 == row_count {
+                                units.push((start, row + 1));
+                                start = row + 1;
                             }
                         }
-                        items.push(FlowItem {
-                            blocks,
-                            height: Width(bottom.0 - top.0),
-                            before: Glue {
-                                width: if group_start == 0 {
-                                    leading_gap
-                                } else {
-                                    Width::ZERO
-                                },
-                                plus: Width::ZERO,
-                                minus: Width::ZERO,
-                            },
-                            after: Glue::ZERO,
-                            keep_with_next: false,
-                            page_break_before: false,
-                            forced_break: false,
-                            footnotes: Vec::new(),
-                            parts: Vec::new(),
-                            table: Some(TableContext {
-                                id: table_id,
-                                row: group_start as u32,
-                                header_rows: header_rows as u32,
-                                header_height,
-                            }),
-                        });
                     }
+
+                    let mut blocks = Vec::new();
+                    for cell in &cells {
+                        let cell_top = row_offsets[cell.row];
+                        for block in &cell.blocks {
+                            let mut placed = block.clone();
+                            placed.y = placed.y + cell_top;
+                            blocks.push(placed);
+                        }
+                    }
+                    let parts: Vec<Part> = if units.len() > 1 {
+                        units
+                            .iter()
+                            .map(|&(start, end)| Part {
+                                height: Width(row_offsets[end].0 - row_offsets[start].0),
+                                notes: Vec::new(),
+                                row: start as u32,
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+                    items.push(FlowItem {
+                        blocks,
+                        height: row_offsets[row_count],
+                        before: Glue {
+                            width: leading_gap,
+                            plus: Width::ZERO,
+                            minus: Width::ZERO,
+                        },
+                        after: Glue::ZERO,
+                        keep_with_next: false,
+                        page_break_before: false,
+                        forced_break: false,
+                        footnotes: Vec::new(),
+                        parts,
+                        table: Some(TableContext {
+                            id: table_id,
+                            row: 0,
+                            header_rows: header_rows as u32,
+                            header_height,
+                        }),
+                    });
                 }
                 Block::ThematicBreak(node) => {
                     let style = self.style(node.meta.id, fallback);
@@ -1074,6 +1096,7 @@ impl Builder<'_> {
             parts.push(Part {
                 height: advance,
                 notes: Vec::new(),
+                row: 0,
             });
             y = y + advance;
         }
