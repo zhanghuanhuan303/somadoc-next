@@ -2,14 +2,16 @@
 
 Status: **frozen on 2026-11-20** with `docs/architecture-v2.md`.
 ADR-0010 amends §15.1 (one extra crate) and fixes shapes that
-architecture v2 left open; ADR-0012…0026 extend the implemented system
+architecture v2 left open; ADR-0012…0027 extend the implemented system
 (table metrics, line-level pagination, typography, page masters, engine
 configuration, table continuation, table rules and context selectors,
-frontends, display math)
+frontends, display and inline math)
 without changing the layer contract.
 
 These ADRs record the decisions that shape the next phase. They are aligned
-with the already-implemented code; they do not change the frozen inline kernel.
+with the already-implemented code; they do not change the frozen inline
+kernel's DP, cost model, or tie-break (ADR-0027 adds defaulted metrics hooks
+only).
 
 | ADR | Decision | Status |
 |---|---|---|
@@ -39,6 +41,7 @@ with the already-implemented code; they do not change the frozen inline kernel.
 | [0024](0024-html-frontend.md) | HTML frontend: semantic whitelist, tolerant parser, table grid normalization | Accepted |
 | [0025](0025-latex-frontend.md) | LaTeX frontend subset: sections, inline commands, environments, tables, math source | Accepted |
 | [0026](0026-math.md) | Display math: `soma-math` box model, metric adapter, `MathBox` in the page result | Accepted |
+| [0027](0027-inline-math.md) | Inline math as object atoms: kind-aware metrics hooks, markers, `inlineMath` in the page result | Accepted |
 
 ## Rules
 

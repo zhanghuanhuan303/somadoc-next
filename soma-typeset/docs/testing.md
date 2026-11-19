@@ -128,10 +128,14 @@ Cumulative public test files:
 | `a5_md.rs` | 11 | Markdown subset, inlines, spans, validity |
 | `html.rs` (html) | 9 | HTML subset shapes, table grid, degradation, recovery, pipeline |
 | `latex.rs` (latex) | 9 | LaTeX subset shapes, math source, table grid, metadata, recovery, pipeline |
-| `math.rs` (soma-math) | 17 | scripts, fractions, radicals, big operators, function names, delimiters, spacing, errors, determinism |
+| `math.rs` (soma-math) | 19 | scripts, fractions, radicals, big operators, function names, delimiters, spacing, styles, errors |
 | `e11_math.rs` (layout) | 8 | centring, baseline inside the box, flow, canonical `math` field |
+| `e12_inline_math.rs` (layout) | 11 | marker atoms, line-box growth, text style, placeholder, canonical `inlineMath` |
+| `k7_object_metrics.rs` | 4 | object hooks vs text paths, default-hook equivalence |
 | `math.rs` (svg) | 4 | exact formula coordinates |
+| `inline_math.rs` (svg) | 2 | inline items on the line baseline, marker never drawn |
 | `math.rs` (html) | 4 | formula preview spans, placeholder fallback |
+| `inline_math.rs` (html) | 2 | inline preview positions, marker never drawn |
 | `a5_render.rs` | 6 | absolute positions, escaping, no re-breaking |
 | `capabilities.rs` (md) | 7 | Gate C matrix, degradation promise, docs parity |
 | `safety.rs` (render) | 3 | Gate C: no scripts, links, images, or URLs |
@@ -148,7 +152,7 @@ Cumulative public test files:
 | core unit | 24 | IR, units, breaker, result, presets |
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 
-Total: **415 tests**.
+Total: **436 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

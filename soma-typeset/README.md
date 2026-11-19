@@ -63,11 +63,12 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   (`docHash` for exact reproduction, `contentHash` for content identity). The
   crate has **zero dependencies** and no floats; Gate A enforces that.
 - A3–A6 pipeline: `soma-layout` builds paragraph boxes over the frozen kernel and
-  paginates with **line-level vertical K-P** by default (`soma.pages/5`):
+  paginates with **line-level vertical K-P** by default (`soma.pages/6`):
   paragraphs split across pages, widows/orphans are penalties, vertical glue can
   stretch, footnotes are charged to the marker's line, and page masters add a
   running header, footer, and folio. Figure boxes, table cell boxes,
-  code/rule boxes, display-formula boxes, and a `TextSource` seam complete the tree;
+  code/rule boxes, display-formula boxes, inline-formula atoms, and a `TextSource`
+  seam complete the tree;
   `soma-md`, `soma-html`, and `soma-latex` parse documented Markdown/HTML/LaTeX
   subsets into DocIR;
   `soma-render-html`
@@ -89,8 +90,9 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   fractions, radicals, `\sum`/`\int` with limits, function names,
   `\left…\right`) laid out into integer glyphs and rules. `soma-layout`
   centres one `MathBox` per `MathBlock`; both renderers paint it; a malformed
-  formula falls back to text instead of failing the page. See
-  [`docs/math.md`](docs/math.md).
+  formula falls back to text instead of failing the page. Inline formulas are
+  object atoms measured by their own box (ADR-0027), so they break and raise the
+  line box like any other inline object. See [`docs/math.md`](docs/math.md).
 - Engine configuration: `soma-engine` parses `soma.engine/1` (preset, window,
   atom window, fallback switches, vertical cost model) into the same
   `BreakConfig`/`VerticalParams` the hand-built path uses. See
@@ -104,8 +106,8 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
 
 ## What is not here yet
 
-- Word import, browser WASM packaging, incremental layout, inline math layout,
-  and the human blind-test run. Gate Q remains `Inconclusive` until that run exists; the
+- Word import, browser WASM packaging, incremental layout, and the human
+  blind-test run. Gate Q remains `Inconclusive` until that run exists; the
   effect scorecard (Q′) is a structural report, not a quality claim. See
   [`docs/roadmap-v2.md`](docs/roadmap-v2.md) and
   [`docs/debt.md`](docs/debt.md).

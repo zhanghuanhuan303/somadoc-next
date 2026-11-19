@@ -16,6 +16,17 @@ MathBlock source
   └─ renderers             → <text>/<rect>, <span>/<div>
 ```
 
+Inline math takes a parallel path (ADR-0027):
+
+```text
+MathInline source
+  └─ soma_math::lay_out (text style)  → MathLayout
+  └─ soma_layout::math::InlineMaths   → marker atom (U+E001 + index)
+  └─ break_paragraph via ObjectMetrics → atom width/ascent/descent
+  └─ PlacedBlock.inline_math          → {atom, source, math}
+  └─ renderers                        → drawn at the atom origin
+```
+
 `soma_math` knows nothing about pages, styles, or fonts. `soma-layout` supplies
 metrics through `MathMetrics`, implemented by `MathAdapter` over the same
 `soma_core::Metrics` face the paragraph uses.
@@ -56,6 +67,31 @@ Unsupported commands are a hard error: `MathError::UnsupportedCommand`. Layout
 catches it and keeps the text placeholder, so a formula outside the subset is
 visible in output instead of silently wrong.
 
+## Inline math
+
+`$...$` / `\(...\)` sources become **object atoms** (`AtomKind::InlineObject`):
+
+- laid out in **text style** (`MathStyle { display: false }`), so `\sum`/`\prod`
+  limits follow the operator instead of stacking;
+- measured by their box: the kernel calls
+  `Metrics::object_advance` / `Metrics::object_metrics` for object atoms, and
+  `soma-layout::math::ObjectMetrics` answers from the laid-out formula;
+- identifed by a marker (`U+E001` + ordinal) so a body-text atom can never be
+  confused with a formula;
+- recorded as `PlacedBlock.inline_math: [{atom, source, math}]`, where `atom`
+  indexes the block's text stream;
+- drawn by both renderers at
+  `x = atom.x`, `y = line top + line ascent` (baseline), never as text.
+
+A formula that does not parse keeps the old placeholder behaviour: the source
+is one text atom and `inline_math` stays empty. Inline formulas never split
+across lines, participate in justification only as fixed-width atoms, and raise
+the line box through their ascent/depth.
+
+Remaining inline limits (D72): text style reuses the display constants
+(`\frac` parts keep `script_scale`, `big_scale` does not shrink), and there is
+no italic math font or delimiter sizing.
+
 ## Style constants (`MathStyle`)
 
 | Field | Default | Meaning |
@@ -71,6 +107,7 @@ visible in output instead of silently wrong.
 | `rel_gap` | 280 | space around `= < ≥` |
 | `punct_gap` | 170 | reserved for `, ;` |
 | `big_scale` | 1400 | big operator size relative to the base |
+| `display` | `true` | limits stack above/below (`false` for inline) |
 
 All values are permille of the current size. `soma-layout::math::style_for`
 takes everything from `MathStyle::default()` and replaces `size` with the
@@ -79,17 +116,19 @@ with no extra configuration.
 
 ## Placeholder fallback
 
-`math::display` returns `None` for a parse error. `Builder::math_item` then
-returns `None` and `flow_into` calls `object_item(BoxKind::Math, source, style)`
-— the source is laid out as one text line, exactly as before this ADR. The page
-never fails because of a formula.
+`math::display` / `math::display_inline` return `None` for a parse error.
+Display: `Builder::math_item` then returns `None` and `flow_into` calls
+`object_item(BoxKind::Math, source, style)` — the source is laid out as one
+text line. Inline: the atom text stays the source and is measured as text.
+Either way the page never fails because of a formula.
 
 ## Pagination
 
 A display formula is one indivisible flow item: it has glue before/after from
 the style, `keep_with_next` and `page_break_before` are honoured, and it never
 splits. If it does not fit on an empty page the page is marked `overflow` like
-any other tall box.
+any other tall box. An inline formula is an indivisible *atom*: it moves to the
+next line with the rest of the line and never splits mid-formula.
 
 ## Tests
 
@@ -97,6 +136,10 @@ any other tall box.
 |---|---|
 | `soma-math/tests/math.rs` | scripts, fractions, radicals, big operators, names, delimiters, spacing, errors |
 | `soma-layout/tests/e11_math.rs` | centring, baseline inside the box, line flow, canonical JSON |
+| `soma-layout/tests/e12_inline_math.rs` | marker atoms, line-box growth, text-style limits, placeholder, canonical `inlineMath` |
 | `soma-render-svg/tests/math.rs` | exact `<text>`/`<rect>` coordinates |
+| `soma-render-svg/tests/inline_math.rs` | inline items on the line baseline, marker never drawn |
 | `soma-render-html/tests/math.rs` | span/div preview, placeholder fallback |
+| `soma-render-html/tests/inline_math.rs` | inline preview positions, marker never drawn |
 | `soma-layout/tests/a6_blocks.rs` | display box vs placeholder |
+| `soma-core/tests/k7_object_metrics.rs` | object hooks vs text paths, default-hook equivalence |

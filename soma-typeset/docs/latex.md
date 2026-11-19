@@ -65,7 +65,7 @@ let document = parse_latex(r"\section{标题}
 
 - 无宏、计数器、交叉引用、参考文献、`\includegraphics`。
 - 行间公式的源码原样进入 `MathBlock.source`，随后由 `soma-math` 排成数学盒（ADR-0026）；
-  行内公式仍是占位文本（D54）。
+  行内公式同样交给 `soma-math`，作为对象 atom 参与断行（ADR-0027）。
 - 无 `\item[label]`、无 `description` 环境、无 `\multicolumn` 以外的列格式。
 - 无 `\maketitle` 布局：标题进元数据，占位标题页由模板决定。
 - 无源位置（`SourceSpan` 为空）。
