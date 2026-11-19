@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use soma_core::{BreakConfig, ParamSet, Permille, Weight, Window};
-use soma_doc::block::{Cell, Column, Paragraph, Row, Table};
+use soma_doc::block::{Cell, Column, Heading, MathBlock, Paragraph, Row, Table};
 use soma_doc::meta::DocumentMeta;
 use soma_doc::node::NodeMeta;
 use soma_doc::{Block, CellAlign, Document, Text};
@@ -136,6 +136,8 @@ pub fn evaluate_dir(dir: &Path, params: &ParamSet) -> Result<CorpusReport, Strin
 pub fn evaluate_all(dir: &Path, params: &ParamSet) -> Result<CorpusReport, String> {
     let mut documents = load_files(dir)?;
     documents.push((String::from("table-page"), table_document()));
+    documents.push((String::from("math-page"), math_document()));
+    documents.push((String::from("book"), book_document()));
     evaluate_documents(documents, params)
 }
 
@@ -206,13 +208,14 @@ fn evaluate_documents(
     })
 }
 
-/// A table taller than a page: exercises cell boxes and row stacking.
+/// A table taller than a page: exercises cell boxes, colspan widths, and row
+/// stacking.
 pub fn table_document() -> Document {
     let mut document = Document::new(DocumentMeta::new().with_language("zh-Hans"));
     document.push_block(Block::Paragraph(Paragraph::new(
         NodeMeta::synthesized(),
         vec![text(
-            "下面是一张跨页表格，用来检验单元盒、行高与分页是否稳定。",
+            "下面是一张跨页表格，用来检验单元盒、列宽与分页是否稳定。",
         )],
     )));
 
@@ -220,21 +223,19 @@ pub fn table_document() -> Document {
         .map(|_| Column::new(NodeMeta::synthesized(), CellAlign::Default))
         .collect();
     let mut rows = Vec::new();
-    for row in 0..16 {
-        let cells = (0..3)
-            .map(|column| {
-                Cell::new(
-                    NodeMeta::synthesized(),
-                    vec![Block::Paragraph(Paragraph::new(
-                        NodeMeta::synthesized(),
-                        vec![text(&format!(
-                            "第{row}行第{column}列：单元格里的中文需要换行与对齐，长度足够触发多行。"
-                        ))],
-                    ))],
-                )
-            })
-            .collect();
-        rows.push(Row::new(NodeMeta::synthesized(), row == 0, cells));
+    let mut wide = cell("编号与类别");
+    wide.colspan = 2;
+    rows.push(Row::new(
+        NodeMeta::synthesized(),
+        true,
+        vec![wide, cell("说明")],
+    ));
+    for row in 1..=40 {
+        rows.push(Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![cell(&format!("{row}")), cell("甲类"), cell("短说明")],
+        ));
     }
     document.push_block(Block::Table(Table::new(
         NodeMeta::synthesized(),
@@ -247,6 +248,75 @@ pub fn table_document() -> Document {
     )));
     document.renumber();
     document
+}
+
+/// Formula placeholders. `soma-layout` renders a `MathBlock` as one object atom
+/// until a math adapter exists (D52); this fixture measures that path.
+pub fn math_document() -> Document {
+    let mut document = Document::new(DocumentMeta::new().with_language("zh-Hans"));
+    document.push_block(Block::Paragraph(Paragraph::new(
+        NodeMeta::synthesized(),
+        vec![text(
+            "下面是一组公式占位。真正的数学排版由适配器提供，核心只负责宽高与基线。",
+        )],
+    )));
+    for source in [
+        "E = mc^2",
+        "\\int_0^1 x^2 dx = 1/3",
+        "\\sum_{i=1}^n i = n(n+1)/2",
+        "\\frac{a+b}{c+d} = \\frac{1}{2}",
+    ] {
+        document.push_block(Block::MathBlock(MathBlock::new(
+            NodeMeta::synthesized(),
+            source,
+        )));
+    }
+    document.push_block(Block::Paragraph(Paragraph::new(
+        NodeMeta::synthesized(),
+        vec![text("公式之后的正文，用来确认对象盒不影响分页顺序。")],
+    )));
+    document.renumber();
+    document
+}
+
+const BOOK_PARAGRAPHS: &[&str] = &[
+    "长篇文档的分页与短文档不同：页面数量增加后，孤行、寡行和底部留白都会被放大，任何一处偏差都会在几十页后变成明显的节奏问题。",
+    "我们要求每一页的填充都可以解释：要么正文排满，要么脚注占位，要么是章节起始的刻意留白。无法解释的空白一律视为缺陷。",
+    "中文标点在长篇里更容易暴露问题。连续标点、行首禁则与行尾悬挂如果只在短样本上验证，到了长篇就会在某一页集中出现。",
+    "版面的一致性来自可复现，而不是来自某一次调参的运气。同一份文档在两年后应当排成同一个样子，页码与断点都不应漂移。",
+    "跨页段落需要保持语义完整：标记与脚注同页，段首不出现孤行，段末不出现寡行。这些规则在短文档里是细节，在长篇里是底线。",
+    "性能也是长篇的一部分。分页窗口是精确剪枝，因此页数增加时耗时应当近似线性，而不是随着候选断点数量爆炸。",
+];
+
+/// A long document: thirty chapters, twelve paragraphs each.
+pub fn book_document() -> Document {
+    let mut document = Document::new(DocumentMeta::new().with_language("zh-Hans"));
+    for chapter in 1..=30 {
+        document.push_block(Block::Heading(Heading::new(
+            NodeMeta::synthesized(),
+            2,
+            vec![text(&format!("第{chapter}章"))],
+        )));
+        for index in 0..12 {
+            let paragraph = BOOK_PARAGRAPHS[(chapter + index) % BOOK_PARAGRAPHS.len()];
+            document.push_block(Block::Paragraph(Paragraph::new(
+                NodeMeta::synthesized(),
+                vec![text(paragraph)],
+            )));
+        }
+    }
+    document.renumber();
+    document
+}
+
+fn cell(value: &str) -> Cell {
+    Cell::new(
+        NodeMeta::synthesized(),
+        vec![Block::Paragraph(Paragraph::new(
+            NodeMeta::synthesized(),
+            vec![text(value)],
+        ))],
+    )
 }
 
 fn text(value: &str) -> soma_doc::Inline {

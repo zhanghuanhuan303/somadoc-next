@@ -1,7 +1,9 @@
 //! Real-corpus evaluation: structural claims that must hold on `corpus/zh`.
 
 use soma_core::ParamSet;
-use soma_eval::corpus::{calibrate, evaluate_all, evaluate_dir, repository_dir, table_document};
+use soma_eval::corpus::{
+    calibrate, evaluate_all, evaluate_dir, math_document, repository_dir, table_document,
+};
 
 #[test]
 fn the_corpus_is_present_and_every_document_lays_out() {
@@ -75,8 +77,10 @@ fn the_expanded_corpus_includes_long_form_footnotes_and_a_table() {
     assert!(names.contains(&"classics"), "long-form prose: {names:?}");
     assert!(names.contains(&"footnotes"), "footnote-dense: {names:?}");
     assert!(names.contains(&"table-page"), "table fixture: {names:?}");
-    assert!(report.documents.len() >= 7);
-    assert!(report.pages >= 8);
+    assert!(names.contains(&"math-page"), "math fixture: {names:?}");
+    assert!(names.contains(&"book"), "book fixture: {names:?}");
+    assert!(report.documents.len() >= 10);
+    assert!(report.pages >= 25);
 
     let table = report
         .documents
@@ -115,6 +119,57 @@ fn the_table_fixture_produces_cell_boxes() {
         .flat_map(|page| page.blocks.iter())
         .filter(|block| block.kind == BoxKind::TableCell)
         .count();
-    assert!(cells >= 16, "expected one box per cell, got {cells}");
+    assert!(cells >= 60, "expected one box per cell, got {cells}");
     assert!(!layout.pages.is_empty());
+}
+
+#[test]
+fn the_math_fixture_keeps_one_box_per_formula() {
+    use soma_core::BreakConfig;
+    use soma_layout::{layout_with, BoxKind, PaginationStrategy, StyledMetrics, VerticalParams};
+    use soma_metrics::MetricsTable;
+    use soma_template::{parse_template, resolve};
+
+    let document = math_document();
+    let template = parse_template(soma_eval::score::TEMPLATE).expect("template");
+    let styled = resolve(&document, &template).expect("styles");
+    let table = MetricsTable::embedded();
+    let metrics = StyledMetrics::new(&table, &styled);
+    let layout = layout_with(
+        &document,
+        &styled,
+        &metrics,
+        &BreakConfig::default(),
+        PaginationStrategy::VerticalKp,
+        VerticalParams::default_v1(),
+    )
+    .expect("layout");
+
+    let formulas = layout
+        .pages
+        .iter()
+        .flat_map(|page| page.blocks.iter())
+        .filter(|block| block.kind == BoxKind::Math)
+        .count();
+    assert_eq!(formulas, 4, "one object box per formula");
+}
+
+#[test]
+fn the_book_fixture_is_long_and_stable() {
+    let report = evaluate_all(&repository_dir(), &ParamSet::default_v1()).expect("evaluate");
+    let book = report
+        .documents
+        .iter()
+        .find(|document| document.name == "book")
+        .expect("book fixture");
+    assert!(book.pages >= 15, "book has {} pages", book.pages);
+    assert!(book.metrics.lines > 300);
+
+    let again = evaluate_all(&repository_dir(), &ParamSet::default_v1()).expect("evaluate");
+    let second = again
+        .documents
+        .iter()
+        .find(|document| document.name == "book")
+        .expect("book fixture");
+    assert_eq!(book, second, "the book must lay out identically twice");
 }

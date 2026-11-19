@@ -236,3 +236,51 @@ fn footnote_numbering_resets_per_page() {
         }
     }
 }
+
+#[test]
+fn colspan_cells_span_their_columns() {
+    let columns = (0..3)
+        .map(|_| Column::new(NodeMeta::synthesized(), CellAlign::Default))
+        .collect();
+    let mut wide = Cell::new(
+        NodeMeta::synthesized(),
+        vec![Block::Paragraph(Paragraph::new(
+            NodeMeta::synthesized(),
+            vec![text("跨两列")],
+        ))],
+    );
+    wide.colspan = 2;
+    let row = Row::new(
+        NodeMeta::synthesized(),
+        true,
+        vec![
+            wide,
+            Cell::new(
+                NodeMeta::synthesized(),
+                vec![Block::Paragraph(Paragraph::new(
+                    NodeMeta::synthesized(),
+                    vec![text("第三列")],
+                ))],
+            ),
+        ],
+    );
+    let doc = document(vec![Block::Table(Table::new(
+        NodeMeta::synthesized(),
+        columns,
+        vec![row],
+    ))]);
+    let styled = styled(&doc, TIGHT);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let blocks = &layout.pages[0].blocks;
+
+    assert_eq!(blocks.len(), 2);
+    let column_width = layout.page.content_width().0 / 3;
+    assert_eq!(blocks[0].x.0, 0);
+    assert_eq!(
+        blocks[0].width.0,
+        column_width * 2,
+        "a colspan=2 cell must be two columns wide"
+    );
+    assert_eq!(blocks[1].x.0, column_width * 2);
+    assert_eq!(blocks[1].width.0, column_width);
+}

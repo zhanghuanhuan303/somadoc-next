@@ -695,22 +695,31 @@ impl Builder<'_> {
                         let row_computed = self.computed(row_style);
                         let mut row_blocks = Vec::new();
                         let mut row_height = Width::ZERO;
-                        for (cell_index, cell) in row.cells.iter().enumerate() {
+                        let mut cell_index = 0usize;
+                        for cell in &row.cells {
                             let cell_style = self.style(cell.meta.id, row_style);
+                            let span = (cell.colspan as usize)
+                                .max(1)
+                                .min(columns.saturating_sub(cell_index).max(1));
                             let x = Width(column_width.0 * cell_index as i32);
+                            let width = Width(column_width.0 * span as i32);
                             let mut cell_items = Vec::new();
+                            let saved = self.content_width;
+                            self.content_width = width;
                             self.flow_into(&cell.blocks, cell_style, &mut cell_items)?;
+                            self.content_width = saved;
                             let mut y = Width::ZERO;
                             for item in cell_items {
                                 for mut placed in item.blocks {
                                     placed.kind = BoxKind::TableCell;
-                                    placed.x = x;
+                                    placed.x = placed.x + x;
                                     placed.y = y;
                                     y = y + placed.height;
                                     row_blocks.push(placed);
                                 }
                             }
                             row_height = row_height.max(y);
+                            cell_index += span;
                         }
                         items.push(FlowItem {
                             blocks: row_blocks,
