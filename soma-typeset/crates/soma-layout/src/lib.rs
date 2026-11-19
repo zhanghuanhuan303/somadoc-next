@@ -36,7 +36,7 @@ use soma_doc::{Block, Document, Inline, NodeId};
 use soma_rules::{paragraph_from_spans, paragraph_from_text, InlineSpan, RuleError, SpanKind};
 use soma_template::{ComputedStyle, ResolvedPage, StyledDoc};
 
-pub const SCHEMA: &str = "soma.pages/3";
+pub const SCHEMA: &str = "soma.pages/4";
 
 /// Placeholder atom for a footnote marker. Renderers replace the marked atom
 /// with [`Mark::number`].
@@ -82,6 +82,8 @@ pub enum BoxKind {
     Rule,
     Figure,
     TableCell,
+    /// A horizontal line drawn by the table's rule widths.
+    TableRule,
     Footnote,
 }
 
@@ -95,6 +97,7 @@ impl BoxKind {
             Self::Rule => "thematicBreak",
             Self::Figure => "figure",
             Self::TableCell => "cell",
+            Self::TableRule => "tableRule",
             Self::Footnote => "footnote",
         }
     }
@@ -539,9 +542,36 @@ struct TableHeader {
 /// One laid-out table cell before row heights are resolved.
 struct TableCellLayout {
     row: usize,
+    column: usize,
+    colspan: usize,
     rowspan: usize,
     blocks: Vec<PlacedBlock>,
     height: Width,
+}
+
+/// A horizontal table rule at an exact position.
+fn table_rule(
+    node: NodeId,
+    style: StyleId,
+    x: Width,
+    y: Width,
+    width: Width,
+    height: Width,
+) -> PlacedBlock {
+    PlacedBlock {
+        node,
+        kind: BoxKind::TableRule,
+        style,
+        x,
+        y,
+        width,
+        height,
+        lines: Vec::new(),
+        marks: Vec::new(),
+        line_offset: 0,
+        lines_total: 0,
+        stage: FallbackStage::Normal,
+    }
 }
 
 struct FlowItem {
@@ -777,6 +807,8 @@ impl Builder<'_> {
                             }
                             cells.push(TableCellLayout {
                                 row: row_index,
+                                column,
+                                colspan,
                                 rowspan,
                                 blocks,
                                 height,
@@ -820,33 +852,107 @@ impl Builder<'_> {
                         }
                     }
 
-                    let mut row_offsets = Vec::with_capacity(row_count + 1);
-                    let mut offset = Width::ZERO;
-                    for height in &row_heights {
-                        row_offsets.push(offset);
-                        offset = offset + *height;
-                    }
-                    row_offsets.push(offset);
-
                     // Leading header rows are repeated on continuation pages.
                     let mut header_rows = 0usize;
                     while header_rows < row_count && node.rows[header_rows].header {
                         header_rows += 1;
                     }
-                    let header_height = row_offsets[header_rows];
-                    let mut header_blocks = Vec::new();
-                    if header_rows > 0 {
-                        for cell in cells
-                            .iter()
-                            .filter(|cell| cell.row + cell.rowspan <= header_rows)
-                        {
-                            let cell_top = row_offsets[cell.row];
-                            for block in &cell.blocks {
-                                let mut placed = block.clone();
-                                placed.y = placed.y + cell_top;
-                                header_blocks.push(placed);
+
+                    // Rules occupy their own vertical space, so a continuation
+                    // page can shift them like any other block.
+                    let rules = self.styled.table_rules();
+                    let mut rule_after = vec![Width::ZERO; row_count];
+                    for (row, slot) in rule_after.iter_mut().enumerate() {
+                        *slot = if row + 1 == row_count {
+                            rules.outer_rule
+                        } else if header_rows > 0 && row < header_rows {
+                            rules.header_rule
+                        } else {
+                            rules.rule
+                        };
+                    }
+                    let mut row_top = Vec::with_capacity(row_count + 1);
+                    let mut cursor = rules.outer_rule;
+                    for (row, height) in row_heights.iter().enumerate() {
+                        row_top.push(cursor);
+                        cursor = cursor + *height + rule_after[row];
+                    }
+                    row_top.push(cursor);
+                    let table_height = cursor;
+                    let table_width = Width(column_width.0 * columns as i32);
+                    let header_height = row_top[header_rows];
+
+                    let mut blocks = Vec::new();
+                    if rules.outer_rule.0 > 0 {
+                        blocks.push(table_rule(
+                            node.meta.id,
+                            style,
+                            Width::ZERO,
+                            Width::ZERO,
+                            table_width,
+                            rules.outer_rule,
+                        ));
+                    }
+                    for cell in &cells {
+                        let cell_top = row_top[cell.row];
+                        for block in &cell.blocks {
+                            let mut placed = block.clone();
+                            placed.y = placed.y + cell_top;
+                            blocks.push(placed);
+                        }
+                    }
+                    for row in 0..row_count {
+                        let thickness = rule_after[row];
+                        if thickness.0 == 0 {
+                            continue;
+                        }
+                        let y = row_top[row] + row_heights[row];
+                        // A rule never crosses a cell that spans the boundary,
+                        // so the line is emitted column by column.
+                        let mut covered = vec![false; columns];
+                        for cell in &cells {
+                            if cell.rowspan > 1
+                                && cell.row <= row
+                                && row + 1 < cell.row + cell.rowspan
+                            {
+                                for slot in covered
+                                    .iter_mut()
+                                    .take(cell.column + cell.colspan)
+                                    .skip(cell.column)
+                                {
+                                    *slot = true;
+                                }
                             }
                         }
+                        let mut column = 0usize;
+                        while column < columns {
+                            if covered[column] {
+                                column += 1;
+                                continue;
+                            }
+                            let start = column;
+                            while column < columns && !covered[column] {
+                                column += 1;
+                            }
+                            blocks.push(table_rule(
+                                node.meta.id,
+                                style,
+                                Width(column_width.0 * start as i32),
+                                y,
+                                Width(column_width.0 * (column - start) as i32),
+                                thickness,
+                            ));
+                        }
+                    }
+
+                    let mut header_blocks = Vec::new();
+                    if header_rows > 0 {
+                        header_blocks.extend(
+                            blocks
+                                .iter()
+                                .filter(|block| block.y.0 + block.height.0 <= header_height.0)
+                                .cloned(),
+                        );
                     }
                     let table_id = self.tables.len().min(u16::MAX as usize) as u16;
                     self.tables.push(TableHeader {
@@ -895,22 +1001,23 @@ impl Builder<'_> {
                         }
                     }
 
-                    let mut blocks = Vec::new();
-                    for cell in &cells {
-                        let cell_top = row_offsets[cell.row];
-                        for block in &cell.blocks {
-                            let mut placed = block.clone();
-                            placed.y = placed.y + cell_top;
-                            blocks.push(placed);
-                        }
-                    }
                     let parts: Vec<Part> = if units.len() > 1 {
                         units
                             .iter()
-                            .map(|&(start, end)| Part {
-                                height: Width(row_offsets[end].0 - row_offsets[start].0),
-                                notes: Vec::new(),
-                                row: start as u32,
+                            .enumerate()
+                            .map(|(index, &(start, end))| {
+                                // The first band owns the outer top rule, so it
+                                // starts at zero rather than at `row_top[0]`.
+                                let top = if index == 0 {
+                                    Width::ZERO
+                                } else {
+                                    row_top[start]
+                                };
+                                Part {
+                                    height: Width(row_top[end].0 - top.0),
+                                    notes: Vec::new(),
+                                    row: start as u32,
+                                }
                             })
                             .collect()
                     } else {
@@ -918,7 +1025,7 @@ impl Builder<'_> {
                     };
                     items.push(FlowItem {
                         blocks,
-                        height: row_offsets[row_count],
+                        height: table_height,
                         before: Glue {
                             width: leading_gap,
                             plus: Width::ZERO,

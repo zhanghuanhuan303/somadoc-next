@@ -77,7 +77,7 @@ fn canonical_json_is_stable_and_namespaced() {
     let json = template.canonical_json();
 
     assert!(
-        json.starts_with("{\"schema\":\"soma.template/2\""),
+        json.starts_with("{\"schema\":\"soma.template/3\""),
         "{json}"
     );
     assert!(json.contains("\"size\":\"A4\""));
@@ -191,4 +191,97 @@ styles:
             &declaration.value,
             soma_template::PropertyValue::Text(text) if text == "Noto Serif CJK SC"
         )));
+}
+
+#[test]
+fn a_within_selector_parses_and_canonicalizes() {
+    let source = r#"
+name: cells
+page:
+  size: A4
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+  - selector:
+      element: paragraph
+    declarations:
+      first-indent: 2em
+  - selector:
+      element: paragraph
+      within: cell
+    declarations:
+      first-indent: 0
+      indent-left: 0.25em
+"#;
+    let template = parse_template(source).expect("within must parse");
+    let rule = template
+        .styles
+        .iter()
+        .find(|rule| rule.selector.within.as_deref() == Some("cell"))
+        .expect("cell-context rule");
+    assert_eq!(rule.selector.element.as_deref(), Some("paragraph"));
+
+    let json = template.canonical_json();
+    assert!(json.contains("\"within\":\"cell\""), "{json}");
+    assert_eq!(json, template.canonical_json(), "deterministic");
+
+    let error = parse_template(&source.replace("within: cell", "within: celll")).expect_err("bad");
+    assert_eq!(error.reason, "unknown within selector");
+    assert!(
+        !rule.selector.matches("paragraph", None, &[], &[]),
+        "within: cell must not match outside a cell"
+    );
+    assert!(
+        rule.selector
+            .matches("paragraph", None, &[], &["table", "row", "cell"]),
+        "within: cell matches inside a cell"
+    );
+}
+
+#[test]
+fn a_table_block_parses_and_canonicalizes() {
+    let source = r#"
+name: ruled
+page:
+  size: A4
+table:
+  rule-width: 0.5pt
+  header-rule-width: 0.75pt
+  outer-rule-width: 1pt
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+"#;
+    let template = parse_template(source).expect("table section must parse");
+    assert_eq!(
+        template.table.rule,
+        soma_template::LengthSpec::parse("0.5pt").unwrap()
+    );
+    assert_eq!(
+        template.table.header_rule,
+        soma_template::LengthSpec::parse("0.75pt").unwrap()
+    );
+    assert_eq!(
+        template.table.outer_rule,
+        soma_template::LengthSpec::parse("1pt").unwrap()
+    );
+    assert!(!template.table.is_zero());
+
+    let json = template.canonical_json();
+    assert!(
+        json.contains("\"table\":{\"ruleWidth\":{\"num\":1,\"den\":2,\"unit\":\"pt\"}"),
+        "{json}"
+    );
+
+    let error = parse_template(&source.replace("rule-width: 0.5pt", "rule-width: -0.5pt"))
+        .expect_err("negative rules are invalid");
+    assert_eq!(error.reason, "table rule width must not be negative");
+
+    let error = parse_template(&source.replace("outer-rule-width: 1pt", "outer: 1pt"))
+        .expect_err("unknown table key");
+    assert!(error.reason.contains("unknown"));
 }

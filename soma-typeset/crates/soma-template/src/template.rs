@@ -14,7 +14,7 @@ use crate::units::{LengthSpec, LineHeightSpec, Rational, Unit};
 use crate::yaml::{Key, Value, ValueKind};
 use crate::TemplateError;
 
-pub const SCHEMA: &str = "soma.template/2";
+pub const SCHEMA: &str = "soma.template/3";
 
 /// Element names a selector may target. Derived from DocIR node kinds; a typo is
 /// an error instead of silently matching nothing.
@@ -64,6 +64,7 @@ pub struct Template {
     pub version: Option<String>,
     pub page: PageSpec,
     pub footnote: FootnoteSpec,
+    pub table: TableSpec,
     pub styles: Vec<StyleRule>,
 }
 
@@ -193,6 +194,36 @@ pub struct FootnoteSpec {
     pub numbering: FootnoteNumbering,
 }
 
+/// Table rule thicknesses. Zero draws no rule at that boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TableSpec {
+    /// Rule between two body rows.
+    pub rule: LengthSpec,
+    /// Rule below the last header row.
+    pub header_rule: LengthSpec,
+    /// Rule above row 0 and below the last row.
+    pub outer_rule: LengthSpec,
+}
+
+impl Default for TableSpec {
+    fn default() -> Self {
+        Self {
+            rule: LengthSpec::zero(),
+            header_rule: LengthSpec::zero(),
+            outer_rule: LengthSpec::zero(),
+        }
+    }
+}
+
+impl TableSpec {
+    /// No rule is drawn anywhere; the table keeps its rule-free geometry.
+    pub fn is_zero(self) -> bool {
+        self.rule.value == Rational::ZERO
+            && self.header_rule.value == Rational::ZERO
+            && self.outer_rule.value == Rational::ZERO
+    }
+}
+
 /// One style rule: a selector plus declarations.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StyleRule {
@@ -201,15 +232,23 @@ pub struct StyleRule {
 }
 
 /// Selector. Every present part must match (`element` + `role` + all `classes`).
+/// `within` additionally requires some block ancestor to be that element.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Selector {
     pub element: Option<String>,
     pub role: Option<String>,
     pub classes: Vec<String>,
+    pub within: Option<String>,
 }
 
 impl Selector {
-    pub fn matches(&self, element: &str, role: Option<&str>, classes: &[&str]) -> bool {
+    pub fn matches(
+        &self,
+        element: &str,
+        role: Option<&str>,
+        classes: &[&str],
+        ancestors: &[&str],
+    ) -> bool {
         if let Some(expected) = &self.element {
             if expected != element {
                 return false;
@@ -217,6 +256,11 @@ impl Selector {
         }
         if let Some(expected) = &self.role {
             if role != Some(expected.as_str()) {
+                return false;
+            }
+        }
+        if let Some(expected) = &self.within {
+            if !ancestors.iter().any(|ancestor| ancestor == expected) {
                 return false;
             }
         }
@@ -229,7 +273,7 @@ impl Selector {
     pub(crate) fn specificity(&self) -> (u32, u32, u32) {
         (
             self.classes.len() as u32,
-            if self.role.is_some() { 1 } else { 0 },
+            if self.role.is_some() { 1 } else { 0 } + if self.within.is_some() { 1 } else { 0 },
             if self.element.is_some() { 1 } else { 0 },
         )
     }
@@ -374,7 +418,7 @@ pub enum FontSlant {
 pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
     let root = crate::yaml::parse(source)?;
     let fields = Fields::new(&root, "")?;
-    fields.reject_unknown(&["name", "version", "page", "footnote", "styles"])?;
+    fields.reject_unknown(&["name", "version", "page", "footnote", "table", "styles"])?;
 
     let name = fields.require_str("name")?;
     check_token(&name, fields.error("name must be a non-empty token"))?;
@@ -384,6 +428,10 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
     let footnote = match fields.optional("footnote") {
         Some(value) if !value.is_null() => parse_footnote(value, "footnote")?,
         _ => FootnoteSpec::default(),
+    };
+    let table = match fields.optional("table") {
+        Some(value) if !value.is_null() => parse_table(value, "table")?,
+        _ => TableSpec::default(),
     };
 
     let style_nodes = fields.require("styles")?.as_seq("styles")?;
@@ -397,6 +445,7 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
         version,
         page,
         footnote,
+        table,
         styles,
     };
     validate_template(&template)?;
@@ -569,6 +618,36 @@ fn parse_footnote(value: &Value, path: &str) -> Result<FootnoteSpec, TemplateErr
     Ok(FootnoteSpec { numbering })
 }
 
+fn parse_table(value: &Value, path: &str) -> Result<TableSpec, TemplateError> {
+    let fields = Fields::new(value, path)?;
+    fields.reject_unknown(&["rule-width", "header-rule-width", "outer-rule-width"])?;
+
+    let mut spec = TableSpec::default();
+    let read = |name: &str| -> Result<Option<LengthSpec>, TemplateError> {
+        fields
+            .optional(name)
+            .map(|value| parse_length(value, path))
+            .transpose()
+    };
+    if let Some(length) = read("rule-width")? {
+        spec.rule = length;
+    }
+    if let Some(length) = read("header-rule-width")? {
+        spec.header_rule = length;
+    }
+    if let Some(length) = read("outer-rule-width")? {
+        spec.outer_rule = length;
+    }
+
+    for length in [spec.rule, spec.header_rule, spec.outer_rule] {
+        if length.value.num() < 0 {
+            return Err(fields.error("table rule width must not be negative"));
+        }
+    }
+
+    Ok(spec)
+}
+
 fn parse_rule(value: &Value, index: usize) -> Result<StyleRule, TemplateError> {
     let path = alloc::format!("styles[{index}]");
     let fields = Fields::new(value, &path)?;
@@ -596,12 +675,19 @@ fn parse_rule(value: &Value, index: usize) -> Result<StyleRule, TemplateError> {
 
 fn parse_selector(value: &Value, path: &str) -> Result<Selector, TemplateError> {
     let fields = Fields::new(value, path)?;
-    fields.reject_unknown(&["element", "role", "class", "classes"])?;
+    fields.reject_unknown(&["element", "role", "class", "classes", "within"])?;
 
     let element = fields.optional_str("element")?;
     if let Some(element) = &element {
         if !ELEMENTS.contains(&element.as_str()) {
             return Err(fields.error("unknown element selector"));
+        }
+    }
+
+    let within = fields.optional_str("within")?;
+    if let Some(within) = &within {
+        if !ELEMENTS.contains(&within.as_str()) {
+            return Err(fields.error("unknown within selector"));
         }
     }
 
@@ -636,6 +722,7 @@ fn parse_selector(value: &Value, path: &str) -> Result<Selector, TemplateError> 
         element,
         role,
         classes,
+        within,
     })
 }
 

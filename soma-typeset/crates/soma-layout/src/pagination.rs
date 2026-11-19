@@ -104,7 +104,9 @@ fn push_item(out: &mut Vec<VItem>, index: usize, item: &FlowItem, params: Vertic
 /// middle of a table.
 pub(crate) fn header_reserve(item: &VItem) -> Width {
     match item.table {
-        Some(table) if table.row >= table.header_rows => table.header_height,
+        Some(table) if table.header_rows > 0 && table.row >= table.header_rows => {
+            table.header_height
+        }
         _ => Width::ZERO,
     }
 }

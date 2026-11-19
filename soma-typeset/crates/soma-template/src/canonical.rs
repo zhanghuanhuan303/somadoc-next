@@ -81,21 +81,21 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
     out.write_str("\",")?;
     let (width, height) = template.page.size.dimensions();
     out.write_str("\"width\":")?;
-    write_length(out, width)?;
+    write_length_object(out, width)?;
     out.write_str(",\"height\":")?;
-    write_length(out, height)?;
+    write_length_object(out, height)?;
     out.write_str(",\"marginTop\":")?;
-    write_length(out, template.page.margin_top)?;
+    write_length_object(out, template.page.margin_top)?;
     out.write_str(",\"marginBottom\":")?;
-    write_length(out, template.page.margin_bottom)?;
+    write_length_object(out, template.page.margin_bottom)?;
     out.write_str(",\"marginLeft\":")?;
-    write_length(out, template.page.margin_left)?;
+    write_length_object(out, template.page.margin_left)?;
     out.write_str(",\"marginRight\":")?;
-    write_length(out, template.page.margin_right)?;
+    write_length_object(out, template.page.margin_right)?;
     out.write_str(",\"header\":")?;
-    write_length(out, template.page.header)?;
+    write_length_object(out, template.page.header)?;
     out.write_str(",\"footer\":")?;
-    write_length(out, template.page.footer)?;
+    write_length_object(out, template.page.footer)?;
     out.write_str(",\"headerText\":")?;
     write_opt_string(out, template.page.header_text.as_deref())?;
     out.write_str(",\"folio\":")?;
@@ -105,6 +105,14 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
     out.write_str(",\"footnote\":{\"numbering\":\"")?;
     out.write_str(template.footnote.numbering.as_str())?;
     out.write_str("\"}")?;
+
+    out.write_str(",\"table\":{\"ruleWidth\":")?;
+    write_length_object(out, template.table.rule)?;
+    out.write_str(",\"headerRuleWidth\":")?;
+    write_length_object(out, template.table.header_rule)?;
+    out.write_str(",\"outerRuleWidth\":")?;
+    write_length_object(out, template.table.outer_rule)?;
+    out.write_char('}')?;
 
     out.write_str(",\"styles\":[")?;
     for (index, rule) in template.styles.iter().enumerate() {
@@ -137,7 +145,10 @@ fn write_selector(out: &mut impl Write, selector: &Selector) -> fmt::Result {
         }
         write_string(out, class)?;
     }
-    out.write_str("]}")
+    out.write_str("]")?;
+    out.write_str(",\"within\":")?;
+    write_opt_string(out, selector.within.as_deref())?;
+    out.write_str("}")
 }
 
 fn write_declaration(out: &mut impl Write, declaration: &Declaration) -> fmt::Result {
@@ -196,6 +207,13 @@ fn write_length(out: &mut impl Write, length: LengthSpec) -> fmt::Result {
     out.write_str(",\"unit\":\"")?;
     out.write_str(length.unit.as_str())?;
     out.write_char('"')
+}
+
+/// A length as a complete JSON object (page geometry and table rules).
+fn write_length_object(out: &mut impl Write, length: LengthSpec) -> fmt::Result {
+    out.write_char('{')?;
+    write_length(out, length)?;
+    out.write_char('}')
 }
 
 fn write_rational(out: &mut impl Write, value: Rational) -> fmt::Result {

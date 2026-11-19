@@ -77,7 +77,7 @@ fn render_block_at(
 ) {
     let style = styles.get(block.style);
     match block.kind {
-        BoxKind::Rule => {
+        BoxKind::Rule | BoxKind::TableRule => {
             out.push_str(&format!(
                 "<rect data-page=\"{page}\" data-node=\"{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#333\"/>\n",
                 block.node.0,

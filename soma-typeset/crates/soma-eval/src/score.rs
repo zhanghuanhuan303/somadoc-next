@@ -33,6 +33,10 @@ page:
   footer: 8mm
   header-text: running-title
   folio: "{page}"
+table:
+  rule-width: 0
+  header-rule-width: 0.6pt
+  outer-rule-width: 0.8pt
 styles:
   - selector:
       element: document

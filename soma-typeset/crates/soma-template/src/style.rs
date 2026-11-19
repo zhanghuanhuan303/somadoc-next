@@ -6,9 +6,11 @@
 //!
 //! Cascade rules, in order:
 //!
-//! 1. a rule matches when every present selector part matches;
+//! 1. a rule matches when every present selector part matches; `within` also
+//!    requires a matching block ancestor;
 //! 2. matched rules are applied from least to most specific
-//!    (`classes`, then `role`, then `element`), ties by declaration order;
+//!    (`classes`, then `role`/`within`, then `element`), ties by declaration
+//!    order;
 //! 3. within a rule, properties apply in a fixed order with `font-size` first,
 //!    so `line-height` and `em` lengths see the new font size;
 //! 4. a later declaration of the same property in the same rule wins.
@@ -176,6 +178,24 @@ impl ResolvedPage {
     }
 }
 
+/// Table rule thicknesses resolved to 1/4096 em.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TableRules {
+    /// Rule between two body rows.
+    pub rule: Width,
+    /// Rule below the last header row.
+    pub header_rule: Width,
+    /// Rule above row 0 and below the last row.
+    pub outer_rule: Width,
+}
+
+impl TableRules {
+    /// No rule is drawn anywhere.
+    pub fn is_empty(self) -> bool {
+        self.rule.0 == 0 && self.header_rule.0 == 0 && self.outer_rule.0 == 0
+    }
+}
+
 /// The resolved style layer for one document.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StyledDoc {
@@ -184,6 +204,7 @@ pub struct StyledDoc {
     table: StyleTable,
     page: ResolvedPage,
     footnote: crate::template::FootnoteNumbering,
+    table_rules: TableRules,
     header_text: Option<String>,
     folio: Option<String>,
     template_hash: crate::TemplateHash,
@@ -215,6 +236,11 @@ impl StyledDoc {
 
     pub fn footnote_numbering(&self) -> crate::template::FootnoteNumbering {
         self.footnote
+    }
+
+    /// Table rules resolved from the template's `table` section.
+    pub fn table_rules(&self) -> TableRules {
+        self.table_rules
     }
 
     /// Literal header text, or `running-title` when the template says so.
@@ -260,23 +286,27 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         node_style: Vec::new(),
     };
 
-    let root = resolver.compute("document", None, &[], ComputedStyle::base())?;
+    let root = resolver.compute("document", None, &[], ComputedStyle::base(), &[])?;
     resolver.table.intern(root.clone());
 
+    let mut ancestors: Vec<&'static str> = Vec::new();
     if let Some(title) = &doc.meta.title {
-        resolver.inlines(title, &root)?;
+        resolver.inlines(title, &root, &mut ancestors)?;
     }
-    resolver.blocks(&doc.blocks, &root)?;
+    resolver.blocks(&doc.blocks, &root, &mut ancestors)?;
     for definition in &doc.footnotes {
         let style = resolver.compute(
             "footnote",
             definition.meta.attrs.role.as_deref(),
             &class_refs(&definition.meta.attrs.classes),
             ComputedStyle::inherited_from(&root),
+            &ancestors,
         )?;
         let id = resolver.table.intern(style.clone());
         resolver.node_style.push((definition.meta.id, id));
-        resolver.blocks(&definition.blocks, &style)?;
+        let mut footnote_ancestors = ancestors.clone();
+        footnote_ancestors.push("footnote");
+        resolver.blocks(&definition.blocks, &style, &mut footnote_ancestors)?;
     }
 
     resolver.node_style.sort_by_key(|(node, _)| *node);
@@ -315,6 +345,11 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         table: resolver.table,
         page,
         footnote: template.footnote.numbering,
+        table_rules: TableRules {
+            rule: template.table.rule.resolve(root.font_size, body_pt),
+            header_rule: template.table.header_rule.resolve(root.font_size, body_pt),
+            outer_rule: template.table.outer_rule.resolve(root.font_size, body_pt),
+        },
         header_text: template.page.header_text.clone(),
         folio: template.page.folio.clone(),
         template_hash: template.template_hash(),
@@ -329,26 +364,40 @@ struct Resolver<'a> {
 }
 
 impl Resolver<'_> {
-    fn blocks(&mut self, blocks: &[Block], parent: &ComputedStyle) -> Result<(), TemplateError> {
+    fn blocks(
+        &mut self,
+        blocks: &[Block],
+        parent: &ComputedStyle,
+        ancestors: &mut Vec<&'static str>,
+    ) -> Result<(), TemplateError> {
         for block in blocks {
             let meta = block.meta();
+            let element = block_element(block);
             let style = self.compute(
-                block_element(block),
+                element,
                 meta.attrs.role.as_deref(),
                 &class_refs(&meta.attrs.classes),
                 ComputedStyle::inherited_from(parent),
+                ancestors,
             )?;
             let id = self.table.intern(style.clone());
             self.node_style.push((meta.id, id));
-            self.visit_block(block, &style)?;
+            ancestors.push(element);
+            self.visit_block(block, &style, ancestors)?;
+            ancestors.pop();
         }
         Ok(())
     }
 
-    fn visit_block(&mut self, block: &Block, style: &ComputedStyle) -> Result<(), TemplateError> {
+    fn visit_block(
+        &mut self,
+        block: &Block,
+        style: &ComputedStyle,
+        ancestors: &mut Vec<&'static str>,
+    ) -> Result<(), TemplateError> {
         match block {
-            Block::Paragraph(node) => self.inlines(&node.inlines, style),
-            Block::Heading(node) => self.inlines(&node.inlines, style),
+            Block::Paragraph(node) => self.inlines(&node.inlines, style, ancestors),
+            Block::Heading(node) => self.inlines(&node.inlines, style, ancestors),
             Block::List(node) => {
                 for item in &node.items {
                     let meta = &item.meta;
@@ -357,14 +406,17 @@ impl Resolver<'_> {
                         meta.attrs.role.as_deref(),
                         &class_refs(&meta.attrs.classes),
                         ComputedStyle::inherited_from(style),
+                        ancestors,
                     )?;
                     let id = self.table.intern(item_style.clone());
                     self.node_style.push((meta.id, id));
-                    self.blocks(&item.blocks, &item_style)?;
+                    ancestors.push("listItem");
+                    self.blocks(&item.blocks, &item_style, ancestors)?;
+                    ancestors.pop();
                 }
                 Ok(())
             }
-            Block::BlockQuote(node) => self.blocks(&node.blocks, style),
+            Block::BlockQuote(node) => self.blocks(&node.blocks, style, ancestors),
             Block::Figure(node) => {
                 let meta = &node.image.meta;
                 let image_style = self.compute(
@@ -372,10 +424,11 @@ impl Resolver<'_> {
                     meta.attrs.role.as_deref(),
                     &class_refs(&meta.attrs.classes),
                     ComputedStyle::inherited_from(style),
+                    ancestors,
                 )?;
                 let id = self.table.intern(image_style.clone());
                 self.node_style.push((meta.id, id));
-                self.inlines(&node.caption, style)
+                self.inlines(&node.caption, style, ancestors)
             }
             Block::Table(node) => {
                 for column in &node.columns {
@@ -385,11 +438,12 @@ impl Resolver<'_> {
                         meta.attrs.role.as_deref(),
                         &class_refs(&meta.attrs.classes),
                         ComputedStyle::inherited_from(style),
+                        ancestors,
                     )?;
                     let id = self.table.intern(column_style);
                     self.node_style.push((meta.id, id));
                 }
-                self.inlines(&node.caption, style)?;
+                self.inlines(&node.caption, style, ancestors)?;
                 for row in &node.rows {
                     let meta = &row.meta;
                     let row_style = self.compute(
@@ -397,9 +451,11 @@ impl Resolver<'_> {
                         meta.attrs.role.as_deref(),
                         &class_refs(&meta.attrs.classes),
                         ComputedStyle::inherited_from(style),
+                        ancestors,
                     )?;
                     let row_id = self.table.intern(row_style.clone());
                     self.node_style.push((meta.id, row_id));
+                    ancestors.push("row");
                     for cell in &row.cells {
                         let cell_meta = &cell.meta;
                         let cell_style = self.compute(
@@ -407,21 +463,25 @@ impl Resolver<'_> {
                             cell_meta.attrs.role.as_deref(),
                             &class_refs(&cell_meta.attrs.classes),
                             ComputedStyle::inherited_from(&row_style),
+                            ancestors,
                         )?;
                         let cell_id = self.table.intern(cell_style.clone());
                         self.node_style.push((cell_meta.id, cell_id));
-                        self.blocks(&cell.blocks, &cell_style)?;
+                        ancestors.push("cell");
+                        self.blocks(&cell.blocks, &cell_style, ancestors)?;
+                        ancestors.pop();
                     }
+                    ancestors.pop();
                 }
                 Ok(())
             }
             Block::Section(node) => {
                 if let Some(title) = &node.title {
-                    self.inlines(title, style)?;
+                    self.inlines(title, style, ancestors)?;
                 }
                 Ok(())
             }
-            Block::Generated(node) => self.blocks(&node.blocks, style),
+            Block::Generated(node) => self.blocks(&node.blocks, style, ancestors),
             Block::CodeBlock(_)
             | Block::MathBlock(_)
             | Block::ThematicBreak(_)
@@ -430,18 +490,27 @@ impl Resolver<'_> {
         }
     }
 
-    fn inlines(&mut self, inlines: &[Inline], parent: &ComputedStyle) -> Result<(), TemplateError> {
+    fn inlines(
+        &mut self,
+        inlines: &[Inline],
+        parent: &ComputedStyle,
+        ancestors: &mut Vec<&'static str>,
+    ) -> Result<(), TemplateError> {
         for inline in inlines {
             let meta = inline.meta();
+            let element = inline_element(inline);
             let style = self.compute(
-                inline_element(inline),
+                element,
                 meta.attrs.role.as_deref(),
                 &class_refs(&meta.attrs.classes),
                 ComputedStyle::inherited_from(parent),
+                ancestors,
             )?;
             let id = self.table.intern(style.clone());
             self.node_style.push((meta.id, id));
-            self.inlines(inline.children(), &style)?;
+            ancestors.push(element);
+            self.inlines(inline.children(), &style, ancestors)?;
+            ancestors.pop();
         }
         Ok(())
     }
@@ -452,12 +521,13 @@ impl Resolver<'_> {
         role: Option<&str>,
         classes: &[&str],
         mut style: ComputedStyle,
+        ancestors: &[&str],
     ) -> Result<ComputedStyle, TemplateError> {
         let mut matched: Vec<(u32, (u32, u32, u32), &StyleRule)> = self
             .rules
             .iter()
             .enumerate()
-            .filter(|(_, rule)| rule.selector.matches(element, role, classes))
+            .filter(|(_, rule)| rule.selector.matches(element, role, classes, ancestors))
             .map(|(index, rule)| (index as u32, rule.selector.specificity(), rule))
             .collect();
         matched.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));

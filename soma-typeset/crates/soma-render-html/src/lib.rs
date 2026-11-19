@@ -32,6 +32,7 @@ pub fn render(layout: &PagedLayout, styles: &StyleTable, text: &dyn TextSource) 
 .atom{position:absolute;white-space:pre;}\
 .figure{position:absolute;background:#eee;border:1px solid #ccc;}\
 .rule{position:absolute;border-top:1px solid #333;}\
+.table-rule{position:absolute;background:#333;}\
 .code{font-family:monospace;}\
 ",
     );
@@ -95,6 +96,16 @@ fn render_block(
                 em(Width(left)),
                 em(Width(top)),
                 em(block.width)
+            ));
+            return;
+        }
+        BoxKind::TableRule => {
+            html.push_str(&format!(
+                "<div class=\"table-rule\" style=\"left:{};top:{};width:{};height:{};\"></div>\n",
+                em(Width(left)),
+                em(Width(top)),
+                em(block.width),
+                em(block.height)
             ));
             return;
         }
