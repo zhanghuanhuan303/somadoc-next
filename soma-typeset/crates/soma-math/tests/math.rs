@@ -505,3 +505,51 @@ fn an_unbalanced_environment_is_an_error() {
         Err(MathError::UnbalancedDelimiter)
     ));
 }
+
+#[test]
+fn a_radical_inside_a_fraction_keeps_its_own_baseline() {
+    // `\frac{\sqrt{\pi}}{2}`: the radical used to ignore the baseline its
+    // parent gave it, so the numerator collapsed onto the bar. Every numerator
+    // glyph must sit above the fraction rule, every denominator glyph below.
+    let result = formula("\\frac{\\sqrt{\\pi}}{2}");
+    let rules = &result.rules;
+    assert_eq!(rules.len(), 2, "the radical bar and the fraction bar");
+    let fraction = rules
+        .iter()
+        .max_by_key(|rule| rule.width.0)
+        .expect("fraction rule");
+    let radical = rules
+        .iter()
+        .min_by_key(|rule| rule.width.0)
+        .expect("radical bar");
+
+    let pi = result
+        .items
+        .iter()
+        .find(|item| item.text == "π")
+        .expect("radicand");
+    let two = result
+        .items
+        .iter()
+        .find(|item| item.text == "2")
+        .expect("denominator");
+
+    assert!(
+        radical.y.0 < pi.y.0,
+        "the radical bar sits above its radicand ({} vs {})",
+        radical.y.0,
+        pi.y.0
+    );
+    assert!(
+        pi.y.0 < fraction.y.0,
+        "the numerator sits above the fraction bar ({} vs {})",
+        pi.y.0,
+        fraction.y.0
+    );
+    assert!(
+        two.y.0 > fraction.y.0,
+        "the denominator sits below the fraction bar ({} vs {})",
+        two.y.0,
+        fraction.y.0
+    );
+}

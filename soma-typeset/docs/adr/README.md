@@ -68,6 +68,7 @@ only).
 | [0050](0050-table-structure.md) | A table is a real structure tree: Table, TR, TD with spans | Accepted |
 | [0051](0051-trim-caps-are-a-budget.md) | A trim cap is a budget, not a measurement | Accepted |
 | [0052](0052-family-aware-faces.md) | A style picks its face by family, not by slot | Accepted |
+| [0053](0053-math-baseline-propagation.md) | Every math node places itself at the baseline it is given | Accepted |
 
 ## Rules
 

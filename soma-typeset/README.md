@@ -226,7 +226,7 @@ docs/
   fonts.md            # how a body font is scored and a metrics table is built
   mixed-font.md       # coverage, rescue faces, and the fallback plan
   font-preset.md      # proposal: ink-aware line width, one profile per font
-  adr/                # accepted decisions (ADR-0001 … 0052)
+  adr/                # accepted decisions (ADR-0001 … 0053)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
   debt.md             # global not-done register (D01–D77, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal

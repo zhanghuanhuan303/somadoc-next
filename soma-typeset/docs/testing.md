@@ -129,7 +129,7 @@ Cumulative public test files:
 | `a5_md.rs` | 15 | Markdown subset, inlines (including GFM `~~`), spans, index extension, front matter, validity |
 | `html.rs` (html) | 9 | HTML subset shapes, table grid, degradation, recovery, pipeline |
 | `latex.rs` (latex) | 15 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, recovery, pipeline |
-| `math.rs` (soma-math) | 27 | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, spacing, styles, errors |
+| `math.rs` (soma-math) | 28 | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, spacing, styles, errors |
 | `e11_math.rs` (layout) | 8 | centring, baseline inside the box, flow, canonical `math` field |
 | `e12_inline_math.rs` (layout) | 11 | marker atoms, line-box growth, text style, placeholder, canonical `inlineMath` |
 | `e13_toc.rs` (layout) | 13 | TOC depth, page numbers, row shape, leaders, wrapped rows, forced page, figure/table lists, section-start master |
@@ -170,7 +170,7 @@ Cumulative public test files:
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 | render-pdf unit | 26 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing |
 
-Total: **600 tests**.
+Total: **601 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

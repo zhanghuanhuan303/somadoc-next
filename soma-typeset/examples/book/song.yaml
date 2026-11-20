@@ -86,6 +86,8 @@ styles:
       element: mathBlock
     declarations:
       font-size: 12pt
+      space-before: 0.5em
+      space-after: 0.5em
 
   - selector:
       element: math

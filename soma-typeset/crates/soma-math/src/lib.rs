@@ -970,8 +970,14 @@ impl Context<'_> {
                 let thickness = scale(size, self.style.rule_thickness).max(1);
                 let gap = scale(size, self.style.fraction_gap());
                 let rule_y = baseline - axis;
-                let numerator_baseline = rule_y - gap - numerator_box.1;
-                let denominator_baseline = rule_y + thickness + gap + denominator_box.2;
+                // A fraction clears the bar by its *depth* above and its
+                // *height* below: the numerator's bottom edge and the
+                // denominator's top edge are what must not touch the rule.
+                // Using the height for the numerator (as this did) lifted it by
+                // its whole cap height, and using the depth for the denominator
+                // dropped it by only a quarter em, so the two overlapped.
+                let numerator_baseline = rule_y - gap - numerator_box.2;
+                let denominator_baseline = rule_y + thickness + gap + denominator_box.1;
                 let left = self.cursor;
                 let num_x = left + (width - numerator_box.0) / 2;
                 let den_x = left + (width - denominator_box.0) / 2;
@@ -991,7 +997,7 @@ impl Context<'_> {
                     Some(index) => {
                         let script = script_size(size, self.style);
                         let measured = self.measure(index, script);
-                        let index_baseline = -(measured.1) - thickness;
+                        let index_baseline = baseline - measured.1 - thickness;
                         self.node_with_x(index, script, index_baseline, self.cursor);
                         measured.0
                     }
@@ -1011,13 +1017,15 @@ impl Context<'_> {
                 self.items.push(MathItem {
                     text: String::from("√"),
                     x: Width(self.cursor + index_width),
-                    y: Width(thickness),
+                    // The surd's own baseline sits one bar-thickness below the
+                    // formula's, so its hook meets the bottom of the body.
+                    y: Width(baseline + thickness),
                     size: radical_size,
                 });
-                self.node_with_x(body, size, 0, body_x);
+                self.node_with_x(body, size, baseline, body_x);
                 self.rules.push(MathRule {
                     x: Width(body_x),
-                    y: Width(-needed),
+                    y: Width(baseline - needed),
                     width: Width(body_box.0),
                     thickness: Width(thickness),
                 });
@@ -1084,13 +1092,13 @@ impl Context<'_> {
             Node::Delimited { left, body, right } => {
                 let body_box = self.measure(body, size);
                 let (delim_size, baseline_off) = self.fence_geometry(body_box, size);
-                self.delimiter(left, delim_size, baseline_off);
+                self.delimiter(left, delim_size, baseline + baseline_off);
                 let body_x = self.cursor;
-                self.node_with_x(body, size, 0, body_x);
+                self.node_with_x(body, size, baseline, body_x);
                 self.cursor = body_x + body_box.0;
-                self.delimiter(right, delim_size, baseline_off);
+                self.delimiter(right, delim_size, baseline + baseline_off);
             }
-            Node::Matrix { kind, rows } => self.matrix(*kind, rows, size),
+            Node::Matrix { kind, rows } => self.matrix(*kind, rows, size, baseline),
             Node::Script { base, sup, sub } => {
                 self.node(base, size, baseline);
                 let base_end = self.cursor;
@@ -1227,7 +1235,7 @@ impl Context<'_> {
         self.cursor += advance;
     }
 
-    fn matrix(&mut self, kind: MatrixKind, rows: &[Vec<Vec<Node>>], size: Width) {
+    fn matrix(&mut self, kind: MatrixKind, rows: &[Vec<Vec<Node>>], size: Width, baseline: i32) {
         let cols = rows.iter().map(|row| row.len()).max().unwrap_or(0);
         if cols == 0 || rows.is_empty() {
             return;
@@ -1273,7 +1281,7 @@ impl Context<'_> {
 
         let (delim_size, baseline_off) = self.fence_geometry((total, height, depth), size);
         let (left, right) = fence_text(kind);
-        self.delimiter(left, delim_size, baseline_off);
+        self.delimiter(left, delim_size, baseline + baseline_off);
         let origin = self.cursor;
 
         let mut col_x = alloc::vec![0i32; cols];
@@ -1292,11 +1300,11 @@ impl Context<'_> {
                     MatrixKind::Cases => col_x[c],
                     _ => col_x[c] + (widths[c] - width) / 2,
                 };
-                self.place_nodes(&rows[r][c], size, baselines[r], origin + cell_x);
+                self.place_nodes(&rows[r][c], size, baseline + baselines[r], origin + cell_x);
             }
         }
         self.cursor = origin + total;
-        self.delimiter(right, delim_size, baseline_off);
+        self.delimiter(right, delim_size, baseline + baseline_off);
     }
 }
 
