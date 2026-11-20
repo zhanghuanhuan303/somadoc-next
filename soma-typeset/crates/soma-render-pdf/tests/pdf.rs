@@ -11,6 +11,7 @@ use soma_template::{parse_template, resolve, StyledDoc};
 const FONT: &[u8] = include_bytes!("fixtures/tiny.ttf");
 const CFF: &[u8] = include_bytes!("fixtures/tiny-cff.otf");
 const CFF_NAME: &[u8] = include_bytes!("fixtures/tiny-cff-name.otf");
+const CFF_SEAC: &[u8] = include_bytes!("fixtures/tiny-cff-seac.otf");
 
 const TEMPLATE: &str = r#"
 name: pdf
@@ -119,12 +120,36 @@ fn a_cid_keyed_cff_is_read_like_any_other_face() {
 }
 
 #[test]
-fn a_name_keyed_cff_says_why_it_cannot_be_embedded() {
+fn a_name_keyed_cff_is_promoted_to_cid_keyed() {
     let font = PdfFont::from_bytes(CFF_NAME.to_vec(), 0).expect("name-keyed cff");
-    let error = font
-        .subset(&[1, 2])
-        .expect_err("name-keyed CFF is out of scope");
-    assert!(error.reason.contains("name-keyed"), "{}", error.reason);
+    let subset = font.subset(&[1, 2]).expect("subset");
+    assert_eq!(subset.kind, ProgramKind::CidCff);
+    assert!(
+        subset.program.windows(5).any(|window| window == b"Adobe"),
+        "the ROS registry has to be a string of the program"
+    );
+    assert!(
+        subset
+            .program
+            .windows(8)
+            .any(|window| window == b"Identity"),
+        "the ROS ordering has to be a string of the program"
+    );
+}
+
+#[test]
+fn a_seac_composite_is_embedded_as_one_outline() {
+    // The fixture maps U+00C1 to a glyph drawn from two glyphs with `endchar`.
+    let blocks = vec![Block::Paragraph(soma_doc::block::Paragraph::new(
+        NodeMeta::synthesized(),
+        vec![text("A\u{c1}B")],
+    ))];
+    let (layout, styled) = build(blocks);
+    let font = PdfFont::from_bytes(CFF_SEAC.to_vec(), 0).expect("seac font");
+    let pdf = render_pdf_with(&layout, &styled, &font);
+    let text = String::from_utf8_lossy(&pdf);
+    assert!(text.contains("/Subtype /CIDFontType0C"));
+    assert!(text.contains("beginbfchar"), "the composite keeps its text");
 }
 
 #[test]

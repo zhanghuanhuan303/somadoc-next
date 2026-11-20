@@ -12,6 +12,7 @@ extern crate alloc;
 
 mod cff;
 mod font;
+mod standard_encoding;
 
 pub use cff::CidSystem;
 pub use font::{PdfError, PdfFont, PdfFontDescriptor, ProgramKind, Subset};

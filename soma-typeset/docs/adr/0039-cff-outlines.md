@@ -78,6 +78,10 @@ start can be computed before writing it.
 
 ### 5. A name-keyed CFF is refused, not converted
 
+> Superseded by ADR-0040: with a Type 2 interpreter the composite can be drawn
+> out, so name-keyed faces are now promoted. The reasoning below is why the
+> interpreter came first.
+
 `FDArray`/`FDSelect` are mandatory in the PDF CFF flavour, so a name-keyed
 program (most Latin OTFs) would have to be promoted: a synthesised
 `Adobe-Identity-0` `ROS`, a Font DICT holding the original `Private` dict, an
