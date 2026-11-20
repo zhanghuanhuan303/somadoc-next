@@ -110,7 +110,7 @@ Cumulative public test files:
 | `a2_cell_context.rs` | 1 | `within: cell` overrides body rules and sets cell padding |
 | `a3_layout.rs` | 7 | paragraph boxes match the kernel, text index, stacking |
 | `a4_pagination.rs` | 13 | vertical K-P optimality, page breaks, keep-with-next, splitting, overflow |
-| `a6_blocks.rs` | 12 | code, display math box, figures, tables (+colspan), rules, raw, footnotes |
+| `a6_blocks.rs` | 13 | code, display math box, figures, tables (+colspan), rules, raw, footnotes, marker width |
 | `metrics.rs` (layout) | 9 | table-backed metrics, per-style scaling, bold face, determinism, outline ink, rescue face |
 | `e2_split.rs` | 7 | line conservation, widows/orphans, footnote lines, glue, vertical hash |
 | `e3_typography.rs` | 2 | hanging punctuation is post-processing and respects the cap |
@@ -166,7 +166,7 @@ Cumulative public test files:
 | core unit | 24 | IR, units, breaker, result, presets |
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 
-Total: **552 tests**.
+Total: **553 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

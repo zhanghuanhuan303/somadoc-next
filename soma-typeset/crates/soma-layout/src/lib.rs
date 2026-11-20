@@ -43,6 +43,8 @@ pub const SCHEMA: &str = "soma.pages/9";
 /// Placeholder atom for a footnote marker. Renderers replace the marked atom
 /// with [`Mark::number`].
 pub const FOOTNOTE_MARKER: char = '\u{e000}';
+/// The marker as a string, for metrics adapters that must recognise it.
+pub const FOOTNOTE_MARKER_TEXT: &str = "\u{e000}";
 
 /// How a page was filled. Only the deterministic greedy path exists in v1.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

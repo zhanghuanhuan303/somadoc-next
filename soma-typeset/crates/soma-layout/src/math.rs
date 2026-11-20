@@ -209,6 +209,13 @@ impl Metrics for ObjectMetrics<'_> {
     }
 
     fn object_advance(&self, text: &str, style: StyleId) -> Width {
+        // A footnote reference is a small superscript number, not a full glyph
+        // in the text run: an em of width pushes the following mark onto its
+        // own line and opens a hole before it. Three fifths of a digit is the
+        // room a superscript actually needs.
+        if text == crate::FOOTNOTE_MARKER_TEXT {
+            return Width(self.base.advance("0", style).0 * 3 / 5);
+        }
         match self.objects.find(text) {
             Some(object) => object.layout.width,
             None => self.base.object_advance(text, style),
@@ -220,6 +227,18 @@ impl Metrics for ObjectMetrics<'_> {
     }
 
     fn object_metrics(&self, text: &str, style: StyleId) -> GlyphMetrics {
+        if text == crate::FOOTNOTE_MARKER_TEXT {
+            let line = self.base.line_metrics(style);
+            return GlyphMetrics {
+                advance: Width(self.base.advance("0", style).0 * 3 / 5),
+                ascent: line.ascent,
+                descent: line.descent,
+                leading: line.leading,
+                baseline_shift: Width::ZERO,
+                overhang_left: Width::ZERO,
+                overhang_right: Width::ZERO,
+            };
+        }
         match self.objects.find(text) {
             Some(object) => GlyphMetrics {
                 advance: object.layout.width,

@@ -318,3 +318,35 @@ fn colspan_cells_span_their_columns() {
     assert_eq!(blocks[1].x.0, column_width * 2);
     assert_eq!(blocks[1].width.0, column_width);
 }
+
+#[test]
+fn a_footnote_marker_is_narrower_than_a_character() {
+    let doc = footnote_document();
+    let styled = styled(&doc, TIGHT);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+    let mark = block.marks[0];
+
+    let marker = block
+        .lines
+        .iter()
+        .flat_map(|placed| placed.line.boxes.iter())
+        .find(|atom| atom.atom == mark.atom)
+        .expect("the marker occupies a box");
+    let character = block
+        .lines
+        .iter()
+        .flat_map(|placed| placed.line.boxes.iter())
+        .find(|atom| atom.atom != mark.atom)
+        .expect("a text atom");
+
+    // A superscript reference needs room for its number, not a full em: an em
+    // here pushes the following punctuation onto its own line.
+    assert!(
+        marker.advance.0 < character.advance.0,
+        "marker {} vs character {}",
+        marker.advance.0,
+        character.advance.0
+    );
+    assert!(marker.advance.0 > 0, "the number still needs room");
+}

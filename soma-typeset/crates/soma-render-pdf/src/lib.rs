@@ -643,8 +643,14 @@ fn paint_block(
                 continue;
             }
             let text_value = text.atom_text(block.node, atom.atom);
-            if text_value.is_empty()
-                || text_value
+            if text_value.is_empty() {
+                continue;
+            }
+            let mark = block.marks.iter().find(|mark| mark.atom == atom.atom);
+            // A footnote marker has no glyph of its own: it is drawn as its
+            // number, like every other renderer does.
+            if mark.is_none()
+                && text_value
                     .chars()
                     .all(|character| character == '\u{fffc}' || character == FOOTNOTE_MARKER)
             {
@@ -659,16 +665,27 @@ fn paint_block(
                 .unwrap_or_else(|| style.clone());
             let role = fonts.role_for(&atom_style, text.uses_fallback(block.node, atom.atom));
             let font = fonts.font(role);
-            let size = painter.scale.size(&atom_style);
+            // A footnote reference is a superscript: smaller and raised.
+            let full = painter.scale.size(&atom_style);
+            let size = if mark.is_some() { full * 2 / 3 } else { full };
             let x = layout.page.margin_left.0 + block.x.0 + atom.x.0;
-            let y = layout.page.height.0 - baseline;
+            let mut y = layout.page.height.0 - baseline;
+            if mark.is_some() {
+                y += (full / 3) as i32;
+            }
             painter.set_fill(atom_style.color.unwrap_or(0));
             painter.start_text();
             painter.set_font(role, size);
-            let glyphs: Vec<u16> = text_value
-                .chars()
-                .map(|character| font.glyph(character as u32))
-                .collect();
+            let glyphs: Vec<u16> = match mark {
+                Some(mark) => format!("{}", mark.number)
+                    .chars()
+                    .map(|character| font.glyph(character as u32))
+                    .collect(),
+                None => text_value
+                    .chars()
+                    .map(|character| font.glyph(character as u32))
+                    .collect(),
+            };
             painter.show(painter.scale.milli(x), painter.scale.milli(y), &glyphs);
         }
     }
