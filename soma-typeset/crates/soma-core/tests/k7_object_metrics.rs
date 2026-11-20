@@ -84,6 +84,7 @@ fn paragraph(atoms: Vec<Atom>) -> Paragraph {
             width: Width::from_em(3),
             first_indent: Width::ZERO,
             hang: Width::ZERO,
+            tracking: Width::ZERO,
             line_height: Width::EM,
             align: soma_core::Align::Justify,
         },

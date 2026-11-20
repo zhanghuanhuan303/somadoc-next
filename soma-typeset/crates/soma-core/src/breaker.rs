@@ -414,14 +414,20 @@ impl<'a> Shaped<'a> {
         let boundary_count = paragraph.boundaries.len();
 
         let mut atom_width = Vec::with_capacity(atom_count);
-        for atom in &paragraph.atoms {
+        let tracking = paragraph.style.tracking.0.max(0) as i64;
+        for (index, atom) in paragraph.atoms.iter().enumerate() {
             // Object atoms have host-supplied geometry (inline math); text atoms
             // go through the font path.
-            let width = match atom.kind {
-                AtomKind::InlineObject => metrics.object_advance(&atom.text, atom.style),
-                _ => metrics.advance(&atom.text, atom.style),
+            let mut width = match atom.kind {
+                AtomKind::InlineObject => metrics.object_advance(&atom.text, atom.style).0 as i64,
+                _ => metrics.advance(&atom.text, atom.style).0 as i64,
             };
-            atom_width.push(width.0 as i64);
+            // Tracking opens the space *between* atoms; the last one would only
+            // pad the line end.
+            if tracking > 0 && index + 1 < atom_count && atom.kind != AtomKind::InlineObject {
+                width += tracking;
+            }
+            atom_width.push(width);
         }
 
         let mut glue = Vec::with_capacity(boundary_count);
@@ -1569,6 +1575,7 @@ mod tests {
                 width: Width::from_em(width_em),
                 first_indent: Width::ZERO,
                 hang: Width::ZERO,
+                tracking: Width::ZERO,
                 line_height: Width::from_em_frac(3, 2),
                 align: Align::Justify,
             },
@@ -1594,6 +1601,7 @@ mod tests {
                 width: Width::from_em(width_em),
                 first_indent: Width::ZERO,
                 hang: Width::ZERO,
+                tracking: Width::ZERO,
                 line_height: Width::from_em_frac(3, 2),
                 align: Align::Justify,
             },
@@ -1611,6 +1619,7 @@ mod tests {
                 width: Width::from_em(2),
                 first_indent: Width::ZERO,
                 hang: Width::ZERO,
+                tracking: Width::ZERO,
                 line_height: Width::from_em_frac(3, 2),
                 align: Align::Justify,
             },
@@ -1639,6 +1648,7 @@ mod tests {
                 width: Width::from_em(width_em),
                 first_indent: Width::ZERO,
                 hang: Width::ZERO,
+                tracking: Width::ZERO,
                 line_height: Width::from_em_frac(3, 2),
                 align: Align::Justify,
             },

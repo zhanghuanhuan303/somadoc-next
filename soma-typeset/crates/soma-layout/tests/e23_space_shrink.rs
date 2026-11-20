@@ -17,6 +17,7 @@ fn body(width: Width) -> Paragraph {
     let style = ParagraphStyle {
         first_indent: Width::ZERO,
         hang: Width::ZERO,
+        tracking: Width::ZERO,
         ..justified_style(width)
     };
     paragraph_from_text("aaaa bbbb cccc dddd eeee", style, StyleId(0)).expect("paragraph")
@@ -61,6 +62,7 @@ fn a_word_wider_than_the_measure_still_renders() {
     let style = ParagraphStyle {
         first_indent: Width::ZERO,
         hang: Width::ZERO,
+        tracking: Width::ZERO,
         ..justified_style(Width::from_em(6))
     };
     let paragraph = paragraph_from_text("aaaaaaaaaaaaaaaa", style, StyleId(0)).expect("paragraph");

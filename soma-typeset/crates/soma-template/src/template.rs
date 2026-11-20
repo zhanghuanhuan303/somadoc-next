@@ -476,6 +476,7 @@ pub enum Property {
     FontSize,
     LineHeight,
     FirstIndent,
+    LetterSpacing,
     IndentLeft,
     IndentRight,
     SpaceBefore,
@@ -506,6 +507,7 @@ impl Property {
             Self::FontSize => "font-size",
             Self::LineHeight => "line-height",
             Self::FirstIndent => "first-indent",
+            Self::LetterSpacing => "letter-spacing",
             Self::IndentLeft => "indent-left",
             Self::IndentRight => "indent-right",
             Self::SpaceBefore => "space-before",
@@ -536,6 +538,7 @@ impl Property {
             "font-size" => Self::FontSize,
             "line-height" => Self::LineHeight,
             "first-indent" => Self::FirstIndent,
+            "letter-spacing" => Self::LetterSpacing,
             "indent-left" => Self::IndentLeft,
             "indent-right" => Self::IndentRight,
             "space-before" => Self::SpaceBefore,
@@ -1163,6 +1166,7 @@ fn parse_declaration(
     let parsed = match property {
         Property::FontSize
         | Property::FirstIndent
+        | Property::LetterSpacing
         | Property::IndentLeft
         | Property::IndentRight
         | Property::SpaceBefore

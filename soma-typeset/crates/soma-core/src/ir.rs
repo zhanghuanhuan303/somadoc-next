@@ -182,6 +182,9 @@ pub struct ParagraphStyle {
     /// outside the text it marks. Zero for every paragraph that is not a list
     /// item; `first_indent` and `hang` are never both non-zero (ADR-0058).
     pub hang: Width,
+    /// Extra advance between atoms (tracking). Applied to every atom but the
+    /// last, so a line's width never includes a trailing gap (ADR-0059).
+    pub tracking: Width,
     pub line_height: Width,
     pub align: Align,
 }
@@ -192,6 +195,7 @@ impl Default for ParagraphStyle {
             width: Width::from_em(40),
             first_indent: Width::from_em(2),
             hang: Width::ZERO,
+            tracking: Width::ZERO,
             line_height: Width::from_em_frac(3, 2),
             align: Align::Justify,
         }
@@ -220,6 +224,9 @@ impl Paragraph {
             return Err(IrError::InvalidWidth);
         }
         if self.style.hang < Width::ZERO || self.style.hang >= self.style.width {
+            return Err(IrError::InvalidWidth);
+        }
+        if self.style.tracking < Width::ZERO {
             return Err(IrError::InvalidWidth);
         }
         if self.style.line_height <= Width::ZERO {

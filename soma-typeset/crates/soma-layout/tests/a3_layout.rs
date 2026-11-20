@@ -31,6 +31,7 @@ fn paragraph_box_matches_the_inline_kernel() {
         width: inner,
         first_indent: computed.first_indent,
         hang: Width::ZERO,
+        tracking: Width::ZERO,
         line_height: computed.line_height,
         align: computed.align,
     };

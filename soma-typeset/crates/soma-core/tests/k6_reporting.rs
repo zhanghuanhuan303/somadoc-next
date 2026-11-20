@@ -38,6 +38,7 @@ fn style(width: Width) -> ParagraphStyle {
         width,
         first_indent: Width::ZERO,
         hang: Width::ZERO,
+        tracking: Width::ZERO,
         line_height: Width::from_em_frac(3, 2),
         align: Align::Justify,
     }

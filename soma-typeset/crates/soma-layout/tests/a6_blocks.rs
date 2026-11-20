@@ -522,6 +522,45 @@ fn a_footnote_marker_is_narrower_than_a_character() {
     assert!(marker.advance.0 > 0, "the number still needs room");
 }
 
+const TRACKED: &str = r#"
+name: tracked
+page:
+  size: custom
+  width: 100mm
+  height: 60mm
+  margin: 4mm
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+      letter-spacing: 0.1em
+"#;
+
+#[test]
+fn letter_spacing_widens_the_gaps_between_atoms() {
+    let doc = document(vec![paragraph("甲乙")]);
+    let tight = styled(&doc, TIGHT);
+    let tracked = styled(&doc, TRACKED);
+    let plain = layout(&doc, &tight, &metrics(), &engine()).expect("layout");
+    let spaced = layout(&doc, &tracked, &metrics(), &engine()).expect("layout");
+    let plain_width = plain.pages[0].blocks[0].lines[0]
+        .line
+        .natural_width
+        .0;
+    let spaced_width = spaced.pages[0].blocks[0].lines[0]
+        .line
+        .natural_width
+        .0;
+
+    assert_eq!(
+        spaced_width - plain_width,
+        409,
+        "0.1em between two atoms, rounded down once, and nothing after the last"
+    );
+}
+
 const LISTS: &str = r#"
 name: lists
 page:

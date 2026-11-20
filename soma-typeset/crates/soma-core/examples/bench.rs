@@ -43,6 +43,7 @@ fn paragraph(atom_count: usize) -> Paragraph {
             width: Width::from_em(20),
             first_indent: Width::ZERO,
             hang: Width::ZERO,
+            tracking: Width::ZERO,
             line_height: Width::from_em_frac(3, 2),
             align: Align::Justify,
         },

@@ -2188,6 +2188,7 @@ impl Builder<'_> {
             width: inner,
             first_indent,
             hang,
+            tracking: computed.tracking,
             line_height: computed.line_height,
             // The kernel only justifies or flushes left; centering and
             // right-alignment are applied to the finished lines below.
@@ -2395,6 +2396,7 @@ impl Builder<'_> {
                 width: Width(self.content_width.0.max(1)),
                 first_indent: Width::ZERO,
                 hang: Width::ZERO,
+                tracking: Width::ZERO,
                 line_height: computed.line_height,
                 align: Align::Left,
             };
@@ -2587,6 +2589,7 @@ impl Builder<'_> {
             width: Width::from_em(1000),
             first_indent: Width::ZERO,
             hang: Width::ZERO,
+            tracking: Width::ZERO,
             line_height: computed.line_height,
             align: computed.align,
         };
@@ -2729,6 +2732,7 @@ impl Builder<'_> {
             width: slot.width,
             first_indent: Width::ZERO,
             hang: Width::ZERO,
+            tracking: Width::ZERO,
             line_height: computed.line_height,
             align: kernel_align(slot.align),
         };
@@ -3552,6 +3556,7 @@ fn margin_block(
         width: Width::from_em(1000),
         first_indent: Width::ZERO,
         hang: Width::ZERO,
+        tracking: Width::ZERO,
         line_height: band_height,
         align: soma_core::Align::Justify,
     };

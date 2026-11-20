@@ -60,6 +60,8 @@ pub struct ComputedStyle {
     /// Absolute leading, resolved from the multiplier or fixed length.
     pub line_height: Width,
     pub first_indent: Width,
+    /// Extra advance after every atom but the last (tracking).
+    pub tracking: Width,
     pub indent_left: Width,
     pub indent_right: Width,
     pub space_before: Width,
@@ -98,6 +100,7 @@ impl ComputedStyle {
             font_size: Width::EM,
             line_height: Width::from_em_frac(6, 5),
             first_indent: Width::ZERO,
+            tracking: Width::ZERO,
             indent_left: Width::ZERO,
             indent_right: Width::ZERO,
             space_before: Width::ZERO,
@@ -132,6 +135,7 @@ impl ComputedStyle {
             color: parent.color,
             weight: parent.weight,
             slant: parent.slant,
+            tracking: parent.tracking,
             small_caps: parent.small_caps,
             widow_lines: parent.widow_lines,
             orphan_lines: parent.orphan_lines,
@@ -897,10 +901,11 @@ impl Resolver<'_> {
 
 /// Fixed application order: `font-size` first, then `line-height`, then the
 /// remaining properties. This makes the result independent of YAML key order.
-const PROPERTY_ORDER: [Property; 25] = [
+const PROPERTY_ORDER: [Property; 26] = [
     Property::FontSize,
     Property::LineHeight,
     Property::FirstIndent,
+    Property::LetterSpacing,
     Property::IndentLeft,
     Property::IndentRight,
     Property::SpaceBefore,
@@ -933,6 +938,9 @@ fn apply(style: &mut ComputedStyle, property: Property, value: &PropertyValue, b
         }
         (Property::FirstIndent, PropertyValue::Length(length)) => {
             style.first_indent = length.resolve(font_size, body_pt);
+        }
+        (Property::LetterSpacing, PropertyValue::Length(length)) => {
+            style.tracking = length.resolve(font_size, body_pt);
         }
         (Property::IndentLeft, PropertyValue::Length(length)) => {
             style.indent_left = length.resolve(font_size, body_pt);
