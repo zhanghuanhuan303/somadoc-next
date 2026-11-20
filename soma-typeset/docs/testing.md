@@ -155,6 +155,7 @@ Cumulative public test files:
 | `spans.rs` (rules) | 6 | span compiler agrees with the text compiler |
 | `soma-doc` doc-test | 1 | crate-level usage example |
 | `soma-eval` unit | 11 | bench, sweep, Wilson, kappa, blind, kit key translation, `length_limited` share |
+| `perturbation.rs` (eval, ignored) | 1 | ±1/4096 advance sensitivity on the corpus; run with `--ignored` |
 | `soma-demo` unit | 6 | HTML geometry, escaping, anonymized blind sheet, deterministic sides |
 | `soma-wasm` unit | 1 | fixture determinism + forced end + DocIR |
 | `vertical_slice.rs` (rules) | 6 | end-to-end rules + trim + hard break |
