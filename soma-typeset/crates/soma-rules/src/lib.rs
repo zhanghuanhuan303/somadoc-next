@@ -148,6 +148,11 @@ pub const CLOSE_TRIM_RIGHT: Width = Width::from_em_frac(1, 2);
 pub const MIDDLE_TRIM_LEFT: Width = Width::from_em_frac(1, 2);
 pub const MIDDLE_TRIM_RIGHT: Width = Width::from_em_frac(1, 2);
 
+/// Side bearing of half-width punctuation. A comma is roughly a quarter em
+/// wide; trimming half an em would eat the glyph itself, and hanging the same
+/// amount would push it into the margin.
+pub const LATIN_TRIM: Width = Width::from_em_frac(1, 8);
+
 /// Extra left-side compression for a punctuation mark that directly follows
 /// another punctuation mark (`。」`, `），`, `？！」`).
 pub const PAIR_TRIM: Width = Width::from_em_frac(1, 4);
@@ -446,8 +451,11 @@ fn push_atom(
     style: StyleId,
     join: Join,
 ) {
-    let (mut compress_left, compress_right) = trim_caps(class);
-    if class != PunctClass::None {
+    let full_width = text.chars().next().is_some_and(is_full_width_punct);
+    let (mut compress_left, compress_right) = trim_caps(class, full_width);
+    // Pair compression is about two marks set against each other. A space or a
+    // forced break between them breaks the pair.
+    if class != PunctClass::None && join == Join::Normal {
         if let Some(previous) = atoms.last() {
             if previous.class != PunctClass::None {
                 compress_left = compress_left.saturating_add(PAIR_TRIM);
@@ -481,13 +489,27 @@ fn push_atom(
     atoms.push(atom);
 }
 
-fn trim_caps(class: PunctClass) -> (Width, Width) {
+fn trim_caps(class: PunctClass, full_width: bool) -> (Width, Width) {
+    if !full_width {
+        return match class {
+            PunctClass::Open => (LATIN_TRIM, Width::ZERO),
+            PunctClass::Close => (Width::ZERO, LATIN_TRIM),
+            PunctClass::Middle => (LATIN_TRIM, LATIN_TRIM),
+            PunctClass::None => (Width::ZERO, Width::ZERO),
+        };
+    }
     match class {
         PunctClass::Open => (OPEN_TRIM_LEFT, Width::ZERO),
         PunctClass::Close => (Width::ZERO, CLOSE_TRIM_RIGHT),
         PunctClass::Middle => (MIDDLE_TRIM_LEFT, MIDDLE_TRIM_RIGHT),
         PunctClass::None => (Width::ZERO, Width::ZERO),
     }
+}
+
+/// Full-width punctuation. The CJK quotation marks sit outside the CJK blocks
+/// but are drawn one em wide in Chinese faces, so they trim like CJK marks.
+pub fn is_full_width_punct(c: char) -> bool {
+    is_cjk(c) || matches!(c, '\u{201c}' | '\u{201d}' | '\u{2018}' | '\u{2019}')
 }
 
 fn normal_boundary(previous: &Atom, next: &Atom) -> Boundary {
@@ -747,6 +769,36 @@ mod tests {
             MIDDLE_TRIM_LEFT.saturating_add(PAIR_TRIM)
         );
         assert_eq!(paragraph.atoms[3].compress_right, MIDDLE_TRIM_RIGHT);
+    }
+
+    #[test]
+    fn half_width_punctuation_gets_a_small_side_bearing() {
+        let paragraph = compile("a, b. (c)");
+        let texts: Vec<&str> = paragraph
+            .atoms
+            .iter()
+            .map(|atom| atom.text.as_str())
+            .collect();
+        assert_eq!(texts, ["a", ",", "b", ".", "(", "c", ")"]);
+
+        let comma = &paragraph.atoms[1];
+        assert_eq!(comma.compress_left, LATIN_TRIM);
+        assert_eq!(comma.compress_right, LATIN_TRIM);
+
+        let period = &paragraph.atoms[3];
+        assert_eq!(period.compress_right, LATIN_TRIM);
+
+        let paren = &paragraph.atoms[4];
+        assert_eq!(paren.compress_left, LATIN_TRIM);
+        assert_eq!(paren.compress_right, Width::ZERO);
+    }
+
+    #[test]
+    fn cjk_quotation_marks_trim_like_cjk_marks() {
+        let paragraph = compile("“字”");
+
+        assert_eq!(paragraph.atoms[0].compress_left, OPEN_TRIM_LEFT);
+        assert_eq!(paragraph.atoms[2].compress_right, CLOSE_TRIM_RIGHT);
     }
 
     #[test]

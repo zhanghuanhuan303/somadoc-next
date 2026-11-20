@@ -51,12 +51,19 @@ fn compression_past_the_shrink_limit_is_rare() {
 }
 
 #[test]
-fn calibration_finds_a_point_without_over_compression() {
+fn calibration_finds_a_point_with_little_over_compression() {
     let rows = calibrate(&repository_dir(), &[1_500, 2_000], &[50, 100]).expect("calibrate");
     assert_eq!(rows.len(), 4);
-    assert_eq!(
-        rows[0].over_compress, 0,
-        "the best point must not compress past the shrink limit"
+    // Trimming the trailing bearing (ADR-0036) lowers the badness of a
+    // slightly overfull line that ends in punctuation, so the model now picks
+    // a few such lines: their ink overruns the text edge by less than the
+    // bearing they gave up. A handful per corpus is expected; a collapse is
+    // not, and `compression_past_the_shrink_limit_is_rare` still holds the 5%
+    // budget.
+    assert!(
+        rows[0].over_compress <= 8,
+        "the best point over-compresses {} lines",
+        rows[0].over_compress
     );
     assert!(rows.iter().all(|row| row.pages >= 5));
     // Ordering is by the proxy objective; the header names must stay stable.

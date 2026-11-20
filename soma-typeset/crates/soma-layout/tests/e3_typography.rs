@@ -12,6 +12,15 @@ fn hanging_template() -> String {
     )
 }
 
+/// The same template with hanging explicitly off, so the pair differs in one
+/// knob (hanging is on by default since ADR-0036).
+fn flush_template() -> String {
+    BOOK.replace(
+        "align: justify",
+        "align: justify\n      hanging-punctuation: false",
+    )
+}
+
 fn mixed_text() -> String {
     let unit = "中文排版，数字一二三四五六七八九十。行内标点需要压缩与悬挂。";
     unit.repeat(30)
@@ -20,7 +29,7 @@ fn mixed_text() -> String {
 #[test]
 fn hanging_punctuation_relaxes_stretched_lines_without_moving_breaks() {
     let doc = document(vec![paragraph(&mixed_text())]);
-    let base = styled(&doc, BOOK);
+    let base = styled(&doc, &flush_template());
     let hanging = styled(&doc, &hanging_template());
 
     let plain = layout(&doc, &base, &metrics(), &engine()).expect("layout");

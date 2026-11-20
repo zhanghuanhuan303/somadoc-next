@@ -756,18 +756,45 @@ impl<'a> Shaped<'a> {
         let mut compress_cost = 0i64;
         let mut effective = natural;
 
-        if natural > target && config.params().features.edge_trim {
-            let excess = natural - target;
-            let right_cap = self.paragraph.atoms[end - 1].compress_right.0.max(0) as i64;
+        // A justified line always drops the trailing bearing so its ink lands
+        // on the text edge (ADR-0036). A ragged line (paragraph end, forced
+        // break) is left aligned: it only trims when it would otherwise
+        // overrun, which keeps its punctuation inside the block.
+        let justified = end_kind == LineEnd::Justified;
+        if config.params().features.edge_trim && (justified || natural > target) {
+            // Never spend more than half of the mark's own em box, even if a
+            // rule table and a metrics table disagree about its side bearing.
+            let mark_width = self.atom_width(end - 1);
+            let right_cap =
+                (self.paragraph.atoms[end - 1].compress_right.0.max(0) as i64).min(mark_width / 2);
             let left_cap = self.paragraph.atoms[start].compress_left.0.max(0) as i64;
-            let c_end = excess.min(right_cap);
-            let c_start = (excess - c_end).min(left_cap);
-            let c = c_end + c_start;
+
+            // The em box, not the ink, is what native Chinese punctuation draws
+            // with. Trimming here (rather than at the renderer) keeps badness,
+            // adjustment and the box coordinates in agreement; a justified line
+            // then grows the inter-character glue by the same amount, so the
+            // ink lands on the text edge.
+            let c_end = right_cap;
             trim_right = c_end as i32;
-            trim_left = c_start as i32;
-            effective = natural - c;
-            compress_cost = compression_cost(c, costs.compress_amount.0, costs.compress_count.0);
-            cost += compress_cost;
+            effective = natural - c_end;
+
+            // Only an overfull line needs to give up the leading mark's side
+            // bearing as well, and only an originally overfull line pays for
+            // the trim: the trailing bearing of a short line is optical
+            // alignment, not compensation.
+            let mut c = c_end;
+            if effective > target {
+                let excess = effective - target;
+                let c_start = excess.min(left_cap);
+                trim_left = c_start as i32;
+                effective -= c_start;
+                c += c_start;
+            }
+            if natural > target {
+                compress_cost =
+                    compression_cost(c, costs.compress_amount.0, costs.compress_count.0);
+                cost += compress_cost;
+            }
         }
 
         if end_kind != LineEnd::Justified {

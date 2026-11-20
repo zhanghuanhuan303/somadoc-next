@@ -1851,13 +1851,25 @@ impl Builder<'_> {
         for line in &result.lines {
             let mut line = line.clone();
             let hang = if computed.hanging_punctuation && computed.align == Align::Justify {
-                hanging_amount(&paragraph, &line, computed.hanging_cap)
+                match line.end.checked_sub(1) {
+                    // A paragraph's last line is left aligned, so it has no
+                    // right edge to hang into.
+                    Some(last) if (last as usize) + 1 < paragraph.atoms.len() => {
+                        let atom = &paragraph.atoms[last as usize];
+                        let cap = Width(scale_units(
+                            computed.hanging_cap.0,
+                            self.computed(atom.style).font_size.0,
+                        ));
+                        hanging_amount(atom, cap)
+                    }
+                    _ => 0,
+                }
             } else {
                 0
             };
             if hang > 0 {
-                let sign = if line.adjustment < 0 { -1 } else { 1 };
-                line.adjustment -= sign * hang;
+                // Hanging is pure geometry: the line keeps its `adjustment`
+                // and its internal distribution, only the last em box moves.
                 if let Some(last) = line.boxes.last_mut() {
                     last.x = Width(last.x.0 + hang);
                 }
@@ -3110,21 +3122,17 @@ fn scale_units(value: i32, size: i32) -> i32 {
     (value as i64 * size as i64 / 4096) as i32
 }
 
-/// How far the final punctuation may hang into the margin. Hanging relaxes
-/// justification in either direction: it reduces compression on a tight line
-/// and stretch on a loose one.
-fn hanging_amount(paragraph: &Paragraph, line: &Line, cap: Width) -> i32 {
-    if line.adjustment == 0 || cap.0 <= 0 {
-        return 0;
-    }
-    let Some(last) = line.end.checked_sub(1) else {
-        return 0;
-    };
-    let Some(atom) = paragraph.atoms.get(last as usize) else {
-        return 0;
-    };
+/// How far the final punctuation hangs into the margin. Chinese closing
+/// punctuation carries half an em of side bearing on its right; moving the
+/// glyph — not the em box — to the text edge is what makes a justified line
+/// look flush (ADR-0036).
+fn hanging_amount(atom: &soma_core::Atom, cap: Width) -> i32 {
+    // Hanging pushes the whole em box past the text edge. Trimming already
+    // spends the side bearing, so the two are independent styles; a template
+    // picks one, not both.
+    let limit = cap.0.min(atom.compress_right.0).max(0);
     match atom.class {
-        PunctClass::Close | PunctClass::Middle => line.adjustment.abs().min(cap.0),
+        PunctClass::Close | PunctClass::Middle => limit,
         PunctClass::Open | PunctClass::None => 0,
     }
 }

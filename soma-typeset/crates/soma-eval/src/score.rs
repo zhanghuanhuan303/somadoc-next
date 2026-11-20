@@ -22,8 +22,9 @@ use soma_layout::{layout_with, PagedLayout, PaginationStrategy, StyledMetrics, V
 use soma_metrics::MetricsTable;
 use soma_template::{parse_template, resolve};
 
-/// A book-like template: hanging punctuation on, widows/orphans at two lines,
-/// stretchable paragraph spacing so the page can close a gap without a hole.
+/// A book-like template: widows/orphans at two lines, stretchable paragraph
+/// spacing so the page can close a gap without a hole. Line-end punctuation is
+/// trimmed by the breaker (ADR-0036), so no hanging knob is set here.
 pub const TEMPLATE: &str = r#"
 name: effect-score
 page:
@@ -48,8 +49,6 @@ styles:
       element: paragraph
     declarations:
       first-indent: 2em
-      hanging-punctuation: true
-      hanging-cap: 0.5em
       widow-lines: 2
       orphan-lines: 2
       space-before-plus: 0.25em
