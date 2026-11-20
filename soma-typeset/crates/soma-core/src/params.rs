@@ -177,6 +177,16 @@ impl ParamSet {
         params
     }
 
+    /// `publish-v1` plus K7: adjacent justified lines may not jump more than
+    /// one looseness class for free. One class costs one line's worth.
+    pub fn rhythm_v1() -> Self {
+        let mut params = Self::publish_v1();
+        params.preset = PresetId("rhythm-v1");
+        params.break_params.costs.fitness = Weight(10);
+        params.features.fitness = true;
+        params
+    }
+
     /// Validate ranges and cross-field constraints.
     pub fn validate(&self) -> Result<(), ParamError> {
         let break_params = self.break_params;

@@ -58,7 +58,14 @@ index:
 `codepoint` is the default and writes no canonical key, so existing templates
 keep their bytes. An unknown value is a template error.
 
-### 5. Markers follow the page that prints them
+### 5. Page lists collapse long runs
+
+Consecutive arabic folios collapse to `3–5` when the run is at least three
+pages; two consecutive pages stay `3, 4` because a two-page range saves one
+character and costs a reader a scan. Roman or mixed labels are never merged,
+and the original page order is preserved.
+
+### 6. Markers follow the page that prints them
 
 A marker inside a table cell is attached to the table's flow item; a marker
 inside a footnote definition is attached to the item that refers to the note,
@@ -69,5 +76,4 @@ because that is the page the note is printed on.
 - The index is a generated block like the contents; it still runs the extra
   pass and reports `stable`.
 - Indentation is one ideograph of the entry style per level, capped at three.
-- Page ranges (`3–5`) are not merged; consecutive pages are listed in full.
 - `soma-collate` is a new allowed dependency of `soma-layout` in Gate A.

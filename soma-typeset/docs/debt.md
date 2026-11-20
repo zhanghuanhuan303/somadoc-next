@@ -27,7 +27,7 @@
 | D09 | ~~无 hyphenation~~ | **已关闭（ADR-0059）**：`soma-hyphen`（Liang 算法，模式集外置），CLI `--hyphenation`；内核新增 `BoundaryKind::Hyphen` 与 `Line.hyphenated`，连字符宽度计入行宽。URL/路径/全大写词不参与 | — | ✅ 已关闭 | 否 |
 | D10 | `boundary_deviation` 假设无自动告警 | `Line.boundary_deviation` 是比例分配近似，`LineTrace.boundary_deviation_exact` 是精确值；两者都在 `inspect` 输出，但 `bench` 只打近似值，没有相对误差门限 | 比例分配假设失效时不会报警 | A4 后加 P95 相对误差报告项 | 否 |
 | D11 | active-node 剪枝 | 未实现；atom 数窗口已够（4,000 atoms 最差 1.2 ms） | 无 | 未排期（等 wasm 实测） | 否 |
-| D12 | K7 fitness / rhythm | 相邻行松紧节奏不进代价 | 「松紧交替」无法优化 | 未排期（需 A4 页面上下文 + 评估证据） | 否 |
+| D12 | ~~K7 fitness / rhythm~~ | **已关闭（ADR-0064）**：四档松紧等级进入 DP 状态，跨一档记一次代价；`rhythm-v1` preset 启用，其他 preset 字节不变 | 页级灰度仍只报告不优化 | ✅ 已关闭 | 否 |
 | D13 | `emergency_stretch` 双来源 | `break_params.emergency_stretch`（默认 `0`）在进入 emergency 阶段时被 `fallback.emergency_stretch`（默认 `3em`）覆盖，之后才被读取；等于两处配置面、一个实际生效值，两处都进 `paramHash` | `default-v1` 里看起来「emergency stretch 是 0」，容易误读；未来改一处会静默不一致 | modelVersion 2（删除冗余字段会改 hash） | 否 |
 | D14 | ~~legacy `semantic` / `text`~~ | **已关闭（A1）**：两个模块与公开再导出已删除，等价能力迁到 `soma-doc` 的 `plain_text`；`ir_to_markdown` 是调试辅助，不再保留（canonical JSON 取代它） | — | ✅ 已关闭 | 否 |
 
@@ -41,7 +41,7 @@
 | D21 | ~~`soma-template`（纯 YAML）~~ | **已关闭（A2）**：YAML 子集解析、精确单位、级联/继承、`StyledDoc`（纯数据）、`templateHash` + `styleHash`；schema `soma.template/1` / `soma.styles/1` | — | ✅ 已关闭 | 否 |
 | D22 | ~~`soma-layout`（盒子树）~~ | **已关闭（A3）**：`PagedLayout`/页面/放置块/行；段落盒与直接 K-P 逐行一致 | — | ✅ 已关闭 | 否 |
 | D23 | ~~分页~~ | **已关闭（A4）**：确定性贪心、强制分页、keep-with-next、溢出标记、脚注区重排 | — | ✅ 已关闭 | 否 |
-| D24 | ~~Word 前端~~ | **已关闭（ADR-0063）**：`soma-docx` 自写 zip/inflate + OOXML，只读导入段落/标题/行内强调/表格/列表/元数据；样式表、图片、脚注、域、修订不承诺保真 | 复杂 Word 会降级，符合 N1 | ✅ 已关闭 | 否 |
+| D24 | ~~Word 前端~~ | **已关闭（ADR-0063 / ADR-0066）**：zip/inflate + OOXML；段落、标题（按样式名）、`basedOn` 样式继承、行内强调、表格、列表、元数据、内嵌图片（→ 图块）。浮动位置、绕排、裁剪、域、脚注仍不承诺保真 | 复杂 Word 会降级，符合 N1 | ✅ 已关闭 | 否 |
 | D25 | ~~正式 HTML 渲染器~~ | **已关闭（A5）**：`soma-render-html` 消费 `PagedLayout` + `TextSource`，不重排 | — | ✅ 已关闭 | 否 |
 | D26 | ~~脚注 / 图 / 表 / 公式适配~~ | **已关闭（A6 起，ADR-0017/0019/0026/0047）**：脚注整块移页 + 编号、图片 XObject、表格网格与行线/列线/colspan/rowspan、数学适配器全都在；剩余边界分别记在 D51、D71 | — | ✅ 已关闭 | 否 |
 | D27 | ~~全管线 native/wasm 哈希~~ | **已关闭（A6）**：fixture 含 DocIR + 行内 + 页面，8,979 bytes 一致 | — | ✅ 已关闭 | 否 |
@@ -78,7 +78,7 @@
 | D65 | 引擎配置用固定形状解析器 | 不复用模板的 YAML 子集：无序列、无锚点、长度只支持整数 `em` | 配置 DSL 与模板 DSL 是两套错误面 | 有真实需求时再抽公共 YAML crate | 否 |
 | D66 | 引擎只支持 `paragraph` 窗口 | `window: page`/`chapter` 在配置层被拒绝；内核本来也报 `UnsupportedWindow` | 页级/章级搜索未实现 | 未排期（需要页级 DP 上下文） | 否 |
 | D67 | 语料规模仍有限 | `corpus/zh` 现有 12 个文档/1211 行：长篇（30 页）、脚注密集、访谈、科普、colspan/rowspan 表格、表头重复、三线表、真实行间公式已覆盖；仍缺目录/章节页与质量标注 | 代理标定的外推能力有限 | 持续补充 | 否 |
-| D70 | LaTeX 子集有边界 | **表格单元已改为 inline 内容、`\item[label]`/`description` 已支持（ADR-0058）**：强调、代码、`$…$` 在单元格里可用，脚注从单元上提。仍不做宏/计数器/参考文献/交叉引用，无源位置 | 复杂 LaTeX 会降级 | 有真实需求时扩 | 否 |
+| D70 | ~~LaTeX 子集有边界~~ | **已关闭（ADR-0058 / ADR-0067）**：表格单元 inline、`\item[label]`、`description`；`\newcommand`/`\renewcommand`/`\providecommand`/`\def`、参数替换、计数器与 `\arabic`/`\roman`/`\alph`/`\value`/`\the<name>`。仍不做参考文献与交叉引用（`\label`/`\ref`） | 复杂 LaTeX 会降级 | ✅ 已关闭 | 否 |
 | D71 | ~~数学子集有边界~~ | **已关闭（ADR-0054 / ADR-0056）**：斜体变量（面里有 U+1D434… 才启用）、`array` 列格式、`\substack`、`\overbrace`/`\underbrace`（窄时用字形，宽时用线段拼，标注居中）、`\color`、多行公式编号、`\tag`/`\tag*`/`\notag`、`\text{}` 内嵌 `$…$`、嵌套 `aligned` 不再重复编号。仍缺：`\intertext`、`alignat`/`flalign`、`\tag` 对齐到独立列（每行标签都在版心右边界）；拼出的括弧比例固定，不读字体 MATH 表 | — | ✅ 已关闭 |
 | D72 | 行内数学复用显示常量 | **已关闭（ADR-0030）**：`text_frac_scale`/`text_frac_gap`/`text_big_scale` 三组常量；显示分式改为全尺寸分子分母；行内上下限不堆叠 | 无 | ✅ 已关闭 | 否 |
 | D73 | ~~目录能力有边界~~ | **已关闭（ADR-0032）**：`toc.leaders`（默认开）生成引导点；`toc.figures`/`toc.tables` 生成图目录/表目录；目录条目带自动编号。仍无索引与 PDF 书签（并入 D79） | — | ✅ 已关闭 | 否 |
@@ -92,7 +92,7 @@
 | D91 | 混排 2000 atoms 的性能预算擦边 | `bench --check` 的门槛是 ≤2000 atoms 20 ms、≤4000 atoms 80 ms。本机 release 实测：混排 2000 atoms p95 **20.23 ms**（超）、4000 atoms 79.0 ms（内存 4 MB）；纯中文 2000 atoms 0.24 ms，标点密集 0.62 ms，都远低于门槛。差值是 1.28M 次行评估里的整数除法与缓存 | 2,000 字的混排段落在最慢的一档上刚好越线 | 除法换乘法逆元、或按 D11 加保守剪枝；先测 wasm 再决定门槛是否上调 | 否 |
 | D89 | ~~列表没有悬挂缩进~~ | **已关闭（ADR-0058）**：内核 `ParagraphStyle.hang`（默认 0，行为不变）；模板里写负的 `first-indent` 即悬挂缩进，记号落在文字列左侧 1.2em，续行回到文字列 | — | ✅ 已关闭 | 否 |
 | D80 | ~~索引按码位排序~~ | **已关闭（ADR-0061）**：`soma-collate` 内置 27,584 个码位的拼音序表；模板 `index.sort: codepoint\|pinyin`（默认 codepoint，canonical 字节不变） | — | ✅ 已关闭 | 否 |
-| D81 | ~~索引标记覆盖有限~~ | **已关闭（ADR-0061）**：`a!b` 子条目、`@排序键`、`\|see{}`/`\|seealso{}`；表格单元与脚注定义里的标记按所在页收集；父项未标时自动补父行；页码去重 | 无页码范围合并（如 `3–5`） | 未排期 | 否 |
+| D81 | ~~索引标记覆盖有限~~ | **已关闭（ADR-0061）**：`a!b` 子条目、`@排序键`、`\|see{}`/`\|seealso{}`；表格单元与脚注定义里的标记按所在页收集；父项未标时自动补父行；连续三页以上合并为 `3–5` | — | ✅ 已关闭 | 否 |
 | D82 | ~~PDF 后端有边界~~ | **已关闭（ADR-0034…0047）**：`glyf`/CFF 嵌入（0039/0040）且 CFF 子集压缩排（0046）；动态 Huffman 流压缩（0045）；下划线/删除线与链接注解（0044）；PNG/JPEG 图片 XObject 与 tagged PDF（0047）。仍有的窄边界：无 ICC/CMYK 配置、图片只按盒缩放、不支持 >8-bit PNG 与 inline image、表格单元在结构树里当段落、PDF 只在 CLI 暴露 | — | ✅ 已关闭 | 否 |
 | D83 | ~~部分全角标点没有标点类~~ | **已关闭（ADR-0058）**：`…`/`—`/`–`/`·` 归入新的 `PunctClass::Dash`——前面不许断行、两侧不裁量、不悬挂；`——` 与 `……` 保持 2em | — | ✅ 已关闭 | 否 |
 | D85 | ~~name-keyed CFF 不能嵌入~~ | **已关闭（ADR-0040）**：name-keyed 脸被提升为 CID-keyed（合成 ROS/FDArray/FDSelect），`seac` 复合由 Type 2 解释器展开成显式轮廓（子程序内联、hint 丢弃、笔位置跟踪）；解释器不认识的算子直接报错 | — | — | ✅ 已关闭 |
@@ -100,7 +100,7 @@
 | D86 | ~~拉丁文独排时段落词间空会被压到很窄~~ | **已关闭（ADR-0041）**：词间空的可压缩量改为 `min(1/8 em, space_advance/3)`；`overfull` 的齐行行不再当作正常断点，只经 fallback 到达（`modelVersion` 2）。语料 `over_compress_lines` 3 → 0 | — | — | ✅ 已关闭 |
 | D88 | ~~公式排版有可见缺陷~~ | **已关闭（ADR-0053）**：`Radical`/`Delimited`/`Matrix` 三个节点忽略父节点给的 baseline，所以分式里的根号会压到分数线上；分式自身又用「分子高度 + 分母深度」避让，避让的边正好选反。两处都改成按 baseline 下推、按朝向分数线的边避让，`\frac{\sqrt{\pi}}{2}` 现在是三层分离。遗留：数学变量仍是正体（没有数学斜体面），D71 继续跟踪 | — | ✅ 已关闭 | 否 |
 | D87 | ~~SVG 根元素用 `em` 尺寸~~ | **已关闭（ADR-0049）**：真正的问题是坐标也写成 `em`（相对元素自身 font-size），与 `viewBox` 的 layout unit 不同源，因此单页抽出来渲染会错位。现在坐标与 `font-size` 都是无单位 layout unit，根元素宽高是像素（1 em = 16 px），Gate R golden 重算为 `9092984200964852902` | — | ✅ 已关闭 | 否 |
-| D69 | HTML 子集有边界 | **`<caption>` 已接（ADR-0058）**，成为表题。仍只做语义白名单：无 CSS/脚本/表单/框架，无 `<colgroup>` 列宽（DocIR 有意不带列宽），实体集有限，`SourceSpan` 为空 | 复杂 HTML 会降级或丢表现 | 有真实需求时扩 | 否 |
+| D69 | HTML 子集有边界 | **`<caption>`（ADR-0058）与 `<colgroup>`/`<col>` 相对列宽（ADR-0065）已接**。仍只做语义白名单：无 CSS/脚本/表单/框架，实体集有限，`SourceSpan` 为空 | 复杂 HTML 会降级或丢表现 | 有真实需求时扩 | 否 |
 | D68 | 表格线只能整表配置 | **已关闭（ADR-0020）**：五条线宽、竖线/左右框、实线/虚线、颜色都进模板；剩余限制是 `table:` 只能全局一套，不能按表/按行覆盖 | 多套表格外观要多个模板 | ✅ 已关闭 | 否 |
 | D50 | ~~无页面母版 / 页眉页脚 / 页码~~ | **已关闭（E4）**：页眉（running-title 或字面量）、页脚、`{page}`/`{pages}` 页码；两遍无重排 | 首页/封面变体未做（D62） | ✅ 已关闭 | 否 |
 | D51 | 盒子树是扁平的 | **colspan、rowspan、表头重复、单元格跨页续排、行线、tagged 表格层次已支持**（ADR-0017/0018/0019/0050）：结构树现在是 `/Table` → `/TR` → `/TD`，跨行列带 `/RowSpan`/`/ColSpan`，一个单元里的多段共用一个 `/TD`。仍无嵌套 VBox/HBox、逐表覆盖线宽、单元格四边框 | 嵌套布局与逐表线宽受限 | 后续 | 否 |
@@ -153,4 +153,5 @@
 | 长文档能力 | **已完成（ADR-0033）**：题注样式、可换行目录、书签 outline、索引；关闭 D78、D79，新增 D80、D81 |
 | PDF 输出 | **已完成（ADR-0034/ADR-0039）**：TrueType 稀疏子集与 CID-keyed CFF、Identity-H、书签树、PageLabels；边界见 D82/D85 |
 | 全量补课 | **已完成（ADR-0059–0063）**：关闭 D09、D24、D37、D53、D80、D81 |
-| 未排期 | D01、D03、D04、D05、D10、D11、D12、D13、D60、D62、D69、D70、D71、D74、D91、N1–N6 |
+| 遗留清账 | **已完成（ADR-0064–0067）**：关闭 D12、D70；D24/D69/D81 补齐（Word 样式与图片、HTML `colgroup`、索引页码区间） |
+| 未排期 | D01、D03、D04、D05、D10、D11、D13、D60、D62、D69、D71、D74、D91、N1–N6 |

@@ -192,6 +192,7 @@ impl EngineConfig {
         let mut params = match preset.as_str() {
             "default-v1" => ParamSet::default_v1(),
             "publish-v1" => ParamSet::publish_v1(),
+            "rhythm-v1" => ParamSet::rhythm_v1(),
             _ => return Err(EngineError::new(1, 1, "preset", "unknown preset")),
         };
         match window.as_deref() {

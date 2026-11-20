@@ -139,6 +139,36 @@ fn a_table_becomes_a_full_grid() {
 }
 
 #[test]
+fn a_colgroup_supplies_relative_column_widths() {
+    let html = r#"<table>
+  <colgroup>
+    <col width="25%">
+    <col span="2" width="100">
+  </colgroup>
+  <tr><th>甲</th><th>乙</th><th>丙</th></tr>
+  <tr><td>1</td><td>2</td><td>3</td></tr>
+</table>"#;
+    let document = parse_html(html);
+    let Block::Table(table) = &document.blocks[0] else {
+        panic!("expected a table");
+    };
+    assert_eq!(table.columns.len(), 3);
+    assert_eq!(table.columns[0].share, 250);
+    assert_eq!(table.columns[1].share, 100);
+    assert_eq!(table.columns[2].share, 100, "span repeats the hint");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn a_table_without_colgroup_has_no_width_hints() {
+    let document = parse_html("<table><tr><td>甲</td></tr></table>");
+    let Block::Table(table) = &document.blocks[0] else {
+        panic!("expected a table");
+    };
+    assert_eq!(table.columns[0].share, 0);
+}
+
+#[test]
 fn a_table_caption_becomes_the_table_title() {
     let html = r#"<table>
   <caption>支出<strong>明细</strong></caption>

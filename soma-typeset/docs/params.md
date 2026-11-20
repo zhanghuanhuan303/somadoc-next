@@ -477,7 +477,7 @@ pub struct EvalParams {
 | `features.edge_trim` | true | bool | 规则 | K4 启用 |
 | `features.boundary_deviation` | true | bool | 规则 | K2 启用 |
 | `features.height_cost` | false | bool | 实验 | K3 默认关闭 |
-| `features.fitness` | false | bool | 实验 | K7 才启用 |
+| `features.fitness` | false | bool | 实验 | K7 才启用；`rhythm-v1` 打开（ADR-0064） |
 | `features.forced_breaks` | true | bool | 规则 | K5 启用 |
 | `fallback.allow_emergency` | true | bool | 固定 | fallback 开关 |
 | `fallback.allow_forbidden` | true | bool | 固定 | 最后一搏允许 Forbidden 断点；结果标 `ForbiddenRescue` |
@@ -505,7 +505,7 @@ pub struct EvalParams {
 | `height_threshold` | none → body height | `None` 或 0..=5em | 实验 | 超出部分计费 |
 | `emergency` | 10_000_000 | 0..=1e9 | 固定 | 每行 emergency |
 | `forbidden` | 100_000_000 | 0..=1e9 | 固定 | rescue 禁断 |
-| `fitness` | 0 | 0..=1e9 | 实验 | K7 才启用 |
+| `fitness` | 0 | 0..=1e9 | 实验 | 每跨一个松紧等级记一次；`rhythm-v1` 为 10（ADR-0064） |
 
 > 这些数字只是起点。真正标定后写入新的 preset；不要把它们散落在代码里。
 >

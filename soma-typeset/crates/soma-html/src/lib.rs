@@ -639,6 +639,60 @@ fn build_figure(element: &Element, meta: NodeMeta) -> Option<Figure> {
     Some(figure)
 }
 
+/// Width hints from `<colgroup>`/`<col>`, one entry per grid column.
+///
+/// Percent widths become per-mille shares directly; a pixel or unitless width
+/// is used as a relative weight on the same scale. A `<colgroup span>` without
+/// child `<col>` repeats its own hint.
+fn column_shares(element: &Element) -> Vec<u16> {
+    let mut shares = Vec::new();
+    for child in &element.children {
+        let Node::Element(group) = child else {
+            continue;
+        };
+        if group.tag != "colgroup" {
+            continue;
+        }
+        let group_hint = width_share(group);
+        let mut saw_col = false;
+        for item in &group.children {
+            let Node::Element(col) = item else {
+                continue;
+            };
+            if col.tag != "col" {
+                continue;
+            }
+            saw_col = true;
+            let repeat = span(col, "span", 1000);
+            let hint = width_share(col).or(group_hint).unwrap_or(0);
+            for _ in 0..repeat {
+                shares.push(hint);
+            }
+        }
+        if !saw_col {
+            let repeat = span(group, "span", 1000);
+            for _ in 0..repeat {
+                shares.push(group_hint.unwrap_or(0));
+            }
+        }
+    }
+    shares
+}
+
+/// `width="25%"` → 250; `width="120"`/`"120px"` → 120. Anything else is no hint.
+fn width_share(element: &Element) -> Option<u16> {
+    let raw = element.attr("width")?.trim();
+    let (digits, per_mille) = match raw.strip_suffix('%') {
+        Some(digits) => (digits.trim(), true),
+        None => (raw.strip_suffix("px").unwrap_or(raw).trim(), false),
+    };
+    let value: u32 = digits.parse().ok()?;
+    let value = if per_mille { value * 10 } else { value };
+    // A single column may not claim the whole table; keep a floor for the
+    // others. Zero means "size from content".
+    Some(value.clamp(1, 999) as u16)
+}
+
 fn build_table(element: &Element, meta: NodeMeta) -> Option<Table> {
     let mut raw_rows: Vec<(Vec<Element>, bool)> = Vec::new();
     collect_rows(element, false, &mut raw_rows);
@@ -706,8 +760,14 @@ fn build_table(element: &Element, meta: NodeMeta) -> Option<Table> {
         rows.push(Row::new(NodeMeta::synthesized(), header_run, placed));
     }
 
+    // `<colgroup>` / `<col>` carry a relative width; the layout turns it into a
+    // share of the measure, keeping a content floor (ADR-0065).
+    let shares = column_shares(element);
     let columns = (0..columns)
-        .map(|_| Column::new(NodeMeta::synthesized(), soma_doc::CellAlign::Default))
+        .map(|index| {
+            Column::new(NodeMeta::synthesized(), soma_doc::CellAlign::Default)
+                .with_share(shares.get(index).copied().unwrap_or(0))
+        })
         .collect();
     let mut table = Table::new(meta, columns, rows);
     // `<caption>` is the table's title, and it is inline content like any

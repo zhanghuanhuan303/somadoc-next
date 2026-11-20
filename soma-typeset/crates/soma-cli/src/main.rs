@@ -206,10 +206,19 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
 
 fn render(args: &[String]) -> Result<(), String> {
     let options = parse_options(args, true)?;
-    let (document, styled, engine, vertical) = pipeline(&options)?;
+    let pipeline = pipeline(&options)?;
     let metrics = load_metrics(&options)?;
-    let pages = layout(&document, &styled, &engine, vertical, &metrics, &options)?;
-    let assets = FileImages::load(&options.input, &pages);
+    let pages = layout(
+        &pipeline.document,
+        &pipeline.styled,
+        &pipeline.engine,
+        pipeline.vertical,
+        &metrics,
+        &options,
+    )?;
+    let styled = &pipeline.styled;
+    let document = &pipeline.document;
+    let assets = FileImages::load(&options.input, &pages).with_embedded(&pipeline.media);
     match options.format {
         Format::Html => write_output(
             &options,
@@ -253,7 +262,7 @@ fn render(args: &[String]) -> Result<(), String> {
                 math: faces.math.as_ref(),
                 fallback: faces.fallback.as_ref(),
             };
-            let bytes = render_pdf(&pages, &styled, &pages.text, &fonts, &metadata, &assets)
+            let bytes = render_pdf(&pages, styled, &pages.text, &fonts, &metadata, &assets)
                 .map_err(|error| format!("pdf: {error}"))?;
             write_bytes(&options, &bytes)?;
         }
@@ -282,9 +291,17 @@ fn render(args: &[String]) -> Result<(), String> {
 
 fn check(args: &[String]) -> Result<(), String> {
     let options = parse_options(args, false)?;
-    let (document, styled, engine, vertical) = pipeline(&options)?;
+    let pipeline = pipeline(&options)?;
     let metrics = load_metrics(&options)?;
-    let pages = layout(&document, &styled, &engine, vertical, &metrics, &options)?;
+    let pages = layout(
+        &pipeline.document,
+        &pipeline.styled,
+        &pipeline.engine,
+        pipeline.vertical,
+        &metrics,
+        &options,
+    )?;
+    let document = &pipeline.document;
     let overflow = pages.pages.iter().filter(|page| page.overflow).count();
     let emergency = pages
         .pages
@@ -306,23 +323,30 @@ fn check(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn pipeline(
-    options: &Options,
-) -> Result<(Document, StyledDoc, BreakConfig, VerticalParams), String> {
+struct Pipeline {
+    document: Document,
+    styled: StyledDoc,
+    engine: BreakConfig,
+    vertical: VerticalParams,
+    /// Images that came from inside a container (a `.docx` archive).
+    media: Vec<soma_docx::MediaFile>,
+}
+
+fn pipeline(options: &Options) -> Result<Pipeline, String> {
     let extension = std::path::Path::new(&options.input)
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let document = if extension == "docx" {
+    let (document, media) = if extension == "docx" {
         let bytes =
             std::fs::read(&options.input).map_err(|error| format!("{}: {error}", options.input))?;
-        soma_docx::parse_docx(&bytes)
+        soma_docx::parse_docx_with_media(&bytes)
             .map_err(|error| format!("{}: {}", options.input, error.reason))?
     } else {
         let source = std::fs::read_to_string(&options.input)
             .map_err(|error| format!("{}: {error}", options.input))?;
-        parse_document(&options.input, &source)?
+        (parse_document(&options.input, &source)?, Vec::new())
     };
 
     let template_source = match &options.template {
@@ -342,7 +366,13 @@ fn pipeline(
         }
         None => (BreakConfig::default(), VerticalParams::default_v1()),
     };
-    Ok((document, styled, engine, vertical))
+    Ok(Pipeline {
+        document,
+        styled,
+        engine,
+        vertical,
+        media,
+    })
 }
 
 fn load_metrics(options: &Options) -> Result<MetricsTable, String> {
@@ -492,6 +522,21 @@ impl FileImages {
             }
         }
         Self { files }
+    }
+}
+
+impl FileImages {
+    /// Images that travelled inside the input (a `.docx` archive) are keyed by
+    /// the same name the DocIR uses, so the renderers need no special case.
+    /// A file next to the input wins: it lets an author override an embedded
+    /// asset without editing the archive.
+    fn with_embedded(mut self, media: &[soma_docx::MediaFile]) -> Self {
+        for file in media {
+            self.files
+                .entry(file.name.clone())
+                .or_insert_with(|| file.bytes.clone());
+        }
+        self
     }
 }
 

@@ -147,3 +147,50 @@ fn a_repeated_header_appears_on_every_table_page() {
         .iter()
         .all(|page| page.used_height.0 <= layout.page.content_height().0));
 }
+
+#[test]
+fn a_width_hint_widens_its_column() {
+    let narrow = Table::new(
+        NodeMeta::synthesized(),
+        columns(2),
+        vec![Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![cell("甲乙", 1, 1), cell("丙丁", 1, 1)],
+        )],
+    );
+    let hint = Table::new(
+        NodeMeta::synthesized(),
+        vec![
+            Column::new(NodeMeta::synthesized(), CellAlign::Default).with_share(700),
+            Column::new(NodeMeta::synthesized(), CellAlign::Default),
+        ],
+        vec![Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![cell("甲乙", 1, 1), cell("丙丁", 1, 1)],
+        )],
+    );
+    let widths = |table: Table| {
+        let doc = document(vec![Block::Table(table)]);
+        let styled = styled(&doc, TIGHT);
+        let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+        let mut starts: Vec<i32> = layout.pages[0]
+            .blocks
+            .iter()
+            .filter(|block| block.kind == BoxKind::TableCell)
+            .map(|block| block.x.0)
+            .collect();
+        starts.sort_unstable();
+        starts
+    };
+
+    let plain = widths(narrow);
+    let shared = widths(hint);
+    assert_eq!(plain.len(), 2);
+    assert_eq!(shared.len(), 2);
+    assert!(
+        shared[1] > plain[1],
+        "a 700‰ hint makes the second column start further right: {plain:?} vs {shared:?}"
+    );
+}

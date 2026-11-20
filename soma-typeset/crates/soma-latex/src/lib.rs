@@ -12,7 +12,14 @@
 //! `verbatim`, `tabular` (with `\hline`/booktabs rules, `\multicolumn`),
 //! `\title`/`\author`/`\date`, and `\newpage`/`\clearpage`.
 //!
-//! Not supported: macros, `\usepackage` semantics, counters/cross-references,
+//! User macros and counters are expanded at the source level before parsing:
+//! `\newcommand`/`\renewcommand`/`\providecommand`/`\def` (0–9 braced
+//! arguments), and `\newcounter`/`\setcounter`/`\stepcounter`/
+//! `\refstepcounter` with `\arabic`, `\roman`, `\Roman`, `\alph`, `\Alph`,
+//! `\value`, and `\the<name>` output.
+//!
+//! Not supported: `\newcommand*` variants, optional macro arguments, `\let`,
+//! `\newenvironment`, `\usepackage` semantics, cross-references,
 //! `\includegraphics`, bibliography, and a full math implementation (the math
 //! source is stored verbatim for a future math adapter).
 
@@ -20,6 +27,8 @@
 #![forbid(unsafe_code)]
 
 extern crate alloc;
+
+mod macros;
 
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -49,12 +58,13 @@ pub fn parse_latex(source: &str) -> Document {
 /// metadata when the caller did not set it.
 pub fn parse_latex_with_meta(source: &str, mut meta: DocumentMeta) -> Document {
     let cleaned = strip_comments(source);
-    let body = match cleaned.find("\\begin{document}") {
-        Some(offset) => &cleaned[offset + "\\begin{document}".len()..],
-        None => cleaned.as_str(),
+    let expanded = macros::expand(&cleaned);
+    let body = match expanded.find("\\begin{document}") {
+        Some(offset) => &expanded[offset + "\\begin{document}".len()..],
+        None => expanded.as_str(),
     };
     if meta.title.is_none() {
-        if let Some(title) = preamble_group(&cleaned, "title") {
+        if let Some(title) = preamble_group(&expanded, "title") {
             let mut parser = Parser::new(title);
             let inlines = parser.parse_inlines(false);
             if !inlines.is_empty() {
@@ -63,14 +73,14 @@ pub fn parse_latex_with_meta(source: &str, mut meta: DocumentMeta) -> Document {
         }
     }
     if meta.authors.is_empty() {
-        if let Some(authors) = preamble_group(&cleaned, "author") {
+        if let Some(authors) = preamble_group(&expanded, "author") {
             for author in split_authors(authors) {
                 meta.authors.push(Author::new(author));
             }
         }
     }
     if meta.date.is_none() {
-        if let Some(date) = preamble_group(&cleaned, "date") {
+        if let Some(date) = preamble_group(&expanded, "date") {
             if let Some(value) = parse_date(date.trim()) {
                 meta.date = Some(value);
             }
@@ -78,7 +88,7 @@ pub fn parse_latex_with_meta(source: &str, mut meta: DocumentMeta) -> Document {
     }
     // `\subtitle{...}` has no DocIR field of its own; it belongs to the cover,
     // which the layout generates from the metadata.
-    if let Some(subtitle) = preamble_group(&cleaned, "subtitle") {
+    if let Some(subtitle) = preamble_group(&expanded, "subtitle") {
         let text = subtitle.trim();
         if !text.is_empty() {
             let cover = meta.cover.get_or_insert_with(CoverData::new);

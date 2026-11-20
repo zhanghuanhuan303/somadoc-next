@@ -14,7 +14,7 @@
 
 ```yaml
 schema: soma.engine/1          # 必需
-preset: publish-v1             # 可选；publish-v1（默认）或 default-v1
+preset: publish-v1             # 可选；publish-v1（默认）、default-v1 或 rhythm-v1
 window: paragraph              # 可选；目前只实现 paragraph
 max_kp_atoms: null             # null 或 1..=10000
 fallback:                      # 可选；覆盖 default-v1
@@ -102,7 +102,7 @@ let json = engine.canonical_json();
 
 ## 5. 当前边界
 
-- 只有 `default-v1` 与 `publish-v1`（ADR-0023）；新 preset 需要新 ADR 与代码。
+- `default-v1`、`publish-v1`（ADR-0023）与 `rhythm-v1`（ADR-0064，K7 行节奏）；新 preset 需要新 ADR 与代码。
 - 只有 `paragraph` 窗口；`page` / `chapter` 在配置层就被拒绝。
 - 不暴露单项权重：preset 的意义就是让文档不能漂移到未复核的代价模型。
 - 解析器是固定形状实现，不复用模板的 YAML 子集（D65）。

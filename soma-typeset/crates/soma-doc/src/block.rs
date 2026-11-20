@@ -280,11 +280,27 @@ impl CellAlign {
 pub struct Column {
     pub meta: NodeMeta,
     pub align: CellAlign,
+    /// Relative width hint in per-mille, `0` for "size from content".
+    ///
+    /// This is a share of the measure, not a length: DocIR stays free of
+    /// physical units (ADR-0009), and the layout still guarantees a content
+    /// floor. An HTML `<colgroup>` or a Word grid may supply it; every other
+    /// front end leaves it zero, which is exactly the old behaviour.
+    pub share: u16,
 }
 
 impl Column {
     pub fn new(meta: NodeMeta, align: CellAlign) -> Self {
-        Self { meta, align }
+        Self {
+            meta,
+            align,
+            share: 0,
+        }
+    }
+
+    pub fn with_share(mut self, share: u16) -> Self {
+        self.share = share;
+        self
     }
 }
 

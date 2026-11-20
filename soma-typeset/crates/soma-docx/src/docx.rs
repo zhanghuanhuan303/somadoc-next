@@ -3,25 +3,37 @@
 //! The walk is deliberately shallow: it understands the block and run
 //! containers DocIR can represent, and skips everything else without failing.
 //! Word properties are read only when they have a semantic DocIR counterpart;
-//! fonts, spacing, colours, and style-sheet inheritance are ignored.
+//! fonts, spacing, and colours are ignored. Styles are resolved through
+//! `word/styles.xml` when it is present, and drawings become figures.
 
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
 use soma_doc::block::{
-    Block, Cell, CellAlign, Column, Heading, List, ListItem, Paragraph, Row, Table,
+    Block, Cell, CellAlign, Column, Figure, Heading, List, ListItem, Paragraph, Row, Table,
 };
-use soma_doc::inline::{Container, Inline, LineBreak, LineBreakKind};
-use soma_doc::meta::{Author, CoverData, DocumentMeta};
+use soma_doc::inline::{Container, Image, Inline, LineBreak, LineBreakKind};
+use soma_doc::meta::{Author, CoverData, DocumentMeta, ImageRef};
 use soma_doc::node::NodeMeta;
 use soma_doc::Text;
 
+use crate::media::ImageIndex;
+use crate::styles::{
+    on_off, read_run_properties, CharFormat, RunFormat, RunProperties, Styles, Vertical,
+};
 use crate::xml::{Token, Tokenizer};
 use crate::DocxError;
 
+/// EMU per CSS pixel at 96 dpi: 914400 / 96.
+const EMU_PER_PIXEL: u64 = 9525;
+
 /// Parse the `w:body` of `word/document.xml`.
-pub(crate) fn parse_blocks(xml: &str) -> Result<Vec<Block>, DocxError> {
+pub(crate) fn parse_blocks(
+    xml: &str,
+    styles: &Styles,
+    images: &ImageIndex,
+) -> Result<Vec<Block>, DocxError> {
     let mut tokens = Tokenizer::new(xml);
     loop {
         match tokens.next_token()? {
@@ -30,7 +42,7 @@ pub(crate) fn parse_blocks(xml: &str) -> Result<Vec<Block>, DocxError> {
                 if tag.self_closing {
                     return Ok(Vec::new());
                 }
-                return parse_children(&mut tokens, "body");
+                return parse_children(&mut tokens, "body", styles, images);
             }
             Some(_) => {}
         }
@@ -42,7 +54,12 @@ pub(crate) fn parse_blocks(xml: &str) -> Result<Vec<Block>, DocxError> {
 /// Paragraphs carrying `w:numPr` and separated only by other numbered
 /// paragraphs become one flat `List`. A non-numbered block always closes the
 /// list; Word's own list continuation is intentionally not modelled.
-fn parse_children(tokens: &mut Tokenizer<'_>, scope: &str) -> Result<Vec<Block>, DocxError> {
+fn parse_children(
+    tokens: &mut Tokenizer<'_>,
+    scope: &str,
+    styles: &Styles,
+    images: &ImageIndex,
+) -> Result<Vec<Block>, DocxError> {
     let mut blocks = Vec::new();
     let mut pending: Option<PendingList> = None;
     let mut closed = false;
@@ -50,7 +67,7 @@ fn parse_children(tokens: &mut Tokenizer<'_>, scope: &str) -> Result<Vec<Block>,
     while let Some(token) = tokens.next_token()? {
         match token {
             Token::Start(tag) if tag.name == "p" => {
-                let paragraph = parse_paragraph(tokens, tag.self_closing)?;
+                let paragraph = parse_paragraph(tokens, tag.self_closing, styles, images)?;
                 match paragraph.numbering {
                     Some(ordered) => {
                         let starts_new =
@@ -63,21 +80,19 @@ fn parse_children(tokens: &mut Tokenizer<'_>, scope: &str) -> Result<Vec<Block>,
                             });
                         }
                         if let Some(list) = pending.as_mut() {
-                            list.items.push(ListItem::new(
-                                NodeMeta::synthesized(),
-                                vec![paragraph.block],
-                            ));
+                            list.items
+                                .push(ListItem::new(NodeMeta::synthesized(), paragraph.blocks));
                         }
                     }
                     None => {
                         flush_list(&mut blocks, &mut pending);
-                        blocks.push(paragraph.block);
+                        blocks.extend(paragraph.blocks);
                     }
                 }
             }
             Token::Start(tag) if tag.name == "tbl" => {
                 flush_list(&mut blocks, &mut pending);
-                blocks.push(parse_table(tokens, tag.self_closing)?);
+                blocks.push(parse_table(tokens, tag.self_closing, styles, images)?);
             }
             Token::Start(tag) => skip_element(tokens, tag.self_closing)?,
             Token::End(name) => {
@@ -116,25 +131,52 @@ fn flush_list(blocks: &mut Vec<Block>, pending: &mut Option<PendingList>) {
 }
 
 struct ParagraphResult {
-    block: Block,
+    /// A paragraph can split around figures: text before the image, the figure,
+    /// then text after it. A paragraph without images yields exactly one block.
+    blocks: Vec<Block>,
     /// `Some(ordered)` when `w:numPr` was present.
     numbering: Option<bool>,
+}
+
+/// A resolved inline run, or an image lifted out to block level.
+enum Piece {
+    Run(RunSegment),
+    Figure(ImageRef),
+}
+
+struct RunSegment {
+    inlines: Vec<Inline>,
+    /// Character + direct run properties. Paragraph-style properties are
+    /// merged in when the paragraph's style is known.
+    format: CharFormat,
+}
+
+/// Part of one `w:r`, before formatting is applied. A run can contain text on
+/// both sides of a drawing, so images split it into segments.
+enum RunPart {
+    Inline(Inline),
+    Figure(ImageRef),
 }
 
 fn parse_paragraph(
     tokens: &mut Tokenizer<'_>,
     self_closing: bool,
+    styles: &Styles,
+    images: &ImageIndex,
 ) -> Result<ParagraphResult, DocxError> {
     if self_closing {
         return Ok(ParagraphResult {
-            block: Block::Paragraph(Paragraph::new(NodeMeta::synthesized(), Vec::new())),
+            blocks: vec![Block::Paragraph(Paragraph::new(
+                NodeMeta::synthesized(),
+                Vec::new(),
+            ))],
             numbering: None,
         });
     }
 
     let mut style: Option<String> = None;
     let mut numbering: Option<bool> = None;
-    let mut inlines = Vec::new();
+    let mut pieces: Vec<Piece> = Vec::new();
 
     while let Some(token) = tokens.next_token()? {
         match token {
@@ -147,8 +189,15 @@ fn parse_paragraph(
                         &mut numbering,
                     )?;
                 }
-                "r" => parse_run(tokens, tag.self_closing, &mut inlines)?,
-                "hyperlink" => parse_hyperlink(tokens, tag.self_closing, &mut inlines)?,
+                "r" => parse_run(tokens, tag.self_closing, styles, images, &mut pieces)?,
+                "hyperlink" => {
+                    parse_hyperlink(tokens, tag.self_closing, styles, images, &mut pieces)?;
+                }
+                "drawing" | "pict" => {
+                    if let Some(image) = parse_image(tokens, tag.self_closing, images)? {
+                        pieces.push(Piece::Figure(image));
+                    }
+                }
                 _ => skip_element(tokens, tag.self_closing)?,
             },
             Token::End(name) => {
@@ -160,11 +209,52 @@ fn parse_paragraph(
         }
     }
 
-    let block = match style.as_deref().and_then(heading_level) {
+    let heading = style.as_deref().and_then(|id| styles.heading_level(id));
+    let paragraph_format = style
+        .as_deref()
+        .map_or_else(CharFormat::default, |id| styles.paragraph_format(id));
+
+    let mut blocks = Vec::new();
+    let mut pending: Vec<Inline> = Vec::new();
+    for piece in pieces {
+        match piece {
+            Piece::Run(segment) => {
+                let mut format = RunFormat::default();
+                paragraph_format.overlay_run(&mut format);
+                segment.format.overlay_run(&mut format);
+                pending.extend(wrap_run(format, segment.inlines));
+            }
+            Piece::Figure(source) => {
+                flush_text(&mut blocks, heading, &mut pending);
+                let image = Image::new(NodeMeta::synthesized(), source);
+                blocks.push(Block::Figure(Figure::new(NodeMeta::synthesized(), image)));
+            }
+        }
+    }
+    flush_text(&mut blocks, heading, &mut pending);
+
+    if blocks.is_empty() {
+        // An empty paragraph still occupies a block. Keep its heading identity
+        // rather than dropping the document structure.
+        let inlines = Vec::new();
+        blocks.push(match heading {
+            Some(level) => Block::Heading(Heading::new(NodeMeta::synthesized(), level, inlines)),
+            None => Block::Paragraph(Paragraph::new(NodeMeta::synthesized(), inlines)),
+        });
+    }
+
+    Ok(ParagraphResult { blocks, numbering })
+}
+
+fn flush_text(blocks: &mut Vec<Block>, heading: Option<u8>, pending: &mut Vec<Inline>) {
+    if pending.is_empty() {
+        return;
+    }
+    let inlines = core::mem::take(pending);
+    blocks.push(match heading {
         Some(level) => Block::Heading(Heading::new(NodeMeta::synthesized(), level, inlines)),
         None => Block::Paragraph(Paragraph::new(NodeMeta::synthesized(), inlines)),
-    };
-    Ok(ParagraphResult { block, numbering })
+    });
 }
 
 fn parse_paragraph_properties(
@@ -238,12 +328,14 @@ fn parse_numbering(
 }
 
 /// `w:hyperlink` is flattened to its child runs. The `r:id` target lives in
-/// `document.xml.rels`, a part this reader does not load, so creating a
-/// `Link` with a guessed URL would be worse than keeping the text.
+/// `document.xml.rels`, which is read for images only, so creating a `Link`
+/// with a guessed URL would be worse than keeping the text.
 fn parse_hyperlink(
     tokens: &mut Tokenizer<'_>,
     self_closing: bool,
-    out: &mut Vec<Inline>,
+    styles: &Styles,
+    images: &ImageIndex,
+    pieces: &mut Vec<Piece>,
 ) -> Result<(), DocxError> {
     if self_closing {
         return Ok(());
@@ -252,7 +344,7 @@ fn parse_hyperlink(
         match token {
             Token::Start(tag) => {
                 if tag.name == "r" {
-                    parse_run(tokens, tag.self_closing, out)?;
+                    parse_run(tokens, tag.self_closing, styles, images, pieces)?;
                 } else {
                     skip_element(tokens, tag.self_closing)?;
                 }
@@ -268,56 +360,55 @@ fn parse_hyperlink(
     Ok(())
 }
 
-#[derive(Default)]
-struct RunStyle {
-    bold: bool,
-    italic: bool,
-    underline: bool,
-    vertical: Option<Vertical>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Vertical {
-    Superscript,
-    Subscript,
-}
-
 fn parse_run(
     tokens: &mut Tokenizer<'_>,
     self_closing: bool,
-    out: &mut Vec<Inline>,
+    styles: &Styles,
+    images: &ImageIndex,
+    pieces: &mut Vec<Piece>,
 ) -> Result<(), DocxError> {
     if self_closing {
         return Ok(());
     }
 
-    let mut style = RunStyle::default();
-    let mut inlines = Vec::new();
+    let mut properties = RunProperties::default();
+    let mut parts: Vec<RunPart> = Vec::new();
 
     while let Some(token) = tokens.next_token()? {
         match token {
             Token::Start(tag) => match tag.name {
-                "rPr" => parse_run_properties(tokens, tag.self_closing, &mut style)?,
+                "rPr" => properties = read_run_properties(tokens, tag.self_closing)?,
                 "t" => {
                     let preserve = tag
                         .attr("space")
                         .is_some_and(|value| value.eq_ignore_ascii_case("preserve"));
                     if let Some(text) = read_text(tokens, tag.self_closing, preserve)? {
-                        inlines.push(Inline::Text(Text::new(NodeMeta::synthesized(), text)));
+                        parts.push(RunPart::Inline(Inline::Text(Text::new(
+                            NodeMeta::synthesized(),
+                            text,
+                        ))));
                     }
                 }
                 "tab" => {
                     // A tab is not modelled as spacing; one literal space keeps
                     // the text projection honest and never creates empty text.
-                    inlines.push(Inline::Text(Text::new(NodeMeta::synthesized(), " ")));
+                    parts.push(RunPart::Inline(Inline::Text(Text::new(
+                        NodeMeta::synthesized(),
+                        " ",
+                    ))));
                     skip_element(tokens, tag.self_closing)?;
                 }
                 "br" | "cr" => {
-                    inlines.push(Inline::LineBreak(LineBreak::new(
+                    parts.push(RunPart::Inline(Inline::LineBreak(LineBreak::new(
                         NodeMeta::synthesized(),
                         LineBreakKind::Hard,
-                    )));
+                    ))));
                     skip_element(tokens, tag.self_closing)?;
+                }
+                "drawing" | "pict" => {
+                    if let Some(image) = parse_image(tokens, tag.self_closing, images)? {
+                        parts.push(RunPart::Figure(image));
+                    }
                 }
                 _ => skip_element(tokens, tag.self_closing)?,
             },
@@ -330,66 +421,127 @@ fn parse_run(
         }
     }
 
-    out.extend(wrap_run(style, inlines));
+    // A paragraph style is the lowest layer, a character style sits above it,
+    // and properties written on the run win over both.
+    let mut format = match properties.style_id.as_deref() {
+        Some(id) => styles.character_format(id),
+        None => CharFormat::default(),
+    };
+    format.overlay(properties.format);
+
+    let mut inlines = Vec::new();
+    for part in parts {
+        match part {
+            RunPart::Inline(inline) => inlines.push(inline),
+            RunPart::Figure(source) => {
+                if !inlines.is_empty() {
+                    pieces.push(Piece::Run(RunSegment {
+                        inlines: core::mem::take(&mut inlines),
+                        format,
+                    }));
+                }
+                pieces.push(Piece::Figure(source));
+            }
+        }
+    }
+    if !inlines.is_empty() {
+        pieces.push(Piece::Run(RunSegment { inlines, format }));
+    }
     Ok(())
 }
 
-fn parse_run_properties(
+/// Scan a `w:drawing` or `w:pict` subtree for an image relationship and an
+/// extent. The first relationship wins; nested `mc:AlternateContent` fallbacks
+/// therefore cannot duplicate an image.
+fn parse_image(
     tokens: &mut Tokenizer<'_>,
     self_closing: bool,
-    style: &mut RunStyle,
-) -> Result<(), DocxError> {
+    images: &ImageIndex,
+) -> Result<Option<ImageRef>, DocxError> {
     if self_closing {
-        return Ok(());
+        return Ok(None);
     }
+
+    let mut relationship: Option<String> = None;
+    let mut width: Option<u32> = None;
+    let mut height: Option<u32> = None;
+    let mut depth = 1usize;
+
     while let Some(token) = tokens.next_token()? {
         match token {
             Token::Start(tag) => {
                 match tag.name {
-                    "b" => style.bold = on_off(tag.attr("val")),
-                    "i" => style.italic = on_off(tag.attr("val")),
-                    "u" => style.underline = on_off(tag.attr("val")),
-                    "vertAlign" => {
-                        style.vertical = match tag.attr("val") {
-                            Some(value) if value.eq_ignore_ascii_case("superscript") => {
-                                Some(Vertical::Superscript)
-                            }
-                            Some(value) if value.eq_ignore_ascii_case("subscript") => {
-                                Some(Vertical::Subscript)
-                            }
-                            _ => None,
-                        };
+                    "extent" => {
+                        width = pixels(tag.attr("cx")).or(width);
+                        height = pixels(tag.attr("cy")).or(height);
                     }
-                    "rStyle" => {
-                        if let Some(value) = tag.attr("val") {
-                            let value = value.trim();
-                            if value.eq_ignore_ascii_case("Strong") {
-                                style.bold = true;
-                            } else if value.eq_ignore_ascii_case("Emphasis") {
-                                style.italic = true;
-                            }
-                            // `Hyperlink` is recognised but stays text: the
-                            // relationship target is not available here.
-                        }
+                    // DrawingML and legacy VML spell the relationship attribute
+                    // differently; both arrive as local name `id` after the
+                    // tokenizer drops the namespace prefix.
+                    "blip" if relationship.is_none() => {
+                        relationship = tag
+                            .attr("embed")
+                            .or_else(|| tag.attr("id"))
+                            .map(String::from);
+                    }
+                    "imagedata" if relationship.is_none() => {
+                        relationship = tag
+                            .attr("id")
+                            .or_else(|| tag.attr("embed"))
+                            .map(String::from);
                     }
                     _ => {}
                 }
-                skip_element(tokens, tag.self_closing)?;
+                if !tag.self_closing {
+                    depth += 1;
+                }
             }
-            Token::End(name) => {
-                if name == "rPr" {
+            Token::End(_) => {
+                if depth <= 1 {
                     break;
                 }
+                depth -= 1;
             }
             Token::Text(_) => {}
         }
     }
-    Ok(())
+
+    Ok(resolve_image(
+        relationship.as_deref(),
+        width,
+        height,
+        images,
+    ))
+}
+
+fn resolve_image(
+    relationship: Option<&str>,
+    width: Option<u32>,
+    height: Option<u32>,
+    images: &ImageIndex,
+) -> Option<ImageRef> {
+    let source = images.get(relationship?)?;
+    let mut image = ImageRef::new(source);
+    if let (Some(width), Some(height)) = (width, height) {
+        image = image.with_intrinsic(width, height);
+    }
+    Some(image)
+}
+
+/// Convert a `wp:extent` coordinate (EMU) to pixels at 96 dpi. A missing or
+/// non-positive extent leaves the intrinsic size unknown.
+fn pixels(value: Option<&str>) -> Option<u32> {
+    let emu: u64 = value?.trim().parse().ok()?;
+    let px = emu / EMU_PER_PIXEL;
+    if px == 0 {
+        return None;
+    }
+    u32::try_from(px).ok()
 }
 
 /// Apply run properties as nested containers. The order is fixed so canonical
 /// output is stable: Strong, Emphasis, Underline, then Superscript/Subscript.
-fn wrap_run(style: RunStyle, inlines: Vec<Inline>) -> Vec<Inline> {
+fn wrap_run(style: RunFormat, inlines: Vec<Inline>) -> Vec<Inline> {
     if inlines.is_empty() {
         return inlines;
     }
@@ -460,13 +612,18 @@ fn read_text(
     }
 }
 
-fn parse_table(tokens: &mut Tokenizer<'_>, self_closing: bool) -> Result<Block, DocxError> {
+fn parse_table(
+    tokens: &mut Tokenizer<'_>,
+    self_closing: bool,
+    styles: &Styles,
+    images: &ImageIndex,
+) -> Result<Block, DocxError> {
     let mut rows: Vec<Row> = Vec::new();
     if !self_closing {
         while let Some(token) = tokens.next_token()? {
             match token {
                 Token::Start(tag) if tag.name == "tr" => {
-                    rows.push(parse_row(tokens, tag.self_closing)?);
+                    rows.push(parse_row(tokens, tag.self_closing, styles, images)?);
                 }
                 Token::Start(tag) => skip_element(tokens, tag.self_closing)?,
                 Token::End(name) => {
@@ -504,14 +661,19 @@ fn parse_table(tokens: &mut Tokenizer<'_>, self_closing: bool) -> Result<Block, 
     )))
 }
 
-fn parse_row(tokens: &mut Tokenizer<'_>, self_closing: bool) -> Result<Row, DocxError> {
+fn parse_row(
+    tokens: &mut Tokenizer<'_>,
+    self_closing: bool,
+    styles: &Styles,
+    images: &ImageIndex,
+) -> Result<Row, DocxError> {
     let mut cells = Vec::new();
     let mut header = false;
     if !self_closing {
         while let Some(token) = tokens.next_token()? {
             match token {
                 Token::Start(tag) if tag.name == "tc" => {
-                    cells.push(parse_cell(tokens, tag.self_closing)?);
+                    cells.push(parse_cell(tokens, tag.self_closing, styles, images)?);
                 }
                 Token::Start(tag) if tag.name == "trPr" => {
                     header |= parse_row_properties(tokens, tag.self_closing)?;
@@ -553,11 +715,16 @@ fn parse_row_properties(tokens: &mut Tokenizer<'_>, self_closing: bool) -> Resul
     Ok(header)
 }
 
-fn parse_cell(tokens: &mut Tokenizer<'_>, self_closing: bool) -> Result<Cell, DocxError> {
+fn parse_cell(
+    tokens: &mut Tokenizer<'_>,
+    self_closing: bool,
+    styles: &Styles,
+    images: &ImageIndex,
+) -> Result<Cell, DocxError> {
     let blocks = if self_closing {
         Vec::new()
     } else {
-        parse_children(tokens, "tc")?
+        parse_children(tokens, "tc", styles, images)?
     };
     Ok(Cell::new(NodeMeta::synthesized(), blocks))
 }
@@ -587,34 +754,6 @@ fn skip_element(tokens: &mut Tokenizer<'_>, self_closing: bool) -> Result<(), Do
         }
     }
     Ok(())
-}
-
-/// Map a word style id to a DocIR heading level. `Title` is level 1; Word's
-/// levels 7-9 clamp to 6 because DocIR headings stop at 6.
-fn heading_level(style: &str) -> Option<u8> {
-    let style = style.trim();
-    if style.eq_ignore_ascii_case("title") {
-        return Some(1);
-    }
-    let lower = style.to_ascii_lowercase();
-    let suffix = lower.strip_prefix("heading")?.trim();
-    let level: u8 = suffix.parse().ok()?;
-    if (1..=9).contains(&level) {
-        Some(level.min(6))
-    } else {
-        None
-    }
-}
-
-fn on_off(value: Option<&str>) -> bool {
-    value.is_none_or(|value| !is_off(value.trim()))
-}
-
-fn is_off(value: &str) -> bool {
-    value == "0"
-        || value.eq_ignore_ascii_case("false")
-        || value.eq_ignore_ascii_case("off")
-        || value.eq_ignore_ascii_case("none")
 }
 
 /// Parse `docProps/core.xml`. Metadata is best-effort: malformed XML yields

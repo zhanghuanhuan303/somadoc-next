@@ -1056,12 +1056,37 @@ fn end_kind(shaped: &Shaped<'_>, end: usize) -> LineEnd {
     }
 }
 
+/// Four looseness classes, the TeX fitness idea: a line is tight, normal,
+/// loose, or very loose. K7 only charges a *change* of class between adjacent
+/// justified lines; the absolute class is already priced by badness.
+const FITNESS_CLASSES: usize = 4;
+const FITNESS_NORMAL: usize = 1;
+
+/// One rhythm-DP cell: `(cost, lines, previous start, previous class)`.
+type FitnessCell = (Cost, u32, usize, u8);
+
+fn fitness_class(ratio_milli: i64) -> usize {
+    if ratio_milli < -500 {
+        0
+    } else if ratio_milli <= 500 {
+        1
+    } else if ratio_milli <= 1500 {
+        2
+    } else {
+        3
+    }
+}
+
 fn optimal(
     shaped: &Shaped<'_>,
     config: &BreakConfig,
     allow_emergency: bool,
     allow_forbidden: bool,
 ) -> Result<(LayoutResult, u64), BreakError> {
+    let params = config.params();
+    if params.features.fitness && params.break_params.costs.fitness.0 > 0 {
+        return optimal_with_fitness(shaped, config, allow_emergency, allow_forbidden);
+    }
     let segments = split_segments(shaped, config)?;
     let (k_min, k_max) = shaped.line_length_bounds(config, allow_emergency);
     let mut evaluated = 0u64;
@@ -1168,6 +1193,151 @@ fn optimal(
         }
         segment_lines.reverse();
         chosen.extend(segment_lines);
+    }
+
+    if let Some(limit) = config.params().break_params.max_lines {
+        if line_count > limit {
+            return Err(BreakError::TooManyLines { limit });
+        }
+    }
+
+    Ok((
+        build_result(shaped, &chosen, Cost(total), config, BreakerKind::Optimal),
+        evaluated,
+    ))
+}
+
+/// K7: the same DP as [`optimal`], with the looseness class of the previous
+/// line as part of the state. Four extra states per break point; a paragraph
+/// without the feature enabled never enters this function.
+fn optimal_with_fitness(
+    shaped: &Shaped<'_>,
+    config: &BreakConfig,
+    allow_emergency: bool,
+    allow_forbidden: bool,
+) -> Result<(LayoutResult, u64), BreakError> {
+    let segments = split_segments(shaped, config)?;
+    let (k_min, k_max) = shaped.line_length_bounds(config, allow_emergency);
+    let weight = config.params().break_params.costs.fitness.0 as i64;
+    let mut evaluated = 0u64;
+    let mut chosen: Vec<(usize, usize, LineEval)> = Vec::new();
+    let mut total = 0i64;
+    let mut line_count = 0u32;
+
+    for segment in &segments {
+        let len = segment.end - segment.start;
+        // Per local break point and per class: (cost, lines, previous start,
+        // previous class).
+        let mut best: Vec<[Option<FitnessCell>; FITNESS_CLASSES]> =
+            alloc::vec![[None; FITNESS_CLASSES]; len + 1];
+        best[0][FITNESS_NORMAL] = Some((Cost::ZERO, 0, 0, FITNESS_NORMAL as u8));
+
+        for local_end in 1..=len {
+            let end = segment.start + local_end;
+            if local_end < len && !shaped.is_break_allowed(end, allow_forbidden) {
+                continue;
+            }
+            let kind = if local_end == len {
+                if segment.is_paragraph_end {
+                    LineEnd::ParagraphEnd
+                } else {
+                    LineEnd::ForcedEnd
+                }
+            } else {
+                LineEnd::Justified
+            };
+
+            let (start_begin, start_end) = if kind == LineEnd::Justified {
+                if k_min > k_max || local_end < k_min {
+                    (0, 0)
+                } else {
+                    let max_start = local_end - k_min;
+                    let min_start = local_end.saturating_sub(k_max);
+                    (min_start, max_start + 1)
+                }
+            } else {
+                (0, local_end)
+            };
+
+            for local_start in start_begin..start_end {
+                let start = segment.start + local_start;
+                let Some(eval) =
+                    shaped.eval_line(start, end, kind, config, allow_emergency, allow_forbidden)
+                else {
+                    continue;
+                };
+                evaluated = evaluated.saturating_add(1);
+                let class = fitness_class(eval.ratio_milli);
+                for previous_class in 0..FITNESS_CLASSES {
+                    let Some((base, base_lines, _, _)) = best[local_start][previous_class] else {
+                        continue;
+                    };
+                    let jump = (class as i64 - previous_class as i64).unsigned_abs() as i64;
+                    let penalty = weight.saturating_mul(jump);
+                    let cost = Cost(base.0.saturating_add(eval.cost.0).saturating_add(penalty));
+                    let lines = base_lines.saturating_add(1);
+                    let better = match best[local_end][class] {
+                        None => true,
+                        Some((current, current_lines, current_start, _)) => {
+                            (cost.0, lines, local_start) < (current.0, current_lines, current_start)
+                        }
+                    };
+                    if better {
+                        best[local_end][class] =
+                            Some((cost, lines, local_start, previous_class as u8));
+                    }
+                }
+            }
+        }
+
+        let mut final_class = 0usize;
+        let mut final_cell: Option<FitnessCell> = None;
+        for (class, cell) in best[len].iter().enumerate() {
+            let Some(cell) = cell else { continue };
+            let better = match final_cell {
+                None => true,
+                Some((cost, lines, start, previous)) => {
+                    (cell.0 .0, cell.1, cell.2, class) < (cost.0, lines, start, previous as usize)
+                }
+            };
+            if better {
+                final_cell = Some(*cell);
+                final_class = class;
+            }
+        }
+        let Some((segment_total, segment_lines, _, _)) = final_cell else {
+            return Err(BreakError::NoFeasibleBreak);
+        };
+        total = total.saturating_add(segment_total.0);
+        line_count = line_count.saturating_add(segment_lines);
+
+        let mut local_end = len;
+        let mut class = final_class;
+        let mut reversed: Vec<(usize, usize, LineEval)> = Vec::new();
+        while local_end > 0 {
+            let Some((_, _, local_start, previous)) = best[local_end][class] else {
+                return Err(BreakError::NoFeasibleBreak);
+            };
+            let start = segment.start + local_start;
+            let end = segment.start + local_end;
+            let kind = if local_end == len {
+                if segment.is_paragraph_end {
+                    LineEnd::ParagraphEnd
+                } else {
+                    LineEnd::ForcedEnd
+                }
+            } else {
+                LineEnd::Justified
+            };
+            let eval = shaped
+                .eval_line(start, end, kind, config, allow_emergency, allow_forbidden)
+                .ok_or(BreakError::NoFeasibleBreak)?;
+            reversed.push((start, end, eval));
+            local_end = local_start;
+            class = previous as usize;
+        }
+        reversed.reverse();
+        chosen.extend(reversed);
     }
 
     if let Some(limit) = config.params().break_params.max_lines {

@@ -9,7 +9,7 @@
 
 \section{定位与边界}
 
-一句话：一个用纯 Rust 写的中文优先排版引擎。Markdown、HTML、LaTeX（Word 在建）进来，按一份纯 YAML 模板，出去是同一套确定性的 PDF、HTML、SVG 与页面 JSON。
+一句话：一个用纯 Rust 写的中文优先排版引擎。Markdown、HTML、LaTeX、Word 进来，按一份纯 YAML 模板，出去是同一套确定性的 PDF、HTML、SVG 与页面 JSON。
 
 它不解决“把文字放到页面上”——浏览器做得够好。它解决三件浏览器做不好的事：
 
@@ -32,10 +32,10 @@
 \item \textbf{F1–F5 字体}：字体指纹、度量表、逐字选面、多字体混排。已交付。
 \item \textbf{数学}：定界符、矩阵、斜体变量、编号与标签、拼接括弧。已交付。
 \item \textbf{长文档}：目录、图目录、表目录、拼音索引（含子条目与 see）、PDF 书签、前置页页码。已交付。
-\item \textbf{中文细节}：注音、连字符断词、嵌套列表、GFM 表格、setext 标题、Word 导入。已交付。
+\item \textbf{中文细节}：注音、连字符断词、嵌套列表、GFM 表格、setext 标题、LaTeX 宏与计数器、Word 样式与图片导入、索引页码范围。已交付。
 \end{itemize}
 
-规模：工作区 \textbf{21 个 crate}，\textbf{63 份 ADR}，\textbf{713 个测试}，全部通过 \texttt{cargo fmt}、\texttt{clippy -D warnings} 与 9 组门禁。
+规模：工作区 \textbf{21 个 crate}，\textbf{67 份 ADR}，\textbf{749 个测试}，全部通过 \texttt{cargo fmt}、\texttt{clippy -D warnings} 与 9 组门禁。
 
 \section{一条管线}
 
@@ -188,7 +188,7 @@ e &= mc^2 \tag{A}
 \item 段落级优化，不做跨段、跨页的整书优化。相邻两页的灰度不参与同一个目标函数。
 \item 数学是可用的子集：没有 \texttt{intertext}、没有 \texttt{alignat}，标签不排成独立的一列，拼出来的括弧比例固定而不是读字体的 MATH 表。
 \item 断词需要外部模式集；没有内置词典，模式覆盖不到的词仍可能超宽。
-\item Word 只读结构与行内强调，不承诺版式保真：样式表、图片、脚注、域都不读。
+\item Word 读结构与样式、内嵌图片；浮动位置、绕排、裁剪、脚注与域不读。
 \item 脚注不跨页拆分，特高的脚注会把正文挤走而不是自己断开。
 \end{itemize}
 

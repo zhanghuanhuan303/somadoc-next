@@ -263,6 +263,42 @@ pub fn rows(
         .collect()
 }
 
+/// Join page labels, collapsing runs of three or more consecutive arabic folios
+/// into `3–5`. Two consecutive pages stay `3, 4`: a range of two saves one
+/// character and costs a reader a scan. Roman or mixed labels are never merged.
+pub fn page_list(pages: &[String]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut index = 0;
+    while index < pages.len() {
+        let Ok(first) = pages[index].parse::<u32>() else {
+            parts.push(pages[index].clone());
+            index += 1;
+            continue;
+        };
+        let mut last = index;
+        while let Some(next) = pages
+            .get(last + 1)
+            .and_then(|page| page.parse::<u32>().ok())
+        {
+            let previous = pages[last].parse::<u32>().unwrap_or(first);
+            if next != previous.saturating_add(1) {
+                break;
+            }
+            last += 1;
+        }
+        let run = last - index + 1;
+        if run >= 3 {
+            parts.push(alloc::format!("{}–{}", pages[index], pages[last]));
+        } else {
+            for page in &pages[index..=last] {
+                parts.push(page.clone());
+            }
+        }
+        index = last + 1;
+    }
+    parts.join(", ")
+}
+
 fn compare_paths(left: &[String], right: &[String], collation: Collation) -> Ordering {
     for (left, right) in left.iter().zip(right) {
         let order = soma_collate::compare(left, right, collation);
@@ -366,6 +402,20 @@ mod tests {
         assert!(rows[0].pages.is_empty());
         assert_eq!(rows[1].text, "行宽");
         assert_eq!(rows[1].level, 1);
+    }
+
+    #[test]
+    fn page_lists_collapse_long_runs_only() {
+        let pages = |values: &[&str]| values.iter().map(|v| String::from(*v)).collect::<Vec<_>>();
+        assert_eq!(page_list(&pages(&["3", "4", "5"])), "3–5");
+        assert_eq!(page_list(&pages(&["3", "4"])), "3, 4");
+        assert_eq!(
+            page_list(&pages(&["1", "2", "5", "6", "7", "9"])),
+            "1, 2, 5–7, 9"
+        );
+        assert_eq!(page_list(&pages(&["ii", "iii"])), "ii, iii");
+        assert_eq!(page_list(&pages(&["iv", "5", "6", "7"])), "iv, 5–7");
+        assert_eq!(page_list(&pages(&[])), "");
     }
 
     #[test]

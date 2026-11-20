@@ -123,7 +123,7 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   bookmark per heading with physical and printed page) and an `index` report.
   `\index{term}` in LaTeX or `[[index:term]]` in Markdown, plus
   `index: {title, sort}` in the template, produces an index with merged page
-  lists. The marker grammar supports sub-entries (`宋体!字面`), per-part sort
+  lists (runs of three or more pages collapse to `3–5`). The marker grammar supports sub-entries (`宋体!字面`), per-part sort
   keys (`宋体@songti`), `|see{}` and `|seealso{}`; markers inside table cells
   and footnote definitions are collected on the page that prints them. Order is
   code point (`codepoint`, the default) or **pinyin** from the checked-in
@@ -135,12 +135,23 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   external TeX pattern file (`soma render --hyphenation en.pat`). A broken line
   ends in a real hyphen whose width is charged to the line; a document without
   patterns is byte-identical to before.
-- Word input (ADR-0063): `soma render --input draft.docx` reads the archive
-  with a dependency-free zip/inflate and maps paragraphs, headings, inline
-  emphasis, tables, lists, and core metadata to DocIR. No layout fidelity is
-  promised (N1).
+- Word input (ADR-0063/ADR-0066): `soma render --input draft.docx` reads the
+  archive with a dependency-free zip/inflate and maps paragraphs, headings
+  (by style name, through `basedOn` chains), inline emphasis, tables, lists,
+  core metadata, and embedded images (as figures) to DocIR. Floats, wrap,
+  crop, fields, and footnotes are not read; no layout fidelity is promised
+  (N1).
 - Markdown structure (ADR-0062): nested lists, GFM tables (alignment, escaped
-  bars), and setext headings join the existing subset.
+  bars), and setext headings join the existing subset. HTML `<colgroup>`/
+  `<col>` can give a column a relative width (ADR-0065).
+- LaTeX macros and counters (ADR-0067): `\newcommand`/`\renewcommand`/
+  `\providecommand`/`\def` with up to nine arguments expand before parsing;
+  `\newcounter`/`\setcounter`/`\stepcounter` and `\arabic`/`\roman`/
+  `\alph`/`\value`/`\the<name>` print counter values. `verbatim` is never
+  expanded.
+- Line rhythm (ADR-0064): `preset: rhythm-v1` charges a DP state for a change
+  of looseness class between adjacent justified lines. `publish-v1` and
+  `default-v1` are unchanged.
 - One command (ADR-0029): `soma render --input doc.tex --template book.yaml
   --format html|svg|json|pdf` runs the whole pipeline; `soma check` prints
   layout facts and the canonical hash. See [`docs/cli.md`](docs/cli.md).

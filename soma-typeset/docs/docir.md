@@ -54,7 +54,7 @@ ADR-0009（语义/呈现边界）。
 | `MathBlock` | `source`（交给 `soma-math` 解析成数学盒，内核不解析） |
 | `Figure` | `image`、`caption`、`label` |
 | `Table` | `columns`、`rows`、`caption`、`label` |
-| `Column` | `align`（宽度是排版决定，不在 IR） |
+| `Column` | `align`；`share` 是可选的相对宽度千分比（0 = 按内容），不是物理长度 |
 | `Row` | `header`、`cells` |
 | `Cell` | `colspan`、`rowspan`、`blocks` |
 | `ThematicBreak` | — |

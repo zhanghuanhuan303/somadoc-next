@@ -175,6 +175,13 @@ fn only_the_paragraph_window_is_accepted() {
 }
 
 #[test]
+fn the_rhythm_preset_is_selectable() {
+    let config = EngineConfig::parse("schema: soma.engine/1\npreset: rhythm-v1\n").expect("parse");
+    assert_eq!(config.preset(), "rhythm-v1");
+    assert!(config.break_config().params().features.fitness);
+}
+
+#[test]
 fn unknown_presets_are_rejected() {
     let source = "schema: soma.engine/1\npreset: house-style\n";
     assert!(EngineConfig::parse(source).is_err());

@@ -16,7 +16,7 @@ let document = parse_latex(r"\section{标题}
 ```
 
 - 零依赖、`no_std + alloc`、`forbid(unsafe_code)`。
-- 只产出 DocIR；不解析宏、不执行 `\usepackage`、不做真实公式排版。
+- 只产出 DocIR；`\newcommand` 等宏在解析前展开（ADR-0067），不执行 `\usepackage`，不做真实公式排版。
 - `%` 注释会被去掉；`\%` 保留。
 - 正文从 `\begin{document}` 之后开始；没有该标记时解析全文。
 - 未闭合的 `{`/环境保留剩余文本，不 panic。
@@ -68,7 +68,7 @@ let document = parse_latex(r"\section{标题}
 
 ## 5. 限制（见 `docs/debt.md` D70）
 
-- 无宏、计数器、交叉引用、参考文献。`\includegraphics` 只得到路径，不读取图片尺寸。
+- 宏只在本文档内定义：`\newcommand`/`\renewcommand`/`\providecommand`/`\def`（0–9 个参数），计数器 `\newcounter`/`\setcounter`/`\stepcounter` 与 `\arabic`/`\roman`/`\Roman`/`\alph`/`\Alph`/`\value`/`\the<名称>`。不做 `\newcommand*`、可选参数、`\let`、环境定义、交叉引用与参考文献。`\includegraphics` 只得到路径，不读取图片尺寸。
 - 行间公式的源码原样进入 `MathBlock.source`，随后由 `soma-math` 排成数学盒（ADR-0026）；
   行内公式同样交给 `soma-math`，作为对象 atom 参与断行（ADR-0027）。
 - 无 `\item[label]`、无 `description` 环境、无 `\multicolumn` 以外的列格式。

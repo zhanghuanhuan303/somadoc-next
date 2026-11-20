@@ -239,6 +239,37 @@ fn a_see_entry_prints_its_target_instead_of_pages() {
 }
 
 #[test]
+fn consecutive_pages_become_a_range() {
+    let mut blocks = Vec::new();
+    for page in 0..4 {
+        blocks.push(paragraph_with(vec![text("正文。"), marker("排版")]));
+        if page < 3 {
+            blocks.push(Block::PageBreak(PageBreak::new(NodeMeta::synthesized())));
+        }
+    }
+    let (layout, _styled) = build(blocks, TEMPLATE);
+    let index_page = page_text(&layout, layout.page_count() as usize - 1);
+
+    assert!(
+        index_page.contains("1–4"),
+        "four pages collapse: {index_page}"
+    );
+}
+
+#[test]
+fn two_consecutive_pages_stay_a_list() {
+    let blocks = vec![
+        paragraph_with(vec![text("正文。"), marker("排版")]),
+        Block::PageBreak(PageBreak::new(NodeMeta::synthesized())),
+        paragraph_with(vec![text("续。"), marker("排版")]),
+    ];
+    let (layout, _styled) = build(blocks, TEMPLATE);
+    let index_page = page_text(&layout, layout.page_count() as usize - 1);
+
+    assert!(index_page.contains("1, 2"), "{index_page}");
+}
+
+#[test]
 fn markers_inside_a_table_cell_are_collected() {
     let paragraph = Paragraph::new(
         NodeMeta::synthesized(),

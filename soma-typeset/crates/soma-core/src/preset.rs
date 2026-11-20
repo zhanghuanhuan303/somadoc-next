@@ -14,3 +14,8 @@ pub fn default_v1() -> ParamSet {
 pub fn publish_v1() -> ParamSet {
     ParamSet::publish_v1()
 }
+
+/// `publish-v1` with the K7 line-rhythm term enabled.
+pub fn rhythm_v1() -> ParamSet {
+    ParamSet::rhythm_v1()
+}

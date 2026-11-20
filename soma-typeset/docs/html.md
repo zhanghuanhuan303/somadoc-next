@@ -66,7 +66,7 @@ let document = parse_html("<h1>标题</h1><p>正文 <strong>重点</strong>。</
 ## 5. 限制（见 `docs/debt.md` D69）
 
 - 不执行 CSS、脚本、表单、框架；`style` 属性不进入 DocIR。
-- 不映射 `<caption>`、`<colgroup>`、`<col>`、脚注标记、`<math>`。
+- `<caption>` 成为表题；`<colgroup>`/`<col>` 的 `width`/`span` 成为列的相对宽度（ADR-0065）。不映射脚注标记、`<math>`。
 - 实体只覆盖常见集合，完整 HTML5 实体表未做。
 - 不保留源位置（`SourceSpan` 为空），错误诊断只有“能解析/不能解析”。
 

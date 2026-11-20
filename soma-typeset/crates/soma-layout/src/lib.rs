@@ -1259,13 +1259,101 @@ fn push_vertical_rule(
 /// shared by natural width, so a table with one long column gets one wide
 /// column instead of equal slices. Largest-remainder rounding keeps the widths
 /// summing to exactly `measure`, which the rules and the span offsets rely on.
-fn column_widths(natural: &[i32], measure: i32) -> Vec<i32> {
+fn column_widths(natural: &[i32], shares: &[u16], measure: i32) -> Vec<i32> {
     let count = natural.len();
     if count == 0 {
         return Vec::new();
     }
     let measure = measure.max(count as i32);
     let floor = (measure / (count as i32 * 6)).max(1);
+    let hint_total: u32 = shares.iter().map(|share| u32::from(*share)).sum();
+
+    // Without hints the widths are the measured widths, exactly as before.
+    if hint_total == 0 {
+        return proportional_widths(natural, measure, floor);
+    }
+
+    // A hint is a per-mille share of the whole measure, so `25%` is a quarter
+    // of the table whatever the other columns hold. The hint is scaled down
+    // only when the hinted columns together ask for more than the measure
+    // (or more than 90% of it, when unhinted columns still need room).
+    let unhinted: Vec<usize> = shares
+        .iter()
+        .enumerate()
+        .filter(|(_, share)| **share == 0)
+        .map(|(index, _)| index)
+        .collect();
+    let limit: u32 = if unhinted.is_empty() { 1000 } else { 900 };
+    let hints: Vec<i64> = shares
+        .iter()
+        .map(|share| {
+            let share = u32::from(*share);
+            if share == 0 {
+                0
+            } else if hint_total > limit {
+                i64::from((share * limit / hint_total).max(1))
+            } else {
+                i64::from(share)
+            }
+        })
+        .collect();
+
+    let mut widths = vec![0i32; count];
+    let mut used = 0i64;
+    for (index, hint) in hints.iter().enumerate() {
+        if *hint <= 0 {
+            continue;
+        }
+        let width = (i64::from(measure) * *hint / 1000).max(i64::from(floor));
+        widths[index] = width as i32;
+        used += width;
+    }
+
+    let remaining = (i64::from(measure) - used).max(0);
+    if remaining > 0 {
+        // Unhinted columns take what is left by natural width; a table whose
+        // columns are all hinted shares the rounding leftover by the hints.
+        let all_hinted = unhinted.is_empty();
+        let flexible: Vec<usize> = if all_hinted {
+            (0..count).collect()
+        } else {
+            unhinted
+        };
+        let weights: Vec<i64> = if all_hinted {
+            flexible.iter().map(|index| hints[*index].max(1)).collect()
+        } else {
+            flexible
+                .iter()
+                .map(|index| i64::from(natural[*index].max(1)))
+                .collect()
+        };
+        let total: i64 = weights.iter().sum::<i64>().max(1);
+        let mut assigned = 0i64;
+        let mut remainders: Vec<(i64, usize)> = Vec::with_capacity(flexible.len());
+        for (slot, index) in flexible.iter().enumerate() {
+            let exact = remaining * weights[slot];
+            let share = exact / total;
+            widths[*index] += share as i32;
+            assigned += share;
+            remainders.push((exact % total, *index));
+        }
+        let mut left = remaining - assigned;
+        remainders.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        for (_, index) in remainders {
+            if left <= 0 {
+                break;
+            }
+            widths[index] += 1;
+            left -= 1;
+        }
+    }
+    widths
+}
+
+/// Split the measure in proportion to the measured widths, with a floor that
+/// keeps every column usable and an exact remainder.
+fn proportional_widths(natural: &[i32], measure: i32, floor: i32) -> Vec<i32> {
+    let count = natural.len();
     let weights: Vec<i64> = natural
         .iter()
         .map(|width| i64::from((*width).max(1)))
@@ -1675,7 +1763,8 @@ impl Builder<'_> {
                             column += colspan;
                         }
                     }
-                    let widths = column_widths(&natural, self.content_width.0);
+                    let shares: Vec<u16> = node.columns.iter().map(|column| column.share).collect();
+                    let widths = column_widths(&natural, &shares, self.content_width.0);
                     let mut column_x = alloc::vec![0i32; columns + 1];
                     for index in 0..columns {
                         column_x[index + 1] = column_x[index] + widths[index];
@@ -3368,7 +3457,7 @@ impl Builder<'_> {
                 text: row.text,
                 page: match row.see {
                     Some((kind, target)) => alloc::format!("{} {}", kind.label(), target),
-                    None => row.pages.join(", "),
+                    None => index::page_list(&row.pages),
                 },
             })
             .collect()
@@ -4249,23 +4338,40 @@ mod unit {
     #[test]
     fn columns_share_the_measure_by_what_they_hold() {
         // Equal columns stay equal, and the widths still sum to the measure.
-        let equal = column_widths(&[100, 100, 100], 9000);
+        let equal = column_widths(&[100, 100, 100], &[], 9000);
         assert_eq!(equal, [3000, 3000, 3000]);
 
         // One long column takes the room it needs.
-        let uneven = column_widths(&[100, 900], 10000);
+        let uneven = column_widths(&[100, 900], &[], 10000);
         assert_eq!(uneven.iter().sum::<i32>(), 10000);
         assert!(uneven[1] > uneven[0] * 4, "the long column gets the room");
 
         // Rounding never loses or invents a unit.
         for measure in [9999, 10000, 10001] {
-            let widths = column_widths(&[37, 41, 43, 47], measure);
+            let widths = column_widths(&[37, 41, 43, 47], &[], measure);
             assert_eq!(widths.iter().sum::<i32>(), measure, "measure {measure}");
         }
 
         // A column with nothing in it still gets a floor.
-        let empty = column_widths(&[0, 5000], 9000);
+        let empty = column_widths(&[0, 5000], &[], 9000);
         assert!(empty[0] > 0, "{empty:?}");
+    }
+
+    #[test]
+    fn a_hinted_column_gets_its_share_and_the_rest_is_measured() {
+        // 700‰ + auto: the hint is absolute, the auto column takes the rest.
+        let widths = column_widths(&[100, 100], &[700, 0], 10000);
+        assert_eq!(widths.iter().sum::<i32>(), 10000);
+        assert!(widths[0] > 6500 && widths[0] < 7500, "{widths:?}");
+
+        // Every column hinted: the shares are the split.
+        let split = column_widths(&[100, 100], &[600, 400], 10000);
+        assert_eq!(split.iter().sum::<i32>(), 10000);
+        assert!(split[0] >= split[1] * 3 / 2, "{split:?}");
+
+        // Hints over 1000‰ are scaled down, not allowed to overflow.
+        let clamped = column_widths(&[100, 100], &[900, 900], 10000);
+        assert_eq!(clamped.iter().sum::<i32>(), 10000);
     }
 
     #[test]
