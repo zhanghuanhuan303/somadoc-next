@@ -61,6 +61,7 @@ only).
 | [0043](0043-pdf-flate.md) | PDF streams are deflated; fixed Huffman | Accepted; superseded in part by 0045 |
 | [0044](0044-decorations-and-links.md) | Underlines and links cross the layers as atom attributes | Accepted |
 | [0045](0045-dynamic-huffman.md) | The deflate encoder builds a dynamic Huffman table when it pays | Accepted |
+| [0046](0046-compact-cff-subset.md) | A CFF subset is compacted, and the charset carries the CIDs | Accepted |
 
 ## Rules
 

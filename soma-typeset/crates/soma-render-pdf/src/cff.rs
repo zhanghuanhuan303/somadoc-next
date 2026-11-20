@@ -33,9 +33,6 @@ const OP_CID_COUNT: u16 = 0x0c22;
 const OP_FDARRAY: u16 = 0x0c24;
 const OP_FDSELECT: u16 = 0x0c25;
 
-/// A Type 2 charstring that paints nothing.
-const BLANK_GLYPH: [u8; 1] = [0x0e];
-
 fn error(reason: impl Into<String>) -> PdfError {
     PdfError::new(reason)
 }
@@ -1026,8 +1023,11 @@ fn resolve_seac(sids: &[u16], code: i32) -> Result<u16, PdfError> {
 
 /// Rebuild `data` as a CID-keyed CFF holding only `used` glyphs.
 ///
-/// Glyph ids are preserved: the returned program has the same glyph count as
-/// the source, and unused glyphs paint nothing.
+/// The CharStrings INDEX is compacted to `[.notdef] + used`, and the charset is
+/// rewritten so that the CID of each surviving glyph stays its *original* glyph
+/// id. That is the one invariant the rest of the pipeline depends on: the
+/// content stream writes the original id as the two-byte code, and `/W` and
+/// `ToUnicode` are keyed by it, so only the program is renumbered (ADR-0046).
 pub(crate) fn subset(data: &[u8], used: &[u16], num_glyphs: u16) -> Result<Vec<u8>, PdfError> {
     let cff = Cff::parse(data)?;
     let count = num_glyphs as usize;
@@ -1060,6 +1060,14 @@ pub(crate) fn subset(data: &[u8], used: &[u16], num_glyphs: u16) -> Result<Vec<u
             *slot = true;
         }
     }
+    // The compact order: glyph 0 first, then every used glyph in ascending id
+    // order. Glyph 0 has to stay at index 0 because that is `.notdef`.
+    let order: Vec<u16> = (0..count)
+        .filter(|gid| include[*gid])
+        .map(|gid| gid as u16)
+        .collect();
+    let kept = order.len();
+    let cid_count = order.last().map_or(1, |gid| usize::from(*gid) + 1);
 
     // A name-keyed face loses its glyph names when the charset becomes
     // identity, so a `seac` composite is drawn out instead of referenced.
@@ -1101,46 +1109,39 @@ pub(crate) fn subset(data: &[u8], used: &[u16], num_glyphs: u16) -> Result<Vec<u
         expanded = owned;
     }
 
-    // 1. An identity charset; glyph 0 is implicit.
-    let mut charset = Vec::with_capacity(2 * count);
+    // 1. The charset maps each new glyph id to the CID the text operator
+    //    writes. Format 0 is a plain array, and the array is now short: only
+    //    the glyphs that survived have an entry.
+    let mut charset = Vec::with_capacity(2 * kept);
     charset.push(0u8);
-    for gid in 1..count {
-        charset.extend_from_slice(&(gid as u16).to_be_bytes());
+    for gid in &order[1..] {
+        charset.extend_from_slice(&gid.to_be_bytes());
     }
 
-    // 2. CharStrings with the unused glyphs blanked.
-    let mut programs: Vec<&[u8]> = Vec::with_capacity(count);
-    for (gid, &keep) in include.iter().enumerate() {
-        if !keep {
-            programs.push(&BLANK_GLYPH);
-            continue;
-        }
+    // 2. CharStrings, compacted; unused glyphs are gone rather than blanked.
+    let mut programs: Vec<&[u8]> = Vec::with_capacity(kept);
+    for gid in &order {
+        let gid = *gid as usize;
         let drawn = expanded.get(gid).and_then(|value| value.as_deref());
         programs.push(drawn.unwrap_or_else(|| charstrings.item(data, gid)));
     }
     let charstrings_data = write_index(&programs);
 
-    // 3. FDSelect is copied for a CID-keyed face, where the glyph ids it maps
-    //    have not changed; a converted face gets a single range.
+    // 3. FDSelect is rewritten into the compact id space. A CID-keyed face maps
+    //    original ids to font dicts; a converted face gets a single range.
     let mut fdselect_owned = Vec::new();
     let fdselect: &[u8] = match (cid, find(&cff.top_dict, OP_FDSELECT)) {
         (true, Some(entry)) => {
             let offset = usize::try_from(entry.args[0])
                 .map_err(|_| error("CFF FDSelect offset is negative"))?;
-            let format = *data
-                .get(offset)
-                .ok_or_else(|| error("CFF FDSelect is out of bounds"))?;
-            let length = match format {
-                0 => 1 + count,
-                3 => 1 + 2 + read_u16(data, offset + 1)? as usize * 3 + 2,
-                other => return Err(error(format!("CFF FDSelect format {other} is unsupported"))),
-            };
-            data.get(offset..offset + length)
-                .ok_or_else(|| error("CFF FDSelect is truncated"))?
+            let per_glyph = fd_per_glyph(data, offset, count)?;
+            let compact: Vec<u8> = order.iter().map(|gid| per_glyph[*gid as usize]).collect();
+            fdselect_owned = write_fdselect(&compact);
+            &fdselect_owned
         }
         _ => {
             fdselect_owned.extend_from_slice(&[3, 0, 1, 0, 0, 0]);
-            fdselect_owned.extend_from_slice(&(count as u16).to_be_bytes());
+            fdselect_owned.extend_from_slice(&(kept as u16).to_be_bytes());
             &fdselect_owned
         }
     };
@@ -1202,7 +1203,7 @@ pub(crate) fn subset(data: &[u8], used: &[u16], num_glyphs: u16) -> Result<Vec<u
     let strings_data = write_index(&strings);
 
     // 6. Sizes do not depend on the offsets: every patch is a five-byte int.
-    let top_size = build_top(&cff, ros.as_deref(), &Offsets::default(), count).len();
+    let top_size = build_top(&cff, ros.as_deref(), &Offsets::default(), cid_count).len();
     let fdarray_size = build_fdarray(&font_dicts, data, region_start, &Offsets::default()).len();
 
     let mut offsets = Offsets::default();
@@ -1218,7 +1219,7 @@ pub(crate) fn subset(data: &[u8], used: &[u16], num_glyphs: u16) -> Result<Vec<u
     position += fdarray_size;
     offsets.region = position as i32;
 
-    let top = build_top(&cff, ros.as_deref(), &offsets, count);
+    let top = build_top(&cff, ros.as_deref(), &offsets, cid_count);
     let fdarray = build_fdarray(&font_dicts, data, region_start, &offsets);
     debug_assert_eq!(top.len(), top_size);
     debug_assert_eq!(fdarray.len(), fdarray_size);
@@ -1240,7 +1241,60 @@ pub(crate) fn subset(data: &[u8], used: &[u16], num_glyphs: u16) -> Result<Vec<u
     Ok(out)
 }
 
-fn build_top(cff: &Cff<'_>, ros: Option<&[i32]>, offsets: &Offsets, count: usize) -> Vec<u8> {
+/// The font dict index of every glyph, in the source's id space.
+fn fd_per_glyph(data: &[u8], offset: usize, count: usize) -> Result<Vec<u8>, PdfError> {
+    let format = *data
+        .get(offset)
+        .ok_or_else(|| error("CFF FDSelect is out of bounds"))?;
+    match format {
+        0 => data
+            .get(offset + 1..offset + 1 + count)
+            .map(|slice| slice.to_vec())
+            .ok_or_else(|| error("CFF FDSelect is truncated")),
+        3 => {
+            let ranges = read_u16(data, offset + 1)? as usize;
+            let mut out = vec![0u8; count];
+            for range in 0..ranges {
+                let base = offset + 3 + range * 3;
+                let first = read_u16(data, base)? as usize;
+                let fd = *data
+                    .get(base + 2)
+                    .ok_or_else(|| error("CFF FDSelect is truncated"))?;
+                let next = if range + 1 < ranges {
+                    read_u16(data, base + 3)? as usize
+                } else {
+                    read_u16(data, offset + 3 + ranges * 3)? as usize
+                };
+                for slot in out.iter_mut().take(next.min(count)).skip(first) {
+                    *slot = fd;
+                }
+            }
+            Ok(out)
+        }
+        other => Err(error(format!("CFF FDSelect format {other} is unsupported"))),
+    }
+}
+
+/// FDSelect format 3 over a fresh id space: one range per run of equal indices.
+fn write_fdselect(per_glyph: &[u8]) -> Vec<u8> {
+    let mut ranges: Vec<(u16, u8)> = Vec::new();
+    for (gid, fd) in per_glyph.iter().enumerate() {
+        if ranges.last().map(|(_, last)| last) != Some(fd) {
+            ranges.push((gid as u16, *fd));
+        }
+    }
+    let mut out = Vec::with_capacity(5 + ranges.len() * 3);
+    out.push(3);
+    out.extend_from_slice(&(ranges.len() as u16).to_be_bytes());
+    for (first, fd) in &ranges {
+        out.extend_from_slice(&first.to_be_bytes());
+        out.push(*fd);
+    }
+    out.extend_from_slice(&(per_glyph.len() as u16).to_be_bytes());
+    out
+}
+
+fn build_top(cff: &Cff<'_>, ros: Option<&[i32]>, offsets: &Offsets, cid_count: usize) -> Vec<u8> {
     let mut out = Vec::new();
     if let Some(args) = ros {
         put_entry(OP_ROS, args, &mut out);
@@ -1252,7 +1306,7 @@ fn build_top(cff: &Cff<'_>, ros: Option<&[i32]>, offsets: &Offsets, count: usize
             OP_CHARSTRINGS => put_entry(OP_CHARSTRINGS, &[offsets.charstrings], &mut out),
             OP_FDARRAY => put_entry(OP_FDARRAY, &[offsets.fdarray], &mut out),
             OP_FDSELECT => put_entry(OP_FDSELECT, &[offsets.fdselect], &mut out),
-            OP_CID_COUNT => put_entry(OP_CID_COUNT, &[count as i32], &mut out),
+            OP_CID_COUNT => put_entry(OP_CID_COUNT, &[cid_count as i32], &mut out),
             // The Private dict moves into the single Font DICT, and a
             // CID-keyed font must not carry an Encoding.
             OP_PRIVATE | OP_ENCODING => {}
@@ -1266,7 +1320,7 @@ fn build_top(cff: &Cff<'_>, ros: Option<&[i32]>, offsets: &Offsets, count: usize
         put_entry(OP_FDSELECT, &[offsets.fdselect], &mut out);
     }
     if find(&cff.top_dict, OP_CID_COUNT).is_none() {
-        put_entry(OP_CID_COUNT, &[count as i32], &mut out);
+        put_entry(OP_CID_COUNT, &[cid_count as i32], &mut out);
     }
     write_index(&[&out])
 }
@@ -1374,34 +1428,47 @@ mod tests {
     }
 
     #[test]
-    fn a_subset_keeps_glyph_ids_charsets_and_blanks_the_rest() {
+    fn a_subset_compacts_the_glyph_slots_and_keeps_the_cids() {
         let source = cff_table(CID);
         let (_, before) = charstrings(source);
         let used = [1u16, 3];
         let program = subset(source, &used, 6).expect("subset");
         let (cff, after) = charstrings(&program);
 
-        assert_eq!(after.count(), 6, "every glyph slot is kept");
+        assert_eq!(after.count(), 3, "only .notdef and the used glyphs remain");
+        assert_eq!(after.item(&program, 0), before.item(source, 0), ".notdef");
         assert_eq!(after.item(&program, 1), before.item(source, 1));
-        assert_eq!(after.item(&program, 3), before.item(source, 3));
-        assert_eq!(after.item(&program, 2), &BLANK_GLYPH);
-        assert_eq!(after.item(&program, 5), &BLANK_GLYPH);
+        assert_eq!(
+            after.item(&program, 2),
+            before.item(source, 3),
+            "glyph 3 moved to index 2"
+        );
 
+        // The charset is what keeps the rest of the pipeline honest: new glyph 2
+        // answers to CID 3, which is the code the content stream writes.
         let charset = find(&cff.top_dict, OP_CHARSET).expect("charset").args[0] as usize;
         assert_eq!(program[charset], 0, "format 0");
-        for gid in 0..5usize {
-            assert_eq!(
-                read_u16(&program, charset + 1 + gid * 2).unwrap() as usize,
-                gid + 1,
-                "the charset is identity, so CID equals glyph id"
-            );
-        }
+        assert_eq!(read_u16(&program, charset + 1).unwrap(), 1);
+        assert_eq!(read_u16(&program, charset + 3).unwrap(), 3);
 
         let ros = find(&cff.top_dict, OP_ROS).expect("ROS");
         assert_eq!(ros.args, vec![391, 392, 0]);
         assert_eq!(
             find(&cff.top_dict, OP_CID_COUNT).expect("CIDCount").args,
-            vec![6]
+            vec![4],
+            "CIDCount follows the highest CID, not the glyph count"
+        );
+    }
+
+    #[test]
+    fn the_compacted_font_is_smaller_than_the_source() {
+        let source = cff_table(CID);
+        let program = subset(source, &[1], 6).expect("subset");
+        assert!(
+            program.len() < source.len(),
+            "{} vs {}",
+            program.len(),
+            source.len()
         );
     }
 
@@ -1415,7 +1482,7 @@ mod tests {
             find(&cff.top_dict, OP_PRIVATE).is_none(),
             "the Private dict moves into the FDArray"
         );
-        assert_eq!(find(&cff.top_dict, OP_CID_COUNT).unwrap().args, vec![6]);
+        assert_eq!(find(&cff.top_dict, OP_CID_COUNT).unwrap().args, vec![2]);
 
         let fdarray = read_index(
             &program,
@@ -1435,7 +1502,7 @@ mod tests {
         let fdselect = find(&cff.top_dict, OP_FDSELECT).expect("fdselect").args[0] as usize;
         assert_eq!(program[fdselect], 3, "format 3");
         assert_eq!(read_u16(&program, fdselect + 1).unwrap(), 1, "one range");
-        assert_eq!(read_u16(&program, fdselect + 6).unwrap(), 6, "sentinel");
+        assert_eq!(read_u16(&program, fdselect + 6).unwrap(), 2, "sentinel");
         assert!(
             program.windows(5).any(|window| window == b"Adobe"),
             "the ROS strings are appended to the string index"
@@ -1498,7 +1565,7 @@ mod tests {
         let source = cff_table(SEAC);
         let program = subset(source, &[1, 2, 3], 6).expect("subset");
         let (_, charstrings) = charstrings(&program);
-        assert_eq!(charstrings.count(), 6, "every glyph slot is kept");
+        assert_eq!(charstrings.count(), 4, ".notdef plus the three used glyphs");
         // "A" is a 500x700 box; the accent is a 100x100 box at (200, 700) in
         // its own space, shifted to (25, 10). The composite walks the base,
         // moves to (25, 10), then draws the accent through a local subroutine.

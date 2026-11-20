@@ -62,6 +62,9 @@ the same:
 - `FDSelect` maps glyphs to Font DICTs and is copied unchanged (ids are
   unchanged).
 
+> Superseded by ADR-0046: the INDEX is compacted and the charset maps the new
+glyph ids back to the original CIDs.
+
 The price is a 65,535-entry INDEX offset table plus one byte per unused glyph —
 ~260 KB on Noto Serif CJK against a ~1.2 MB private-dict/subroutine blob. That
 is cheaper than teaching the renderer a second id space, and it keeps the
@@ -135,3 +138,7 @@ already `Adobe-Identity-0`.
   (~1.2 MB). The eight-page sample with two faces is 1.9 MB. Accepted:
   correctness of the id space first, compression (no Flate in the writer yet)
   later.
+
+> ADR-0046 removes the first half of this cost: the eight-page Noto sample went
+> 1,581,063 B → 1,247,396 B when the INDEX was compacted. The private-dict blob
+> (~1.2 MB) remains.
