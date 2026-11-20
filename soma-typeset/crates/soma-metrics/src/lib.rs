@@ -19,7 +19,16 @@
 //!   per ink: u32 codepoint | i16 ink_left | i16 ink_right
 //!   u32 glyph_ink_count                         (version 3+)
 //!   per glyph: varint(codepoint delta) | u8 left | u8 right
+//!   u16 math_constant_count                     (version 5+)
+//!   per constant: i32 value in per-mille of one em
+//!   u32 math_glyph_count                        (version 5+)
+//!   per glyph: varint(delta) | i16 top | i16 bottom | i16 italic
 //! ```
+//!
+//! Version 5 adds the math face's OpenType `MATH` constants and every glyph's
+//! vertical ink. `top`/`bottom`/`italic` are 1/4096 em; `top` is positive
+//! upwards from the baseline and `bottom` positive downwards. A face with no
+//! math data writes two zero counts, so a normal text face pays eight bytes.
 //!
 //! Version 3 stored the codepoint as a `u32`; version 4 uses a delta from the
 //! previous entry as a LEB128 varint. Adjacent Han glyphs cost one byte instead
@@ -43,7 +52,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 pub const MAGIC: u32 = 0x534d_5431;
-pub const VERSION: u16 = 4;
+pub const VERSION: u16 = 5;
 /// Oldest blob layout this parser still reads.
 pub const VERSION_MIN: u16 = 1;
 pub const UNIT: i32 = 4096;
@@ -66,6 +75,48 @@ pub struct FaceBlock {
     pub advance: i32,
 }
 
+/// Math data from a face's OpenType `MATH` table.
+///
+/// `constants` are per-mille of one em in the order of
+/// `soma_core::MathParam`. `glyphs` are
+/// `(codepoint, top, bottom, italic)`, all in 1/4096 em, sorted by codepoint.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MathFace {
+    constants: Vec<i32>,
+    glyphs: Vec<(u32, i32, i32, i32)>,
+}
+
+impl MathFace {
+    /// One constant in per-mille of one em. `None` when the table has fewer
+    /// constants than the caller asked for (a text face, or an older blob).
+    pub fn constant(&self, index: usize) -> Option<i32> {
+        self.constants.get(index).copied()
+    }
+
+    /// Vertical ink and italic correction of one glyph, in 1/4096 em.
+    pub fn glyph(&self, codepoint: u32) -> Option<(i32, i32, i32)> {
+        self.glyphs
+            .binary_search_by_key(&codepoint, |(cp, _, _, _)| *cp)
+            .ok()
+            .map(|index| {
+                let (_, top, bottom, italic) = self.glyphs[index];
+                (top, bottom, italic)
+            })
+    }
+
+    pub fn constant_count(&self) -> usize {
+        self.constants.len()
+    }
+
+    pub fn glyph_count(&self) -> usize {
+        self.glyphs.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.constants.is_empty() && self.glyphs.is_empty()
+    }
+}
+
 /// One face: metrics for a family/weight/slant combination.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Face {
@@ -85,6 +136,8 @@ pub struct Face {
     /// Every glyph's `(codepoint, ink_left, ink_right)` sorted by codepoint,
     /// dequantised from one byte each. Empty before version 3.
     glyph_ink: Vec<(u32, i32, i32)>,
+    /// Math constants and glyph ink. Empty before version 5.
+    math: MathFace,
 }
 
 impl Face {
@@ -179,6 +232,12 @@ impl Face {
     /// Number of uniform blocks (diagnostics).
     pub fn block_count(&self) -> usize {
         self.blocks.len()
+    }
+
+    /// The face's math constants and glyph ink. Empty before version 5 and for
+    /// every text face.
+    pub fn math(&self) -> &MathFace {
+        &self.math
     }
 
     /// True when the face was built for a bold weight.
@@ -291,6 +350,30 @@ impl MetricsTable {
                     glyph_ink.push((codepoint, left, right));
                 }
             }
+            let mut math = MathFace::default();
+            if version >= 5 {
+                let constant_count = cursor.u16()? as usize;
+                math.constants.reserve(constant_count.min(256));
+                for _ in 0..constant_count {
+                    math.constants.push(cursor.i32()?);
+                }
+                let glyph_count = cursor.u32()? as usize;
+                math.glyphs.reserve(glyph_count.min(1 << 18));
+                let mut previous = 0u32;
+                for index in 0..glyph_count {
+                    let codepoint = previous
+                        .checked_add(cursor.varint()?)
+                        .ok_or(MetricsError::new("math codepoint delta overflows"))?;
+                    let top = cursor.i16()? as i32;
+                    let bottom = cursor.i16()? as i32;
+                    let italic = cursor.i16()? as i32;
+                    if index > 0 && codepoint <= previous {
+                        return Err(MetricsError::new("math glyph entries are not sorted"));
+                    }
+                    previous = codepoint;
+                    math.glyphs.push((codepoint, top, bottom, italic));
+                }
+            }
             faces.push(Face {
                 family,
                 weight,
@@ -304,6 +387,7 @@ impl MetricsTable {
                 entries,
                 ink,
                 glyph_ink,
+                math,
             });
         }
         if cursor.remaining() != 0 {
@@ -472,6 +556,19 @@ mod tests {
         MetricsTable::embedded()
     }
 
+    fn write_varint(out: &mut Vec<u8>, value: u32) {
+        let mut remaining = value;
+        loop {
+            let byte = (remaining & 0x7f) as u8;
+            remaining >>= 7;
+            if remaining == 0 {
+                out.push(byte);
+                break;
+            }
+            out.push(byte | 0x80);
+        }
+    }
+
     #[test]
     fn embedded_table_has_regular_and_bold_faces() {
         let table = table();
@@ -620,6 +717,58 @@ mod tests {
             bytes.extend_from_slice(&right.to_le_bytes());
         }
         assert!(MetricsTable::parse(&bytes).is_err());
+    }
+
+    #[test]
+    fn a_version_five_blob_carries_math_constants_and_glyph_ink() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC.to_le_bytes());
+        bytes.extend_from_slice(&5u16.to_le_bytes());
+        bytes.extend_from_slice(&(UNIT as u16).to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&[FAMILY_MATH, 0, 0, 0]);
+        for value in [UNIT, 0, 0, 0, UNIT] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        // Three constants: axis height 250, rule 40, script 700 (per-mille).
+        bytes.extend_from_slice(&3u16.to_le_bytes());
+        for value in [250i32, 40, 700] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        // Two glyphs: x and π, with vertical ink and an italic correction.
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        for (cp, top, bottom, italic) in [(0x78u32, 2600i16, 0i16, -80i16), (0x3c0, 2400, 0, 0)] {
+            let delta = cp - if cp == 0x78 { 0 } else { 0x78 };
+            write_varint(&mut bytes, delta);
+            bytes.extend_from_slice(&top.to_le_bytes());
+            bytes.extend_from_slice(&bottom.to_le_bytes());
+            bytes.extend_from_slice(&italic.to_le_bytes());
+        }
+
+        let table = MetricsTable::parse(&bytes).expect("v5 blob parses");
+        let face = table.face(0).expect("face");
+        assert_eq!(face.math().constant_count(), 3);
+        assert_eq!(face.math().constant(0), Some(250));
+        assert_eq!(face.math().constant(2), Some(700));
+        assert_eq!(face.math().constant(3), None);
+        assert_eq!(face.math().glyph(0x78), Some((2600, 0, -80)));
+        assert_eq!(face.math().glyph(0x3c0), Some((2400, 0, 0)));
+        assert_eq!(face.math().glyph(0x3b1), None);
+    }
+
+    #[test]
+    fn a_version_four_blob_has_no_math_data() {
+        let bytes: &[u8] = include_bytes!("../data/noto-cjk.smt");
+        let table = MetricsTable::parse(bytes).expect("v4 blob parses");
+        for face in table.faces() {
+            assert!(face.math().is_empty());
+        }
     }
 
     #[test]

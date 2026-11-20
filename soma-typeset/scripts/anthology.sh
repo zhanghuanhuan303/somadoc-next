@@ -15,7 +15,7 @@ mkdir -p "$out"
 # of glyphs MiSans lacks (the mixed-font page relies on it).
 pdf_font=${SOMA_PDF_FONT:-/usr/share/fonts/misan/MiSans-Normal.ttf}
 rescue=${SOMA_FALLBACK_FONT:-/usr/share/fonts/TTF/LXGWWenKai-Regular.ttf}
-math=${SOMA_PDF_MATH:-/usr/share/fonts/noto/NotoSansMath-Regular.ttf}
+math=${SOMA_PDF_MATH:-/usr/share/fonts/TTF/DejaVuMathTeXGyre.ttf}
 
 {
     cat <<'FRONT'

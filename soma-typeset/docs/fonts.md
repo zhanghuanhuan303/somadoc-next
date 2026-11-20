@@ -1,6 +1,6 @@
 # Choosing a body font
 
-The engine never opens a font: layout reads a `soma.metrics/2` table, the PDF
+The engine never opens a font: layout reads a `soma.metrics/5` table, the PDF
 backend embeds `glyf` outlines or CID-keyed CFF programs (ADR-0039). A face is
 therefore usable for PDF only when it has one of those two outline formats. `tools/metrics-gen --audit` scores every face on disk
 against what Chinese body typesetting actually needs, so the choice is a
@@ -214,7 +214,7 @@ cargo run -p tools/metrics-gen -- \
 ```
 
 `examples/book/metrics-lxgw.smt` is committed as an **OFL-licensed layout
-baseline** (360 KB, `soma.metrics/4`, per-glyph bearings for 46,473 glyphs): pointing `--metrics` at it reproduces the same line breaks on any
+baseline** (360 KB, `soma.metrics/5`, per-glyph bearings for 46,473 glyphs: pointing `--metrics` at it reproduces the same line breaks on any
 machine without the font installed. Rendering a PDF still needs the font file
 itself, because the PDF embeds outlines.
 

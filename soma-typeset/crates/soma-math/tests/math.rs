@@ -91,19 +91,41 @@ fn superscripts_are_smaller_and_above_the_baseline() {
 }
 
 #[test]
-fn a_superscript_is_lifted_by_its_depth_not_its_height() {
-    // `mc^2` used to raise the `2` by its own full height, which floats it
-    // halfway to the cap line. The lift is `sup_shift` unless the script's
-    // depth would bring its bottom closer than the gap.
-    let result = formula("x^2");
-    let base = &result.items[0];
+fn a_superscript_is_lifted_by_rule_18_not_by_its_height() {
+    // TeX rule 18: the superscript baseline is `sup_shift` above the base's,
+    // but never more than `sup_drop` below the base's top, and never closer
+    // than `sup_bottom_min` to the baseline. With a real ink box, a lowercase
+    // `x` is short enough that `sup_shift` alone wins.
+    struct InkMetrics;
+    impl MathMetrics for InkMetrics {
+        fn advance(&self, text: &str, size: Width) -> Width {
+            Width(text.chars().count() as i32 * size.0 / 2)
+        }
+        fn ascent(&self, size: Width) -> Width {
+            Width(size.0 * 3 / 4)
+        }
+        fn descent(&self, size: Width) -> Width {
+            Width(size.0 / 4)
+        }
+        fn ink(&self, text: &str, size: Width) -> Option<(Width, Width)> {
+            let (above, below) = match text.chars().next() {
+                Some('x') => (450, 0),
+                Some('2') => (640, 0),
+                _ => (750, 250),
+            };
+            Some((Width(size.0 * above / 1000), Width(size.0 * below / 1000)))
+        }
+        fn has(&self, _character: char) -> bool {
+            // Keep letters upright so the test can name the glyph it measured.
+            false
+        }
+    }
+
+    let result = layout("x^2", &MathStyle::default(), &InkMetrics).expect("layout");
     let sup = &result.items[1];
     let style = MathStyle::default();
-    let shift = base.size.0 as i64 * i64::from(style.sup_shift) / 1000;
-    let depth = sup.size.0 as i64 / 4;
-    let gap = base.size.0 as i64 * 80 / 4096;
-    let expected = shift.max(depth + gap);
-    assert_eq!(i64::from(-sup.y.0), expected);
+    let shift = i64::from(result.items[0].size.0) * i64::from(style.sup_shift) / 1000;
+    assert_eq!(i64::from(-sup.y.0), shift);
 }
 
 #[test]
@@ -202,8 +224,15 @@ fn a_radical_draws_a_bar_over_its_body() {
         bar.x.0 >= glyph.x.0 + TestMetrics.advance("√", glyph.size).0 - 1,
         "the bar starts after the radical glyph"
     );
-    // The bar sits at the top of the body and the glyph is stretched.
-    assert!(bar.y.0 <= -TestMetrics.ascent(glyph.size).0 + bar.thickness.0);
+    // The bar sits on the body's ink top, one rule below it. The surd is
+    // chosen to cover the body and may rise above the bar.
+    assert!(
+        bar.y.0 <= -TestMetrics.ascent(Width::EM).0 + bar.thickness.0,
+        "bar {} body ascent {} thickness {}",
+        bar.y.0,
+        TestMetrics.ascent(Width::EM).0,
+        bar.thickness.0
+    );
     assert!(glyph.size.0 >= Width::EM.0, "the radical covers the body");
     assert!(result.total_height().0 >= bar.thickness.0);
 }
@@ -830,4 +859,138 @@ fn an_unknown_colour_is_refused() {
     let error =
         layout("\\color{chartreuse} x", &MathStyle::default(), &TestMetrics).expect_err("rejected");
     assert!(format!("{error:?}").contains("chartreuse"), "{error:?}");
+}
+
+// ---------------------------------------------------------------------------
+// Math v2: classes, TeX spacing, style levels
+// ---------------------------------------------------------------------------
+
+fn at(result: &soma_math::MathLayout, text: &str) -> soma_math::MathItem {
+    result
+        .items
+        .iter()
+        .find(|item| item.text == text)
+        .unwrap_or_else(|| panic!("no item {text:?} in {:?}", result.items))
+        .clone()
+}
+
+#[test]
+fn a_function_name_takes_a_thin_space_before_its_argument() {
+    let result = formula("\\sin x");
+    let sin = at(&result, "sin");
+    let x = at(&result, "x");
+    let name_width = TestMetrics.advance("sin", sin.size).0;
+    let thin = Width::EM.0 * 167 / 1000;
+    assert_eq!(
+        x.x.0,
+        sin.x.0 + name_width + thin,
+        "Op-Ord is 3mu: {:?}",
+        result.items
+    );
+}
+
+#[test]
+fn a_comma_is_followed_by_a_thin_space() {
+    let result = formula("a,b");
+    let a = at(&result, "a");
+    let comma = at(&result, ",");
+    let b = at(&result, "b");
+    let thin = Width::EM.0 * 167 / 1000;
+    assert_eq!(
+        b.x.0,
+        a.x.0 + TestMetrics.advance("a", a.size).0 + TestMetrics.advance(",", comma.size).0 + thin
+    );
+}
+
+#[test]
+fn a_binary_after_a_relation_becomes_an_ord() {
+    let result = formula("x=-1");
+    let eq = at(&result, "=");
+    let minus = at(&result, "-");
+    let one = at(&result, "1");
+    // Rel-Ord is thick (5mu); the Bin is an Ord here, so no medium space.
+    let thick = Width::EM.0 * 278 / 1000;
+    assert_eq!(
+        minus.x.0,
+        eq.x.0 + TestMetrics.advance("=", eq.size).0 + thick,
+        "items: {:?}",
+        result.items
+    );
+    assert_eq!(one.x.0, minus.x.0 + TestMetrics.advance("-", minus.size).0);
+}
+
+#[test]
+fn nested_scripts_stop_at_scriptscript() {
+    let result = formula("x^{y^{z^{w}}}");
+    let mut sizes: Vec<i32> = result.items.iter().map(|item| item.size.0).collect();
+    sizes.dedup();
+    assert_eq!(sizes.len(), 3, "base, script, scriptscript: {sizes:?}");
+    assert!(sizes[1] < sizes[0]);
+    assert!(sizes[2] < sizes[1]);
+    assert!(
+        result.items.last().unwrap().size.0 >= sizes[2],
+        "the fourth level does not shrink again"
+    );
+}
+
+#[test]
+fn a_large_operator_has_a_thin_space_before_its_operand() {
+    let result = formula("\\sum a");
+    let sum = at(&result, "∑");
+    let a = at(&result, "a");
+    let thin = Width::EM.0 * 167 / 1000;
+    assert_eq!(a.x.0, sum.x.0 + TestMetrics.advance("∑", sum.size).0 + thin);
+}
+
+#[test]
+fn a_hat_sits_above_its_body() {
+    let result = formula("\\hat{x}");
+    let hat = at(&result, "ˆ");
+    let x = at(&result, "x");
+    assert!(hat.y.0 < 0, "the accent is above the baseline");
+    assert!(hat.x.0 >= x.x.0);
+}
+
+#[test]
+fn binom_draws_fences_without_a_rule() {
+    let result = formula("\\binom{n}{k}");
+    assert!(result.rules.is_empty(), "a binomial has no fraction bar");
+    assert!(result.items.iter().any(|item| item.text == "("));
+    assert!(result.items.iter().any(|item| item.text == ")"));
+}
+
+#[test]
+fn operatorname_is_an_operator_for_spacing() {
+    let result = formula("\\operatorname{rank} A");
+    let rank = at(&result, "rank");
+    let a = at(&result, "A");
+    let thin = Width::EM.0 * 167 / 1000;
+    assert_eq!(
+        a.x.0,
+        rank.x.0 + TestMetrics.advance("rank", rank.size).0 + thin
+    );
+}
+
+#[test]
+fn overline_draws_one_rule_above_the_body() {
+    let result = formula("\\overline{x}");
+    assert_eq!(result.rules.len(), 1);
+    assert!(result.rules[0].y.0 < 0);
+}
+
+#[test]
+fn nolimits_keeps_them_beside_the_operator() {
+    let stacked = formula("\\sum_{i=1}^{n}");
+    let side = formula("\\sum\\nolimits_{i=1}^{n}");
+    let stacked_n = at(&stacked, "n");
+    let side_n = at(&side, "n");
+    assert!(stacked_n.y.0 < 0 && stacked_n.x.0 < 2000, "limits stack");
+    assert!(side_n.x.0 > 2000, "nolimits puts them to the right");
+}
+
+#[test]
+fn style_commands_change_the_size_of_the_rest() {
+    let result = formula("\\scriptstyle x");
+    let x = at(&result, "x");
+    assert_eq!(x.size.0, Width::EM.0 * 700 / 1000);
 }

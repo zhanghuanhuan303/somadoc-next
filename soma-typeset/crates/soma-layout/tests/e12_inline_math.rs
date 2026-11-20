@@ -251,3 +251,28 @@ fn an_empty_paragraph_of_only_math_is_still_a_paragraph() {
     assert_eq!(block.lines_total, 1);
     assert!(block.height.0 > Width::ZERO.0);
 }
+
+#[test]
+fn a_long_inline_formula_splits_at_relations() {
+    let layout = layout_of(vec![paragraph_with(vec![
+        text("这里"),
+        math("a_1 + a_2 + a_3 + a_4 + a_5 + a_6 + a_7 + a_8 = b"),
+        text("结束"),
+    ])]);
+    let block = &layout.pages[0].blocks[0];
+
+    assert!(
+        block.inline_math.len() >= 2,
+        "a formula wider than half the measure becomes several boxes: {:?}",
+        block.inline_math.len()
+    );
+    let atoms: Vec<u32> = block.inline_math.iter().map(|part| part.atom).collect();
+    let mut sorted = atoms.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted, atoms, "each piece owns one atom");
+    assert!(
+        block.inline_math.iter().all(|part| part.math.width.0 > 0),
+        "every piece has a box"
+    );
+}

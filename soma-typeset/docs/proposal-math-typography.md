@@ -1,6 +1,6 @@
 # 提案：数学排版对标 LaTeX（Math v2）
 
-- 状态：提案（待拍板）
+- 状态：**已拍板并实现**（M1–M7），决策记录见 ADR-0070
 - 日期：2026-11-21
 - 范围：`soma-math`、`soma-layout` 的数学路径、`soma-metrics`（新增 MATH 段）、
   `tools/metrics-gen`、默认模板的数学跳距。**不动行内 K-P 的 DP**。

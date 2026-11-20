@@ -10,7 +10,7 @@
 //!
 //! Both are pure functions of `(table, style)`; no state, no cache, no fonts.
 
-use soma_core::{LineMetrics, Metrics, StyleId, Width};
+use soma_core::{LineMetrics, MathParam, Metrics, StyleId, Width};
 use soma_metrics::{Face, MetricsTable};
 use soma_template::{ComputedStyle, FontWeight, StyledDoc};
 
@@ -75,6 +75,21 @@ impl Metrics for TableMetrics<'_> {
                 leading: Width::ZERO,
             },
             None => self.line_metrics(style),
+        }
+    }
+
+    fn math_param(&self, param: MathParam, _style: StyleId) -> Option<i32> {
+        self.table.math_face()?.math().constant(param.index())
+    }
+
+    fn math_ink(&self, text: &str, _style: StyleId) -> Option<(Width, Width)> {
+        math_ink(self.table.math_face()?, text, self.size)
+    }
+
+    fn math_italic(&self, text: &str, _style: StyleId) -> Width {
+        match self.table.math_face() {
+            Some(face) => math_italic(face, text, self.size),
+            None => Width::ZERO,
         }
     }
 
@@ -261,6 +276,23 @@ impl Metrics for StyledMetrics<'_> {
         }
     }
 
+    fn math_param(&self, param: MathParam, _style: StyleId) -> Option<i32> {
+        self.table.math_face()?.math().constant(param.index())
+    }
+
+    fn math_ink(&self, text: &str, style: StyleId) -> Option<(Width, Width)> {
+        let computed = self.computed(style);
+        math_ink(self.table.math_face()?, text, computed.font_size)
+    }
+
+    fn math_italic(&self, text: &str, style: StyleId) -> Width {
+        let computed = self.computed(style);
+        match self.table.math_face() {
+            Some(face) => math_italic(face, text, computed.font_size),
+            None => Width::ZERO,
+        }
+    }
+
     fn uses_fallback(&self, text: &str, style: StyleId) -> bool {
         let computed = self.computed(style);
         match (self.face_of(&computed), self.face_for(text, &computed)) {
@@ -303,6 +335,39 @@ fn first_codepoint(text: &str) -> Option<u32> {
 /// The last glyph of an atom; its trailing edge is what a line end trims.
 fn last_codepoint(text: &str) -> Option<u32> {
     text.chars().last().map(|character| character as u32)
+}
+
+/// Vertical ink of a math run from the table's per-glyph records, scaled to
+/// `size`. `None` when any character has no record (a Han character inside
+/// `\text`, for example), so the caller falls back to the em box.
+fn math_ink(face: &soma_metrics::Face, text: &str, size: Width) -> Option<(Width, Width)> {
+    let mut above = 0i32;
+    let mut below = 0i32;
+    let mut any = false;
+    for character in text.chars() {
+        let (top, bottom, _) = face.math().glyph(character as u32)?;
+        above = above.max(top);
+        below = below.max(bottom);
+        any = true;
+    }
+    if !any {
+        return None;
+    }
+    Some((
+        Width(scale(above.max(0), size.0)),
+        Width(scale(below.max(0), size.0)),
+    ))
+}
+
+/// Italic correction of a math run's last glyph, scaled to `size`.
+fn math_italic(face: &soma_metrics::Face, text: &str, size: Width) -> Width {
+    let Some(codepoint) = last_codepoint(text) else {
+        return Width::ZERO;
+    };
+    face.math()
+        .glyph(codepoint)
+        .map(|(_, _, italic)| Width(scale(italic, size.0)))
+        .unwrap_or(Width::ZERO)
 }
 
 /// Scale a table value (1/4096 em) by a font size (also 1/4096 em).

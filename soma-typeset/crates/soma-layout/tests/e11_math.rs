@@ -62,8 +62,14 @@ fn superscript_sits_above_the_baseline_and_is_smaller() {
     assert!(sup.y.0 < 0, "superscript lifts above the baseline");
     assert!(sup.size.0 < base.size.0, "scripts are set smaller");
     assert!(sup.x.0 >= base.x.0 + metrics().advance("x", soma_core::StyleId(0)).0);
-    // The raised script must be counted in the ascent, not clipped.
-    assert!(math.baseline.0 > base.size.0);
+    // The raised script must be counted in the ascent, not clipped: the box
+    // top is above the superscript's own baseline.
+    assert!(
+        math.baseline.0 > -sup.y.0,
+        "box top {} vs sup lift {}",
+        math.baseline.0,
+        -sup.y.0
+    );
 }
 
 #[test]

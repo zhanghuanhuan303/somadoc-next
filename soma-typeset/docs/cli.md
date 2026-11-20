@@ -25,7 +25,7 @@ soma --help
 | `--format`, `-f` | `html` (default), `svg`, `json` (canonical page result), or `pdf`. |
 | `--font-fallback` | Optional rescue face for glyphs `--font` lacks. Layout must have measured it: add a `fallback:` face to the metrics table (`tools/metrics-gen --face fallback:normal:<file>`). Without it, missing glyphs render as `.notdef`. |
 | `--hyphenation` | TeX pattern file for Liang hyphenation of Latin words. Omitted: no word is broken. |
-| `--metrics` | `soma.metrics/2` table; omitted uses the embedded Noto table. Version 1 tables still load. A version 2 table built from the PDF font also carries punctuation ink, so layout can land a line end on the ink instead of a class average. |
+| `--metrics` | `soma.metrics/5` table; omitted uses the embedded Noto table. Older versions still load. A version 3+ table carries per-glyph horizontal ink, so layout can land a line end on the ink instead of a class average; version 5 also carries the math face's `MATH` constants and per-glyph vertical ink (ADR-0070). |
 
 `tools/metrics-gen` also audits installed fonts (`--audit <dir>`), writes a fingerprint library (`--fingerprints <csv>`) and recognises an unknown face against one (`--identify <font> --library <csv>`), checks a face against a document's character set (`--coverage`) and ranks rescue faces (`--fallback`). See [`docs/fonts.md`](fonts.md) and [`docs/mixed-font.md`](mixed-font.md). `scripts/fonts.sh` picks a face and writes the table in one step.
 | `--font` | TrueType font for `--format pdf`; `path#index` selects a TTC face. Required for PDF. |

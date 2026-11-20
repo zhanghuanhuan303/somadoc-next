@@ -29,7 +29,7 @@ pub use ir::{
     Align, Atom, AtomKind, Boundary, BoundaryKind, BoundaryRole, Breakability, Decorations, Glue,
     IrError, Paragraph, ParagraphStyle, PunctClass,
 };
-pub use metrics::{GlyphMetrics, LineMetrics, Metrics, StyleId, SyntheticMetrics};
+pub use metrics::{GlyphMetrics, LineMetrics, MathParam, Metrics, StyleId, SyntheticMetrics};
 pub use params::{
     BreakParams, CostParams, FallbackParams, FeatureFlags, ParamError, ParamHash, ParamSet,
     Permille, PresetId, TieBreak, TrimPriority, Weight,

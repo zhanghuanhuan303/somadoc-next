@@ -1,0 +1,68 @@
+\section{间距与原子类}
+
+函数名与变量之间是细空：$\sin x + \cos x$；逗号后是细空：$a,b,c$；二元运算符在关系符后归一化为普通原子：$x = -1$；括号内侧不留空：$f(x)$ 与 $\left(x+y\right)$。
+
+行内公式如果比半行还宽，会在关系符或二元运算符前断开，断行后新行以运算符开头。下面这个公式会占据不止一行：$a_1 + a_2 + a_3 + a_4 + a_5 + a_6 + a_7 + a_8 + a_9 + a_{10} = b_1 + b_2 + b_3$。
+
+\section{分数与根式}
+
+分式的分子按字体的 \texttt{num1} 抬升、分母按 \texttt{denom1} 下沉，净空以墨迹计算：
+
+\[
+\frac{a+b}{c+d} \qquad \frac{\frac{1}{x}+\frac{1}{y}}{x+y} \qquad \frac{\sqrt{\pi}}{2}
+\]
+
+根式的横线压在开方数的墨迹顶上，根号按内容高度选尺寸：
+
+\[
+\sqrt{x} \qquad \sqrt{x+y} \qquad \sqrt[3]{\frac{a}{b}} \qquad \sqrt{1+\sqrt{1+\sqrt{x}}}
+\]
+
+\section{上下标与样式}
+
+上标按 \texttt{sup\_shift} 抬升，斜体字后先退一个斜体修正；嵌套上标到 scriptscript 就停止缩小：
+
+\[
+x^2 + x_i^2 + x^{y^{z^{w}}} + \int_0^1 f(x)\,dx + \sum_{i=1}^{n} a_{ij}
+\]
+
+\section{大算符与极限}
+
+显示样式的求和号把上下限堆在符号上下，积分保持右侧；\texttt{nolimits} 可以改回右侧：
+
+\[
+\sum_{i=1}^{n} a_i \qquad \prod_{k=1}^{m} b_k \qquad \int_0^\infty e^{-x}\,dx \qquad \sum\nolimits_{i=1}^{n} a_i
+\]
+
+\section{定界符、矩阵与对齐}
+
+\[
+\left( \frac{a}{b} \right) \qquad \left[ \begin{matrix} 1 & 2 \\ 3 & 4 \end{matrix} \right] \qquad
+\begin{cases} x & x > 0 \\ 0 & x \le 0 \end{cases}
+\]
+
+\begin{equation}
+\begin{aligned}
+a &= b + c \\
+d &= e - f \\
+g &= h
+\end{aligned}
+\end{equation}
+
+\section{重音、上划线与其他}
+
+\[
+\hat{x} \quad \bar{x} \quad \vec{v} \quad \tilde{n} \quad \widehat{xyz} \quad \overline{a+b} \quad \binom{n}{k} \quad \operatorname{rank} A
+\]
+
+带编号的公式与自定义标签：
+
+\begin{equation}
+E = mc^2
+\end{equation}
+
+\begin{equation}
+\stackrel{def}{=} a+b
+\end{equation}
+
+行内公式也可以带文字：当 $x > 0$ 时 $y = x$，否则 $y = 0$。

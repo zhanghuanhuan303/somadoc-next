@@ -133,6 +133,33 @@ pub trait Metrics: Sync {
         self.line_metrics(style)
     }
 
+    /// One constant from the math face's OpenType `MATH` table, in per-mille of
+    /// one em. `None` means the host has no table; `soma-math` then uses its
+    /// TeX fallback values.
+    ///
+    /// The variant order is the storage order of `soma.metrics`; changing it
+    /// needs a new table version.
+    fn math_param(&self, _param: MathParam, _style: StyleId) -> Option<i32> {
+        None
+    }
+
+    /// Ink extent of a math glyph run at the style's size, in 1/4096 em:
+    /// `(above baseline, below baseline)`. `None` when the host has no outline
+    /// data for every character in `text`.
+    ///
+    /// The math box needs ink, not the font's em box: a radical bar sits on the
+    /// radicand's ink top, a fence is sized by the body's ink, and a fraction
+    /// clears the bar by the numerator's ink depth (Math v2).
+    fn math_ink(&self, _text: &str, _style: StyleId) -> Option<(Width, Width)> {
+        None
+    }
+
+    /// Italic correction of the last glyph in `text`, in 1/4096 em. A
+    /// superscript after a slanted base starts this much further right.
+    fn math_italic(&self, _text: &str, _style: StyleId) -> Width {
+        Width::ZERO
+    }
+
     /// Advance of an unbreakable object atom (`AtomKind::InlineObject`).
     ///
     /// Hosts that typeset objects themselves (inline math, inline images with
@@ -153,6 +180,133 @@ pub trait Metrics: Sync {
     /// Width of a space boundary. Defaults to the advance of `" "`.
     fn space_width(&self, style: StyleId) -> Width {
         self.advance(" ", style)
+    }
+}
+
+/// A constant from the math face's OpenType `MATH` table.
+///
+/// Values are stored in per-mille of one em (a length of 0.677 em is 677; a
+/// percentage of 70% is also 700). The discriminants are the table's storage
+/// order: `soma-metrics` writes them in this order and `tools/metrics-gen`
+/// reads the same names. Adding a variant is a new metrics-table version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u16)]
+pub enum MathParam {
+    /// `MathConstants.axisHeight`.
+    AxisHeight = 0,
+    /// `MathConstants.fractionRuleThickness`.
+    RuleThickness = 1,
+    /// `MathConstants.scriptPercentScaleDown` (percent -> per-mille).
+    ScriptPercent = 2,
+    /// `MathConstants.scriptScriptPercentScaleDown`.
+    ScriptScriptPercent = 3,
+    /// `MathConstants.superscriptShiftUp`.
+    SupShift = 4,
+    /// `MathConstants.superscriptShiftUpCramped`.
+    SupShiftCramped = 5,
+    /// `MathConstants.subscriptShiftDown`.
+    SubShift = 6,
+    /// `MathConstants.superscriptBaselineDropMax`.
+    SupDrop = 7,
+    /// `MathConstants.subscriptBaselineDropMin`.
+    SubDrop = 8,
+    /// `MathConstants.subSuperscriptGapMin`.
+    SubSupGap = 9,
+    /// `MathConstants.superscriptBottomMin`.
+    SupBottomMin = 10,
+    /// `MathConstants.superscriptBottomMaxWithSubscript`.
+    SupBottomMaxWithSub = 11,
+    /// `MathConstants.fractionNumeratorShiftUp`.
+    NumShift = 12,
+    /// `MathConstants.fractionNumeratorDisplayStyleShiftUp`.
+    NumShiftDisplay = 13,
+    /// `MathConstants.fractionDenominatorShiftDown`.
+    DenomShift = 14,
+    /// `MathConstants.fractionDenominatorDisplayStyleShiftDown`.
+    DenomShiftDisplay = 15,
+    /// `MathConstants.fractionNumeratorGapMin`.
+    NumGapMin = 16,
+    /// `MathConstants.fractionDenominatorGapMin`.
+    DenomGapMin = 17,
+    /// `MathConstants.upperLimitGapMin`.
+    LimitAboveGap = 18,
+    /// `MathConstants.upperLimitBaselineRiseMin`.
+    LimitAboveRise = 19,
+    /// `MathConstants.lowerLimitGapMin`.
+    LimitBelowGap = 20,
+    /// `MathConstants.lowerLimitBaselineDropMin`.
+    LimitBelowDrop = 21,
+    /// `MathConstants.radicalRuleThickness`.
+    RadicalRule = 22,
+    /// `MathConstants.radicalExtraAscender`.
+    RadicalExtra = 23,
+    /// `MathConstants.radicalKernBeforeDegree`.
+    RadicalKernBefore = 24,
+    /// `MathConstants.radicalKernAfterDegree`.
+    RadicalKernAfter = 25,
+    /// `MathConstants.radicalDegreeBottomRaisePercent` (percent -> per-mille).
+    RadicalDegreeRaise = 26,
+    /// `MathConstants.displayOperatorMinHeight`.
+    DisplayOperatorMin = 27,
+    /// `MathConstants.overbarVerticalGap`.
+    OverbarGap = 28,
+    /// `MathConstants.overbarRuleThickness`.
+    OverbarRule = 29,
+    /// `MathConstants.overbarExtraAscender`.
+    OverbarExtra = 30,
+    /// `MathConstants.underbarVerticalGap`.
+    UnderbarGap = 31,
+    /// `MathConstants.underbarRuleThickness`.
+    UnderbarRule = 32,
+    /// `MathConstants.underbarExtraDescender`.
+    UnderbarExtra = 33,
+    /// `MathConstants.accentBaseHeight`.
+    AccentBaseHeight = 34,
+}
+
+impl MathParam {
+    pub const COUNT: usize = 35;
+
+    pub const ALL: [Self; Self::COUNT] = [
+        Self::AxisHeight,
+        Self::RuleThickness,
+        Self::ScriptPercent,
+        Self::ScriptScriptPercent,
+        Self::SupShift,
+        Self::SupShiftCramped,
+        Self::SubShift,
+        Self::SupDrop,
+        Self::SubDrop,
+        Self::SubSupGap,
+        Self::SupBottomMin,
+        Self::SupBottomMaxWithSub,
+        Self::NumShift,
+        Self::NumShiftDisplay,
+        Self::DenomShift,
+        Self::DenomShiftDisplay,
+        Self::NumGapMin,
+        Self::DenomGapMin,
+        Self::LimitAboveGap,
+        Self::LimitAboveRise,
+        Self::LimitBelowGap,
+        Self::LimitBelowDrop,
+        Self::RadicalRule,
+        Self::RadicalExtra,
+        Self::RadicalKernBefore,
+        Self::RadicalKernAfter,
+        Self::RadicalDegreeRaise,
+        Self::DisplayOperatorMin,
+        Self::OverbarGap,
+        Self::OverbarRule,
+        Self::OverbarExtra,
+        Self::UnderbarGap,
+        Self::UnderbarRule,
+        Self::UnderbarExtra,
+        Self::AccentBaseHeight,
+    ];
+
+    pub const fn index(self) -> usize {
+        self as usize
     }
 }
 

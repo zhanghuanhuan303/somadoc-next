@@ -204,12 +204,17 @@ styles:
       first-indent: 0
       space-before: 0.6em
       space-after: 0.6em
+  # \abovedisplayskip / \belowdisplayskip at 10pt: 10pt plus 2pt minus 5pt.
   - selector:
       element: mathBlock
     declarations:
       font-size: 10pt
-      space-before: 0.8em
-      space-after: 0.8em
+      space-before: 1em
+      space-before-plus: 0.2em
+      space-before-minus: 0.5em
+      space-after: 1em
+      space-after-plus: 0.2em
+      space-after-minus: 0.5em
 "#;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

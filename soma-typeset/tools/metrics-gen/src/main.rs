@@ -22,7 +22,7 @@ use std::process::ExitCode;
 
 const UNIT: i32 = 4096;
 const MAGIC: u32 = 0x534d_5431; // "SMT1"
-const VERSION: u16 = 4;
+const VERSION: u16 = 5;
 
 /// Codepoint blocks whose advance is expected to be uniform (CJK).
 const UNIFORM_BLOCKS: &[(u32, u32)] = &[
@@ -329,10 +329,10 @@ impl<'a> Font<'a> {
         dict.windows(2).any(|pair| pair == [12, 30])
     }
 
-    /// Horizontal extent of a glyph's outline in font units. `None` for an
-    /// empty glyph (a space), for a composite that points at nothing, or for a
-    /// font whose outlines are CFF rather than `glyf`.
-    fn ink_bounds(&self, gid: u16) -> Result<Option<(i32, i32)>, String> {
+    /// Full outline box of a glyph in font units: `(x_min, y_min, x_max, y_max)`.
+    /// `None` for an empty glyph, a composite that points at nothing, or a CFF
+    /// face.
+    fn ink_box(&self, gid: u16) -> Result<Option<(i32, i32, i32, i32)>, String> {
         let Some((head, _)) = self.table(b"head") else {
             return Ok(None);
         };
@@ -360,9 +360,129 @@ impl<'a> Font<'a> {
         if contours == 0 {
             return Ok(None);
         }
-        let x_min = read_i16(self.data, offset + 2)? as i32;
-        let x_max = read_i16(self.data, offset + 6)? as i32;
-        Ok(Some((x_min, x_max)))
+        Ok(Some((
+            read_i16(self.data, offset + 2)? as i32,
+            read_i16(self.data, offset + 4)? as i32,
+            read_i16(self.data, offset + 6)? as i32,
+            read_i16(self.data, offset + 8)? as i32,
+        )))
+    }
+
+    /// Horizontal extent of a glyph's outline in font units. `None` for an
+    /// empty glyph (a space), for a composite that points at nothing, or for a
+    /// font whose outlines are CFF rather than `glyf`.
+    fn ink_bounds(&self, gid: u16) -> Result<Option<(i32, i32)>, String> {
+        Ok(self
+            .ink_box(gid)?
+            .map(|(x_min, _, x_max, _)| (x_min, x_max)))
+    }
+
+    /// The 35 constants `soma-math` reads, in `soma_core::MathParam` order, as
+    /// per-mille of one em. `None` when the face has no `MATH` table.
+    ///
+    /// OpenType stores four plain fields (`scriptPercentScaleDown`,
+    /// `scriptScriptPercentScaleDown`, `delimitedSubFormulaMinHeight`,
+    /// `displayOperatorMinHeight`), then 51 `MathValueRecord`s (a value plus a
+    /// device-table offset, four bytes each), then `radicalDegreeBottomRaisePercent`
+    /// as a plain `int16` (HarfBuzz reports that last field as enum 55).
+    /// Lengths become per-mille; percentages become percent x 10.
+    fn math_constants(&self, upem: i32) -> Result<Option<Vec<i32>>, String> {
+        let Some((math, _)) = self.table(b"MATH") else {
+            return Ok(None);
+        };
+        let start = math + read_u16(self.data, math + 4)? as usize;
+        let mut position = start;
+        let mut raw = [0i32; 56];
+        raw[0] = read_i16(self.data, position)? as i32;
+        position += 2;
+        raw[1] = read_i16(self.data, position)? as i32;
+        position += 2;
+        raw[2] = read_u16(self.data, position)? as i32;
+        position += 2;
+        raw[3] = read_u16(self.data, position)? as i32;
+        position += 2;
+        for index in 4..55 {
+            raw[index] = read_i16(self.data, position)? as i32;
+            position += 4;
+        }
+        raw[55] = read_i16(self.data, position)? as i32;
+
+        let upem = upem as i64;
+        let length = |value: i32| -> i32 {
+            let numerator = value as i64 * 1000;
+            if numerator >= 0 {
+                ((numerator + upem / 2) / upem) as i32
+            } else {
+                -(((-numerator) + upem / 2) / upem) as i32
+            }
+        };
+        let percent = |value: i32| value * 10;
+        // Indices are HarfBuzz `hb_ot_math_constant_t` values, except 55, the
+        // trailing `radicalDegreeBottomRaisePercent`.
+        // Order must match `soma_core::MathParam`.
+        Ok(Some(vec![
+            length(raw[5]),   // AxisHeight
+            length(raw[38]),  // RuleThickness (fractionRuleThickness)
+            percent(raw[0]),  // ScriptPercent
+            percent(raw[1]),  // ScriptScriptPercent
+            length(raw[11]),  // SupShift
+            length(raw[12]),  // SupShiftCramped
+            length(raw[8]),   // SubShift
+            length(raw[14]),  // SupDrop
+            length(raw[10]),  // SubDrop
+            length(raw[15]),  // SubSupGap
+            length(raw[13]),  // SupBottomMin
+            length(raw[16]),  // SupBottomMaxWithSub
+            length(raw[32]),  // NumShift
+            length(raw[33]),  // NumShiftDisplay
+            length(raw[34]),  // DenomShift
+            length(raw[35]),  // DenomShiftDisplay
+            length(raw[36]),  // NumGapMin
+            length(raw[39]),  // DenomGapMin
+            length(raw[18]),  // LimitAboveGap
+            length(raw[19]),  // LimitAboveRise
+            length(raw[20]),  // LimitBelowGap
+            length(raw[21]),  // LimitBelowDrop
+            length(raw[51]),  // RadicalRule
+            length(raw[52]),  // RadicalExtra
+            length(raw[53]),  // RadicalKernBefore
+            length(raw[54]),  // RadicalKernAfter
+            percent(raw[55]), // RadicalDegreeRaise
+            length(raw[3]),   // DisplayOperatorMin
+            length(raw[43]),  // OverbarGap
+            length(raw[44]),  // OverbarRule
+            length(raw[45]),  // OverbarExtra
+            length(raw[46]),  // UnderbarGap
+            length(raw[47]),  // UnderbarRule
+            length(raw[48]),  // UnderbarExtra
+            length(raw[6]),   // AccentBaseHeight
+        ]))
+    }
+
+    /// Per-glyph italic correction in font units, from `MathGlyphInfo`.
+    fn italic_corrections(&self) -> Result<BTreeMap<u16, i32>, String> {
+        let Some((math, _)) = self.table(b"MATH") else {
+            return Ok(BTreeMap::new());
+        };
+        let glyph_info = read_u16(self.data, math + 6)? as usize;
+        if glyph_info == 0 {
+            return Ok(BTreeMap::new());
+        }
+        let info = math + glyph_info;
+        let italics = read_u16(self.data, info)? as usize;
+        if italics == 0 {
+            return Ok(BTreeMap::new());
+        }
+        let base = info + italics;
+        let coverage = base + read_u16(self.data, base)? as usize;
+        let count = read_u16(self.data, base + 2)? as usize;
+        let glyphs = coverage_glyphs(self.data, coverage)?;
+        let mut out = BTreeMap::new();
+        for (index, gid) in glyphs.into_iter().take(count).enumerate() {
+            let value = read_i16(self.data, base + 4 + index * 4)? as i32;
+            out.insert(gid, value);
+        }
+        Ok(out)
     }
 }
 
@@ -423,6 +543,35 @@ fn read_u32(data: &[u8], offset: usize) -> Result<u32, String> {
     Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
+/// Glyph ids in a coverage table, in coverage-index order.
+fn coverage_glyphs(data: &[u8], offset: usize) -> Result<Vec<u16>, String> {
+    let format = read_u16(data, offset)?;
+    match format {
+        1 => {
+            let count = read_u16(data, offset + 2)? as usize;
+            let mut out = Vec::with_capacity(count);
+            for index in 0..count {
+                out.push(read_u16(data, offset + 4 + index * 2)?);
+            }
+            Ok(out)
+        }
+        2 => {
+            let count = read_u16(data, offset + 2)? as usize;
+            let mut out = Vec::new();
+            for index in 0..count {
+                let record = offset + 4 + index * 6;
+                let start = read_u16(data, record)?;
+                let end = read_u16(data, record + 2)?;
+                for gid in start..=end {
+                    out.push(gid);
+                }
+            }
+            Ok(out)
+        }
+        other => Err(format!("unknown coverage format {other}")),
+    }
+}
+
 fn scale(value: i32, upem: i32) -> i32 {
     let numerator = value as i64 * UNIT as i64;
     let denominator = upem as i64;
@@ -453,6 +602,8 @@ struct OutFace {
     entries: Vec<(u32, i32)>,
     ink: Vec<(u32, i32, i32)>,
     glyph_ink: Vec<(u32, u8, u8)>,
+    math_constants: Vec<i32>,
+    math_glyphs: Vec<(u32, i32, i32, i32)>,
 }
 
 fn main() -> ExitCode {
@@ -1497,8 +1648,37 @@ fn run() -> Result<(), String> {
             .map(|(_, _, advance)| *advance)
             .unwrap_or(UNIT);
 
+        // Math data: only the dedicated math face carries it. A face without a
+        // `MATH` table (or without `glyf`) writes empty sections, and
+        // `soma-math` falls back to its TeX constants.
+        let mut math_constants = Vec::new();
+        let mut math_glyphs: Vec<(u32, i32, i32, i32)> = Vec::new();
+        if spec.family == 2 {
+            if let Some(constants) = font.math_constants(upem)? {
+                math_constants = constants;
+            }
+            if outlines {
+                let italics = font.italic_corrections()?;
+                for (&codepoint, &gid) in &map {
+                    let Some((_, y_min, _, y_max)) = font.ink_box(gid)? else {
+                        continue;
+                    };
+                    let top = scale(y_max, upem).clamp(i16::MIN as i32, i16::MAX as i32);
+                    let bottom = scale(-y_min, upem).clamp(i16::MIN as i32, i16::MAX as i32);
+                    let italic = italics
+                        .get(&gid)
+                        .map(|value| scale(*value, upem))
+                        .unwrap_or(0)
+                        .clamp(i16::MIN as i32, i16::MAX as i32);
+                    math_glyphs.push((codepoint, top, bottom, italic));
+                }
+                math_glyphs.sort_unstable_by_key(|entry| entry.0);
+                math_glyphs.dedup_by_key(|entry| entry.0);
+            }
+        }
+
         println!(
-            "face {}/{}: upem={} ascii-entries={} blocks={} entries={} ink={} glyphs-ink={}",
+            "face {}/{}: upem={} ascii-entries={} blocks={} entries={} ink={} glyphs-ink={} math-constants={} math-glyphs={}",
             spec.family,
             spec.weight,
             upem,
@@ -1506,7 +1686,9 @@ fn run() -> Result<(), String> {
             blocks.len(),
             entries.len(),
             ink.len(),
-            glyph_ink.len()
+            glyph_ink.len(),
+            math_constants.len(),
+            math_glyphs.len()
         );
 
         faces.push(OutFace {
@@ -1521,6 +1703,8 @@ fn run() -> Result<(), String> {
             entries,
             ink,
             glyph_ink,
+            math_constants,
+            math_glyphs,
         });
     }
 
@@ -1569,6 +1753,20 @@ fn run() -> Result<(), String> {
             previous = *cp;
             bytes.push(*left);
             bytes.push(*right);
+        }
+        // Version 5: the MATH constants and every glyph's vertical ink.
+        bytes.extend_from_slice(&(face.math_constants.len() as u16).to_le_bytes());
+        for value in &face.math_constants {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(&(face.math_glyphs.len() as u32).to_le_bytes());
+        let mut previous = 0u32;
+        for (cp, top, bottom, italic) in &face.math_glyphs {
+            write_varint(&mut bytes, cp - previous);
+            previous = *cp;
+            bytes.extend_from_slice(&(*top as i16).to_le_bytes());
+            bytes.extend_from_slice(&(*bottom as i16).to_le_bytes());
+            bytes.extend_from_slice(&(*italic as i16).to_le_bytes());
         }
     }
 

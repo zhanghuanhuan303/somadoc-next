@@ -31,7 +31,7 @@ if [ -z "$pdf_font" ]; then
     done
 fi
 pdf_bold=${SOMA_PDF_FONT_BOLD:-}
-pdf_math=${SOMA_PDF_MATH:-/usr/share/fonts/noto/NotoSansMath-Regular.ttf}
+pdf_math=${SOMA_PDF_MATH:-/usr/share/fonts/TTF/DejaVuMathTeXGyre.ttf}
 
 pdf_metrics=${SOMA_PDF_METRICS:-}
 if [ -z "$pdf_metrics" ] && [ -n "$pdf_font" ] && [ -f "$pdf_font" ]; then

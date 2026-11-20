@@ -155,6 +155,12 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
 - One command (ADR-0029): `soma render --input doc.tex --template book.yaml
   --format html|svg|json|pdf` runs the whole pipeline; `soma check` prints
   layout facts and the canonical hash. See [`docs/cli.md`](docs/cli.md).
+- Math v2 (ADR-0070): TeX's eight atom classes and 8×8 spacing table
+  (`\sin x`, `a,b`, `x = -1`), four style levels with cramping and rule-18
+  scripts, and geometry taken from the math face's `MATH` table plus per-glyph
+  vertical ink: fraction shifts and gaps, a vinculum on the radicand's ink,
+  `\left…\right` sized by ink, accents, `\binom`, `\operatorname`, and
+  inline formulas that break at relations and binaries. `soma.metrics/5`.
 - LaTeX `article` defaults (ADR-0069): without `--template` the CLI uses
   `latex-article` — A4, 10 pt on 12 pt, a 121.3 x 210.2 mm text block, a 1.5 em
   paragraph indent, no paragraph spacing, and a centred folio; without

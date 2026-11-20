@@ -57,9 +57,9 @@ metrics through `MathMetrics`, implemented by `MathAdapter` over the same
 | `\sqrt{x}`, `\sqrt[3]{x}` | stretched `√` glyph plus a bar over the body; the degree is set at script size |
 | `\sum_{i=1}^{n}`, `\prod`, `\lim`, `\sup`, `\inf` | big operator at `big_scale`; limits stack above and below |
 | `\int_0^1`, `\oint` | big operator; limits stay to the right |
-| `\log \ln \exp \sin \cos \tan \max \min` | upright name |
+| `\log \ln \exp \sin \cos \tan \max \min` | upright name, `Op` class (thin space before the argument) |
 | `\text{...}` | raw text at the current size, no math spacing; `$...$` inside it is maths again (`\$` is a literal dollar) |
-| `\,` `\;` `\!` `\quad` `\qquad` | fixed spaces (167/278/-167/1000/2000 permille) |
+| `\,` `\:` `\;` `\!` `\quad` `\qquad` | fixed spaces (167/222/278/-167/1000/2000 permille) |
 | `\left( ... \right)` | fences stretched to the body, centred on it; `()[]\{\}\|`, `\langle`, `\lfloor`, `\lceil` |
 | `\left.`, `\right.` | null delimiter, draws nothing |
 | `\begin{matrix}` / `pmatrix` / `bmatrix` / `vmatrix` | grid of cells; centred columns, fenced as named |
@@ -222,3 +222,44 @@ the curve is steep.
 | `soma-render-html/tests/inline_math.rs` | inline preview positions, marker never drawn |
 | `soma-layout/tests/a6_blocks.rs` | display box vs placeholder |
 | `soma-core/tests/k7_object_metrics.rs` | object hooks vs text paths, default-hook equivalence |
+
+## Math v2 (ADR-0070)
+
+### Classes and spacing
+
+Atoms carry one of TeX's eight classes (`Ord Op Bin Rel Open Close Punct
+Inner`) and `gap()` implements the chapter-18 table: thin 3mu between an
+operator and its operand or after punctuation, medium 4mu around a binary,
+thick 5mu around a relation. Medium and thick spaces vanish in script styles
+(`\nonscript`). A Bin at a list edge, or after Bin/Op/Rel/Open/Punct, becomes
+Ord first, so `\sin x`, `a,b` and `x=-1` get what TeX gives them.
+`\!` is a negative thin space (the documentation used to promise this; the
+parser now does it), and `\:` is a medium space.
+
+### Style levels
+
+`Display`, `Text`, `Script` and `ScriptScript`; script sizes are percentages
+of the formula's base size, so `x^{y^{z^w}}` stops shrinking at
+scriptscript. The denominator of a fraction is cramped. Superscripts follow
+rule 18 (`\sup`/`\sub` shifts, `sup_drop`, `sub_drop`, `sub_sup_gap`,
+`sup_bottom_min`), a single italic glyph contributes its italic correction
+before a script, and a scripted group ends with `\scriptspace`.
+
+### Geometry from the font
+
+`soma.metrics/5` carries the face's `MATH` constants (35 values, per-mille)
+and every glyph's vertical ink plus italic correction. Fractions use the
+font's numerator/denominator shifts with the gap minima; radicals put the
+vinculum on the radicand's ink top and scale the surd until its ink covers
+the body; big operators use `displayOperatorMinHeight` and the limit gaps;
+fences are sized by the body's ink. A table without a math section keeps the
+TeX fallback constants in `MathStyle::default()`.
+
+### Inline breaking
+
+An inline formula wider than half the measure is split at the boundaries
+before relations and binaries. Each piece is an object atom; the boundary
+carries the math spacing as glue and a 500/700 penalty, so a broken line
+starts with the operator and the unbroken line keeps the same spacing. The
+pieces appear in `inline_math` with the same `source` and distinct atom
+indices.

@@ -249,6 +249,10 @@ pub enum SpanKind {
     /// A continuation piece of a hyphenated word: this span starts at a
     /// hyphenation point, so a line may break before it and draw a hyphen.
     Hyphen,
+    /// A break opportunity inside inline math, with the math spacing that the
+    /// boundary carries. `InlineSpan::width` and `::penalty` give the glue and
+    /// the TeX penalty (`\relpenalty`/`\binoppenalty`).
+    MathBreak,
 }
 
 /// One styled run of inline content.
@@ -261,6 +265,10 @@ pub struct InlineSpan<'a> {
     pub decor: Decorations,
     /// Link target, carried to the renderers.
     pub link: Option<&'a str>,
+    /// Glue width for `SpanKind::MathBreak` (zero otherwise).
+    pub width: Width,
+    /// Break penalty for `SpanKind::MathBreak` (zero otherwise).
+    pub penalty: i32,
 }
 
 impl<'a> InlineSpan<'a> {
@@ -271,6 +279,8 @@ impl<'a> InlineSpan<'a> {
             kind: SpanKind::Text,
             decor: Decorations::NONE,
             link: None,
+            width: Width::ZERO,
+            penalty: 0,
         }
     }
 
@@ -281,6 +291,8 @@ impl<'a> InlineSpan<'a> {
             kind: SpanKind::Code,
             decor: Decorations::NONE,
             link: None,
+            width: Width::ZERO,
+            penalty: 0,
         }
     }
 
@@ -291,6 +303,8 @@ impl<'a> InlineSpan<'a> {
             kind: SpanKind::Object,
             decor: Decorations::NONE,
             link: None,
+            width: Width::ZERO,
+            penalty: 0,
         }
     }
 
@@ -301,6 +315,8 @@ impl<'a> InlineSpan<'a> {
             kind: SpanKind::HardBreak,
             decor: Decorations::NONE,
             link: None,
+            width: Width::ZERO,
+            penalty: 0,
         }
     }
 }
@@ -347,6 +363,7 @@ pub fn paragraph_from_spans(
                 builder.join = Join::Hyphen;
                 builder.push_text(span.text, span.style);
             }
+            SpanKind::MathBreak => builder.math_break(span.width, span.penalty),
             SpanKind::HardBreak => builder.hard_break(),
         }
     }
@@ -372,6 +389,8 @@ enum Join {
     Forced,
     /// Start of a continuation piece of a hyphenated word.
     Hyphen,
+    /// A break opportunity inside inline math with its glue and penalty.
+    Math(Width, i32),
 }
 
 impl<'a> Builder<'a> {
@@ -392,6 +411,12 @@ impl<'a> Builder<'a> {
     fn hard_break(&mut self) {
         if !self.atoms.is_empty() {
             self.join = Join::Forced;
+        }
+    }
+
+    fn math_break(&mut self, width: Width, penalty: i32) {
+        if !self.atoms.is_empty() {
+            self.join = Join::Math(width, penalty);
         }
     }
 
@@ -586,6 +611,16 @@ fn push_atom(
                 // Lower than a space but not free: a break inside a word is a
                 // last resort before overfull, not a preferred break.
                 penalty: HYPHEN_PENALTY,
+            },
+            Join::Math(width, penalty) => Boundary {
+                breakable: Breakability::Allowed,
+                kind: BoundaryKind::Normal,
+                role: BoundaryRole::Plain,
+                glue: Glue {
+                    width,
+                    ..Glue::default()
+                },
+                penalty,
             },
         };
         boundaries.push(boundary);

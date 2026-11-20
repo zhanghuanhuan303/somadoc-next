@@ -71,8 +71,12 @@ set -- --out "$out" --face "serif:normal:$pick_path#$pick_index"
 if [ -n "$bold_path" ]; then
     set -- "$@" --face "serif:bold:$bold_path#$pick_index"
 fi
-for math in /usr/share/fonts/noto/NotoSansMath-Regular.ttf \
-    /usr/share/fonts/opentype/noto/NotoSansMath-Regular.ttf; do
+# A serif math face first: it matches a Chinese serif body and, being `glyf`
+# based, lets metrics-gen record per-glyph vertical ink (a CFF math face keeps
+# the MATH constants but no ink).
+for math in /usr/share/fonts/TTF/DejaVuMathTeXGyre.ttf \
+    /usr/share/fonts/libertinus/LibertinusMath-Regular.ttf \
+    /usr/share/fonts/noto/NotoSansMath-Regular.ttf; do
     if [ -f "$math" ]; then
         set -- "$@" --face "math:normal:$math"
         break

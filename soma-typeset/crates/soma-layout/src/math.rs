@@ -12,9 +12,10 @@
 
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec;
 use alloc::vec::Vec;
 
-use soma_core::{GlyphMetrics, LineMetrics, Metrics, StyleId, Width};
+use soma_core::{GlyphMetrics, LineMetrics, MathParam, Metrics, StyleId, Width};
 use soma_math::{MathLayout, MathMetrics, MathStyle};
 use soma_template::ComputedStyle;
 
@@ -59,6 +60,22 @@ impl MathMetrics for MathAdapter<'_> {
     fn has(&self, character: char) -> bool {
         self.metrics.has_glyph(character, self.style)
     }
+
+    fn ink(&self, text: &str, size: Width) -> Option<(Width, Width)> {
+        let (above, below) = self.metrics.math_ink(text, self.style)?;
+        Some((
+            rescale(above, size, self.base),
+            rescale(below, size, self.base),
+        ))
+    }
+
+    fn italic_correction(&self, text: &str, size: Width) -> Width {
+        rescale(self.metrics.math_italic(text, self.style), size, self.base)
+    }
+
+    fn param(&self, param: MathParam) -> Option<Width> {
+        self.metrics.math_param(param, self.style).map(Width)
+    }
 }
 
 /// Layout constants for a display formula at the style's font size.
@@ -96,13 +113,10 @@ pub fn display(
     metrics: &dyn Metrics,
     style: StyleId,
 ) -> Option<MathLayout> {
-    let math_style = style_for(computed);
-    soma_math::layout(
-        source,
-        &math_style,
-        &MathAdapter::new(metrics, style, computed),
-    )
-    .ok()
+    let adapter = MathAdapter::new(metrics, style, computed);
+    let mut math_style = style_for(computed);
+    math_style.apply_params(&adapter);
+    soma_math::layout(source, &math_style, &adapter).ok()
 }
 
 /// Lay out an inline formula in text style. See [`display`] for the error path.
@@ -112,13 +126,10 @@ pub fn display_inline(
     metrics: &dyn Metrics,
     style: StyleId,
 ) -> Option<MathLayout> {
-    let math_style = inline_style_for(computed);
-    soma_math::layout(
-        source,
-        &math_style,
-        &MathAdapter::new(metrics, style, computed),
-    )
-    .ok()
+    let adapter = MathAdapter::new(metrics, style, computed);
+    let mut math_style = inline_style_for(computed);
+    math_style.apply_params(&adapter);
+    soma_math::layout(source, &math_style, &adapter).ok()
 }
 
 /// One inline formula, registered under a marker until the break produces the
@@ -127,6 +138,54 @@ pub struct InlineMath {
     marker: String,
     source: String,
     layout: MathLayout,
+}
+
+/// One piece of an inline formula after splitting at relations/binaries.
+pub struct InlinePart {
+    pub layout: MathLayout,
+    /// Math spacing that the break boundary carries.
+    pub gap: Width,
+    pub penalty: i32,
+}
+
+/// Lay out an inline formula, split at the points TeX allows a line break at
+/// when the whole formula would take more than half the measure.
+///
+/// A short formula is one part, exactly as before Math v2; a long one becomes
+/// a sequence of object atoms with breakable, penalised boundaries between
+/// them.
+pub fn display_inline_parts(
+    source: &str,
+    computed: &ComputedStyle,
+    metrics: &dyn Metrics,
+    style: StyleId,
+    measure: Width,
+) -> Option<Vec<InlinePart>> {
+    let adapter = MathAdapter::new(metrics, style, computed);
+    let mut math_style = inline_style_for(computed);
+    math_style.apply_params(&adapter);
+    let segments = soma_math::segments(source, &math_style).ok()?;
+    let mut parts = Vec::with_capacity(segments.len());
+    let mut total = 0i64;
+    for segment in &segments {
+        let layout = soma_math::lay_out(&segment.nodes, math_style.size, &math_style, &adapter);
+        total += layout.width.0 as i64 + segment.gap.0 as i64;
+        parts.push(InlinePart {
+            layout,
+            gap: segment.gap,
+            penalty: segment.penalty,
+        });
+    }
+    if parts.len() > 1 && total * 2 >= i64::from(measure.0.max(1)) {
+        return Some(parts);
+    }
+    let nodes = soma_math::parse(source).ok()?;
+    let layout = soma_math::lay_out(&nodes, math_style.size, &math_style, &adapter);
+    Some(vec![InlinePart {
+        layout,
+        gap: Width::ZERO,
+        penalty: 0,
+    }])
 }
 
 /// Registry of inline formulas for one paragraph.

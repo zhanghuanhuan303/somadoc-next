@@ -88,6 +88,8 @@ only).
 | [0067](0067-latex-macros.md) | LaTeX macros and counters expanded before parsing | Accepted |
 | [0068](0068-figure-units-and-image-sizes.md) | Figure/caption units, table headers that never stand alone, intrinsic image sizes | Accepted |
 | [0069](0069-latex-article-defaults.md) | The built-in template is LaTeX `article` 10pt; `latex-v1` preset | Accepted |
+| [0070](0070-math-v2.md) | Math v2: TeX atom classes and spacing, `MATH` constants + glyph ink, style levels, inline math breaking | Accepted |
+| [0070](0070-math-v2.md) | Math v2: TeX atom classes and spacing, `MATH` constants + glyph ink, style levels, inline math breaking | Accepted |
 
 ## Rules
 

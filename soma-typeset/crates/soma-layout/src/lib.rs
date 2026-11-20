@@ -842,6 +842,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
         suppress_hang: false,
         defer_index: false,
         index_entries: index.to_vec(),
+        last_line_short: false,
         figure_refs: Vec::new(),
         table_refs: Vec::new(),
     };
@@ -1134,6 +1135,8 @@ struct OwnedSpan {
     kind: SpanKind,
     decor: Decorations,
     link: Option<String>,
+    width: Width,
+    penalty: i32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1551,6 +1554,9 @@ struct Builder<'a> {
     /// Figure and table captions found in this pass, with their flow item.
     figure_refs: Vec<CaptionRef>,
     table_refs: Vec<CaptionRef>,
+    /// The last paragraph ended well before the measure, so a following
+    /// display formula uses TeX's short display skips.
+    last_line_short: bool,
 }
 
 impl Builder<'_> {
@@ -2431,6 +2437,8 @@ impl Builder<'_> {
                 kind: span.kind,
                 decor: span.decor,
                 link: span.link.as_deref(),
+                width: span.width,
+                penalty: span.penalty,
             })
             .collect();
 
@@ -2575,6 +2583,10 @@ impl Builder<'_> {
             }
         }
         let lines_total = placed_lines.len() as u32;
+        let em = self.computed(style_id).font_size;
+        self.last_line_short = placed_lines
+            .last()
+            .is_none_or(|line| line.line.natural_width.0 + 2 * em.0 < inner.0);
 
         Ok(Some(FlowItem {
             height: y,
@@ -2647,6 +2659,8 @@ impl Builder<'_> {
                     kind: span.kind,
                     decor: span.decor,
                     link: span.link.as_deref(),
+                    width: span.width,
+                    penalty: span.penalty,
                 })
                 .collect();
             let paragraph_style = ParagraphStyle {
@@ -2698,6 +2712,8 @@ impl Builder<'_> {
                         kind: SpanKind::Text,
                         decor,
                         link: link.map(String::from),
+                        width: Width::ZERO,
+                        penalty: 0,
                     }),
                 },
                 Inline::Code(node) => out.push(OwnedSpan {
@@ -2706,6 +2722,8 @@ impl Builder<'_> {
                     kind: SpanKind::Code,
                     decor,
                     link: link.map(String::from),
+                    width: Width::ZERO,
+                    penalty: 0,
                 }),
                 Inline::Underline(node) => self.collect(
                     &node.children,
@@ -2759,24 +2777,55 @@ impl Builder<'_> {
                         .unwrap_or_else(|| String::from("\u{fffc}")),
                     decor,
                     link: link.map(String::from),
+                    width: Width::ZERO,
+                    penalty: 0,
                     style,
                     kind: SpanKind::Object,
                 }),
                 Inline::Math(node) => {
-                    // A parsable formula becomes an object atom measured by its
-                    // own box; a malformed one keeps the source text, exactly
-                    // as before ADR-0027.
+                    // A parsable formula becomes object atoms measured by their
+                    // own boxes; a long one is split at relations and binaries
+                    // so the paragraph can break inside it (Math v2). A
+                    // malformed formula keeps the source text, as before.
                     let computed = self.computed(style);
-                    match math::display_inline(&node.source, &computed, self.metrics, style) {
-                        Some(layout) => {
-                            let marker = objects.push(&node.source, layout);
-                            out.push(OwnedSpan {
-                                text: marker,
-                                style,
-                                kind: SpanKind::Object,
-                                decor,
-                                link: link.map(String::from),
-                            });
+                    let measure = Width(
+                        self.content_width.0
+                            - computed.indent_left.0
+                            - computed.indent_right.0
+                            - self.extra_left.0
+                            - self.extra_right.0,
+                    );
+                    match math::display_inline_parts(
+                        &node.source,
+                        &computed,
+                        self.metrics,
+                        style,
+                        measure,
+                    ) {
+                        Some(parts) => {
+                            for (index, part) in parts.into_iter().enumerate() {
+                                if index > 0 {
+                                    out.push(OwnedSpan {
+                                        text: String::new(),
+                                        style,
+                                        kind: SpanKind::MathBreak,
+                                        decor,
+                                        link: link.map(String::from),
+                                        width: part.gap,
+                                        penalty: part.penalty,
+                                    });
+                                }
+                                let marker = objects.push(&node.source, part.layout);
+                                out.push(OwnedSpan {
+                                    text: marker,
+                                    style,
+                                    kind: SpanKind::Object,
+                                    decor,
+                                    link: link.map(String::from),
+                                    width: Width::ZERO,
+                                    penalty: 0,
+                                });
+                            }
                         }
                         None => out.push(OwnedSpan {
                             text: node.source.clone(),
@@ -2784,6 +2833,8 @@ impl Builder<'_> {
                             kind: SpanKind::Object,
                             decor,
                             link: link.map(String::from),
+                            width: Width::ZERO,
+                            penalty: 0,
                         }),
                     }
                 }
@@ -2801,6 +2852,8 @@ impl Builder<'_> {
                         kind: SpanKind::Object,
                         decor,
                         link: link.map(String::from),
+                        width: Width::ZERO,
+                        penalty: 0,
                     });
                 }
                 Inline::Ruby(node) => {
@@ -2811,6 +2864,8 @@ impl Builder<'_> {
                         kind: SpanKind::Ruby,
                         decor,
                         link: link.map(String::from),
+                        width: Width::ZERO,
+                        penalty: 0,
                     });
                 }
                 Inline::Index(node) => self.pending_index.push(index::parse(&node.term)),
@@ -2820,10 +2875,14 @@ impl Builder<'_> {
                     kind: SpanKind::HardBreak,
                     decor,
                     link: link.map(String::from),
+                    width: Width::ZERO,
+                    penalty: 0,
                 }),
                 Inline::Raw(node) => out.push(OwnedSpan {
                     decor,
                     link: link.map(String::from),
+                    width: Width::ZERO,
+                    penalty: 0,
                     text: if node.content.fallback.is_empty() {
                         node.content.value.clone()
                     } else {
@@ -3671,10 +3730,24 @@ impl Builder<'_> {
                 }
             }
         }
+        // A short line before a display uses TeX's short skips: no space above
+        // and 70% of the normal space below. The template's own glue still
+        // scales, so a designer can change the base values.
+        let mut before = self.before_glue(&computed);
+        let mut after = self.after_glue(&computed);
+        if self.last_line_short {
+            before = Glue::ZERO;
+            after = Glue {
+                width: Width(after.width.0 * 7 / 10),
+                plus: Width(after.plus.0 * 7 / 10),
+                minus: Width(after.minus.0 * 7 / 10),
+            };
+        }
+        self.last_line_short = false;
         Some(FlowItem {
             height,
-            before: self.before_glue(&computed),
-            after: self.after_glue(&computed),
+            before,
+            after,
             keep_with_next: computed.keep_with_next,
             page_break_before: computed.page_break_before,
             forced_break: false,
@@ -3841,6 +3914,8 @@ fn push_hyphenated_text(
                 kind,
                 decor,
                 link: link.map(String::from),
+                width: Width::ZERO,
+                penalty: 0,
             });
             cursor = cut;
             kind = SpanKind::Hyphen;
@@ -3851,6 +3926,8 @@ fn push_hyphenated_text(
             kind,
             decor,
             link: link.map(String::from),
+            width: Width::ZERO,
+            penalty: 0,
         });
         return;
     }
@@ -3860,6 +3937,8 @@ fn push_hyphenated_text(
         kind: SpanKind::Text,
         decor,
         link: link.map(String::from),
+        width: Width::ZERO,
+        penalty: 0,
     });
 }
 

@@ -24,7 +24,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
 
-use soma_core::Width;
+use soma_core::{MathParam, Width};
 
 /// Advances and vertical metrics for math glyphs at a given size.
 pub trait MathMetrics {
@@ -34,6 +34,24 @@ pub trait MathMetrics {
     fn ascent(&self, size: Width) -> Width;
     /// Descent of the font at `size` (below the baseline).
     fn descent(&self, size: Width) -> Width;
+
+    /// Ink extent of a run at `size`: `(above baseline, below baseline)`.
+    /// `None` when the host has no per-glyph outline data; callers then use
+    /// the face's em box.
+    fn ink(&self, _text: &str, _size: Width) -> Option<(Width, Width)> {
+        None
+    }
+
+    /// Italic correction of the run's last glyph at `size`.
+    fn italic_correction(&self, _text: &str, _size: Width) -> Width {
+        Width::ZERO
+    }
+
+    /// One `MATH` constant, in per-mille of one em. `None` when the face has
+    /// no `MATH` table and the style's TeX fallback should be kept.
+    fn param(&self, _param: MathParam) -> Option<Width> {
+        None
+    }
 
     /// Whether the face has a glyph for `character`. Used to decide whether a
     /// variable may be set in the Mathematical Italic block (U+1D434…): a face
@@ -117,6 +135,10 @@ fn italic_letter(character: char) -> Option<char> {
 }
 
 /// Math layout constants. Scales are permille of the base size.
+///
+/// The defaults are TeX's Latin Modern values, so a host without a `MATH`
+/// table still gets TeX geometry. [`Self::apply_params`] replaces them with
+/// the face's own constants when the metrics source has them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MathStyle {
     pub size: Width,
@@ -126,48 +148,137 @@ pub struct MathStyle {
     pub script_scale: u16,
     pub scriptscript_scale: u16,
     pub sup_shift: u16,
+    pub sup_shift_cramped: u16,
     pub sub_shift: u16,
+    pub sup_drop: u16,
+    pub sub_drop: u16,
+    pub sub_sup_gap: u16,
+    pub sup_bottom_min: u16,
+    pub sup_bottom_max_sub: u16,
     pub axis_height: u16,
     pub rule_thickness: u16,
-    pub frac_gap: u16,
+    pub num_shift: u16,
+    pub num_shift_display: u16,
+    pub denom_shift: u16,
+    pub denom_shift_display: u16,
+    pub num_gap: u16,
+    pub denom_gap: u16,
+    pub limit_above_gap: u16,
+    pub limit_above_rise: u16,
+    pub limit_below_gap: u16,
+    pub limit_below_drop: u16,
+    pub radical_rule: u16,
+    pub radical_extra: u16,
+    pub radical_kern_before: u16,
+    pub radical_kern_after: u16,
+    pub radical_degree_raise: u16,
+    pub display_operator_min: u16,
+    pub overbar_gap: u16,
+    pub overbar_rule: u16,
+    pub overbar_extra: u16,
+    pub underbar_gap: u16,
+    pub underbar_rule: u16,
+    pub underbar_extra: u16,
+    pub accent_base_height: u16,
+    /// Space between two rows of an `aligned`/`matrix` (`\jot`, 3pt).
+    pub jot: u16,
+    /// Space after a script before the next atom (`\scriptspace`).
+    pub script_space: u16,
+    /// Gap for stacked boxes (`\substack`, brace labels).
+    pub stack_gap: u16,
     pub bin_gap: u16,
     pub rel_gap: u16,
     pub punct_gap: u16,
-    /// Size of a big operator (`\sum`, `\int`, `\prod`) as permille of the
-    /// surrounding size.
-    pub big_scale: u16,
-    /// Fraction numerator/denominator scale in text style.
-    pub text_frac_scale: u16,
-    /// Gap around a fraction bar in text style.
-    pub text_frac_gap: u16,
-    /// Big-operator scale in text style.
-    pub text_big_scale: u16,
 }
 
 impl MathStyle {
-    /// Numerator/denominator scale: full size in display, script size inline.
-    fn fraction_scale(&self) -> u16 {
-        if self.display {
-            1000
-        } else {
-            self.text_frac_scale
-        }
-    }
-
-    fn fraction_gap(&self) -> u16 {
-        if self.display {
-            self.frac_gap
-        } else {
-            self.text_frac_gap
-        }
-    }
-
-    fn big_per_mille(&self) -> u16 {
-        if self.display {
-            self.big_scale
-        } else {
-            self.text_big_scale
-        }
+    /// Replace the TeX fallback constants with the face's `MATH` values.
+    /// Zero counts as "no value" for a length, and a zero percentage keeps
+    /// the fallback.
+    pub fn apply_params(&mut self, metrics: &dyn MathMetrics) {
+        let set = |param: MathParam, slot: &mut u16, allow_zero: bool| {
+            if let Some(value) = metrics.param(param) {
+                let value = value.0.clamp(0, u16::MAX as i32) as u16;
+                if allow_zero || value > 0 {
+                    *slot = value;
+                }
+            }
+        };
+        set(MathParam::ScriptPercent, &mut self.script_scale, false);
+        set(
+            MathParam::ScriptScriptPercent,
+            &mut self.scriptscript_scale,
+            false,
+        );
+        set(MathParam::AxisHeight, &mut self.axis_height, true);
+        set(MathParam::RuleThickness, &mut self.rule_thickness, false);
+        set(MathParam::SupShift, &mut self.sup_shift, true);
+        set(
+            MathParam::SupShiftCramped,
+            &mut self.sup_shift_cramped,
+            true,
+        );
+        set(MathParam::SubShift, &mut self.sub_shift, true);
+        set(MathParam::SupDrop, &mut self.sup_drop, true);
+        set(MathParam::SubDrop, &mut self.sub_drop, true);
+        set(MathParam::SubSupGap, &mut self.sub_sup_gap, true);
+        set(MathParam::SupBottomMin, &mut self.sup_bottom_min, true);
+        set(
+            MathParam::SupBottomMaxWithSub,
+            &mut self.sup_bottom_max_sub,
+            true,
+        );
+        set(MathParam::NumShift, &mut self.num_shift, true);
+        set(
+            MathParam::NumShiftDisplay,
+            &mut self.num_shift_display,
+            true,
+        );
+        set(MathParam::DenomShift, &mut self.denom_shift, true);
+        set(
+            MathParam::DenomShiftDisplay,
+            &mut self.denom_shift_display,
+            true,
+        );
+        set(MathParam::NumGapMin, &mut self.num_gap, true);
+        set(MathParam::DenomGapMin, &mut self.denom_gap, true);
+        set(MathParam::LimitAboveGap, &mut self.limit_above_gap, true);
+        set(MathParam::LimitAboveRise, &mut self.limit_above_rise, true);
+        set(MathParam::LimitBelowGap, &mut self.limit_below_gap, true);
+        set(MathParam::LimitBelowDrop, &mut self.limit_below_drop, true);
+        set(MathParam::RadicalRule, &mut self.radical_rule, false);
+        set(MathParam::RadicalExtra, &mut self.radical_extra, true);
+        set(
+            MathParam::RadicalKernBefore,
+            &mut self.radical_kern_before,
+            true,
+        );
+        set(
+            MathParam::RadicalKernAfter,
+            &mut self.radical_kern_after,
+            true,
+        );
+        set(
+            MathParam::RadicalDegreeRaise,
+            &mut self.radical_degree_raise,
+            false,
+        );
+        set(
+            MathParam::DisplayOperatorMin,
+            &mut self.display_operator_min,
+            false,
+        );
+        set(MathParam::OverbarGap, &mut self.overbar_gap, true);
+        set(MathParam::OverbarRule, &mut self.overbar_rule, false);
+        set(MathParam::OverbarExtra, &mut self.overbar_extra, true);
+        set(MathParam::UnderbarGap, &mut self.underbar_gap, true);
+        set(MathParam::UnderbarRule, &mut self.underbar_rule, false);
+        set(MathParam::UnderbarExtra, &mut self.underbar_extra, true);
+        set(
+            MathParam::AccentBaseHeight,
+            &mut self.accent_base_height,
+            true,
+        );
     }
 }
 
@@ -178,18 +289,45 @@ impl Default for MathStyle {
             display: true,
             script_scale: 700,
             scriptscript_scale: 500,
-            sup_shift: 400,
-            sub_shift: 200,
+            sup_shift: 363,
+            sup_shift_cramped: 289,
+            sub_shift: 247,
+            sup_drop: 250,
+            sub_drop: 200,
+            sub_sup_gap: 160,
+            sup_bottom_min: 108,
+            sup_bottom_max_sub: 344,
             axis_height: 250,
             rule_thickness: 40,
-            frac_gap: 120,
-            bin_gap: 220,
-            rel_gap: 280,
-            punct_gap: 170,
-            big_scale: 1400,
-            text_frac_scale: 700,
-            text_frac_gap: 80,
-            text_big_scale: 1100,
+            num_shift: 394,
+            num_shift_display: 677,
+            denom_shift: 345,
+            denom_shift_display: 686,
+            num_gap: 40,
+            denom_gap: 120,
+            limit_above_gap: 200,
+            limit_above_rise: 111,
+            limit_below_gap: 167,
+            limit_below_drop: 600,
+            radical_rule: 40,
+            radical_extra: 40,
+            radical_kern_before: 278,
+            radical_kern_after: 0,
+            radical_degree_raise: 600,
+            display_operator_min: 1300,
+            overbar_gap: 120,
+            overbar_rule: 40,
+            overbar_extra: 40,
+            underbar_gap: 120,
+            underbar_rule: 40,
+            underbar_extra: 40,
+            accent_base_height: 450,
+            jot: 300,
+            script_space: 50,
+            stack_gap: 120,
+            bin_gap: 222,
+            rel_gap: 278,
+            punct_gap: 167,
         }
     }
 }
@@ -283,11 +421,15 @@ impl core::error::Error for MathError {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Class {
     Ord,
+    /// A large operator or an upright function name (`\sum`, `\sin`).
+    Op,
     Bin,
     Rel,
     Open,
     Close,
     Punct,
+    /// A fraction, a binomial, or a `\left…\right` group.
+    Inner,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -303,6 +445,8 @@ pub enum Node {
     Fraction {
         numerator: Box<Node>,
         denominator: Box<Node>,
+        /// `\binom` draws no rule; everything else is a fraction.
+        rule: bool,
     },
     Script {
         base: Box<Node>,
@@ -358,7 +502,64 @@ pub enum Node {
     },
     /// `\notag` / `\nonumber`: this row takes no number.
     NoTag,
-    Space(u16),
+    /// `\hat`, `\bar`, `\vec`, `\tilde`, `\widehat`: a mark above the body.
+    Accent {
+        mark: &'static str,
+        body: Box<Node>,
+        wide: bool,
+    },
+    /// `\overline` / `\underline`: one rule over/under the body.
+    Bar {
+        body: Box<Node>,
+        over: bool,
+    },
+    /// `\operatorname{...}` / `\operatorname*{...}`: upright text as an Op.
+    OpName {
+        text: String,
+        limits: bool,
+        sup: Option<Box<Node>>,
+        sub: Option<Box<Node>>,
+    },
+    /// `\mathop{...}` and friends: force the spacing class.
+    Classed {
+        class: Class,
+        body: Box<Node>,
+    },
+    /// `\stackrel{over}{base}`: a script-size label above a base.
+    Stack {
+        over: Box<Node>,
+        base: Box<Node>,
+    },
+    /// `\displaystyle` and friends: the rest of the group in another style.
+    Style {
+        level: StyleLevel,
+        body: Vec<Node>,
+    },
+    /// `\middle|` inside `\left…\right`: a delimiter at the group's size.
+    Middle(String),
+    Space(i32),
+}
+
+/// TeX's four math styles. A script inside a script stays at ScriptScript.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StyleLevel {
+    Display,
+    Text,
+    Script,
+    ScriptScript,
+}
+
+impl StyleLevel {
+    fn script(self) -> Self {
+        match self {
+            Self::Display | Self::Text => Self::Script,
+            Self::Script | Self::ScriptScript => Self::ScriptScript,
+        }
+    }
+
+    fn is_script(self) -> bool {
+        matches!(self, Self::Script | Self::ScriptScript)
+    }
 }
 
 /// What a formula row does about its number.
@@ -397,23 +598,66 @@ pub enum MatrixKind {
 }
 
 impl Node {
+    /// The class of this node when it stands alone. A group takes the class of
+    /// its first meaningful child; use [`Self::last_class`] for the right-hand
+    /// side of a spacing pair.
     fn class(&self) -> Class {
         match self {
             Self::Symbol { class, .. } => *class,
-            Self::Group(_) => Class::Ord,
-            Self::Fraction { .. } => Class::Ord,
-            Self::Script { base, .. } => base.class(),
+            Self::Group(_) | Self::Style { .. } | Self::Color { .. } => self.first_class(),
+            Self::Fraction { .. } => Class::Inner,
+            Self::Script { base, .. } => base.last_class(),
             Self::Radical { .. } => Class::Ord,
-            Self::Big { .. } => Class::Ord,
-            Self::Delimited { .. } => Class::Ord,
+            Self::Big { .. } => Class::Op,
+            Self::Delimited { .. } => Class::Inner,
             Self::Matrix { .. } => Class::Ord,
             Self::Space(_) => Class::Ord,
             Self::Letter(_) => Class::Ord,
             Self::Substack(_) => Class::Ord,
             Self::Brace { .. } => Class::Ord,
-            Self::Color { .. } => Class::Ord,
             Self::Tag { .. } | Self::NoTag => Class::Ord,
+            Self::Accent { .. } => Class::Ord,
+            Self::Bar { .. } => Class::Ord,
+            Self::OpName { .. } => Class::Op,
+            Self::Classed { class, .. } => *class,
+            Self::Stack { .. } => Class::Ord,
+            Self::Middle(_) => Class::Ord,
         }
+    }
+
+    fn first_class(&self) -> Class {
+        match self {
+            Self::Group(nodes)
+            | Self::Style { body: nodes, .. }
+            | Self::Color { body: nodes, .. } => nodes
+                .iter()
+                .find(|node| {
+                    !matches!(node, Self::Tag { .. } | Self::NoTag) && !node.is_empty_group()
+                })
+                .map(Node::first_class)
+                .unwrap_or(Class::Ord),
+            _ => self.class(),
+        }
+    }
+
+    fn last_class(&self) -> Class {
+        match self {
+            Self::Group(nodes)
+            | Self::Style { body: nodes, .. }
+            | Self::Color { body: nodes, .. } => nodes
+                .iter()
+                .rev()
+                .find(|node| {
+                    !matches!(node, Self::Tag { .. } | Self::NoTag) && !node.is_empty_group()
+                })
+                .map(Node::last_class)
+                .unwrap_or(Class::Ord),
+            _ => self.class(),
+        }
+    }
+
+    fn is_empty_group(&self) -> bool {
+        matches!(self, Self::Group(nodes) if nodes.is_empty())
     }
 }
 
@@ -502,6 +746,25 @@ impl Parser {
                     }
                     let (base, mut sup, mut sub) = match base {
                         Node::Script { base, sup, sub } => (base, sup, sub),
+                        Node::OpName {
+                            text,
+                            limits,
+                            sup,
+                            sub,
+                        } => {
+                            let (sup, sub) = if marker == '^' {
+                                (Some(Box::new(argument)), sub)
+                            } else {
+                                (sup, Some(Box::new(argument)))
+                            };
+                            nodes.push(Node::OpName {
+                                text,
+                                limits,
+                                sup,
+                                sub,
+                            });
+                            continue;
+                        }
                         other => (Box::new(other), None, None),
                     };
                     if marker == '^' {
@@ -521,7 +784,69 @@ impl Parser {
                             nodes.push(Node::Fraction {
                                 numerator: Box::new(numerator),
                                 denominator: Box::new(denominator),
+                                rule: true,
                             });
+                        }
+                        "binom" => {
+                            let numerator = self.parse_group()?;
+                            let denominator = self.parse_group()?;
+                            nodes.push(Node::Delimited {
+                                left: String::from("("),
+                                body: Box::new(Node::Fraction {
+                                    numerator: Box::new(numerator),
+                                    denominator: Box::new(denominator),
+                                    rule: false,
+                                }),
+                                right: String::from(")"),
+                            });
+                        }
+                        "dfrac" | "cfrac" | "tfrac" => {
+                            let numerator = self.parse_group()?;
+                            let denominator = self.parse_group()?;
+                            let level = if command == "tfrac" {
+                                StyleLevel::Text
+                            } else {
+                                StyleLevel::Display
+                            };
+                            nodes.push(Node::Style {
+                                level,
+                                body: alloc::vec![Node::Fraction {
+                                    numerator: Box::new(numerator),
+                                    denominator: Box::new(denominator),
+                                    rule: true,
+                                }],
+                            });
+                        }
+                        "genfrac" => {
+                            let left = self.read_raw_group()?;
+                            let right = self.read_raw_group()?;
+                            let thickness = self.read_raw_group()?;
+                            let _style = self.read_raw_group()?;
+                            let numerator = self.parse_group()?;
+                            let denominator = self.parse_group()?;
+                            let rule = !thickness.trim().is_empty() && thickness.trim() != "0";
+                            let fraction = Node::Fraction {
+                                numerator: Box::new(numerator),
+                                denominator: Box::new(denominator),
+                                rule,
+                            };
+                            if left.trim().is_empty() && right.trim().is_empty() {
+                                nodes.push(fraction);
+                            } else {
+                                nodes.push(Node::Delimited {
+                                    left: if left.trim().is_empty() {
+                                        String::new()
+                                    } else {
+                                        left.trim().to_string()
+                                    },
+                                    body: Box::new(fraction),
+                                    right: if right.trim().is_empty() {
+                                        String::new()
+                                    } else {
+                                        right.trim().to_string()
+                                    },
+                                });
+                            }
                         }
                         "sqrt" => {
                             let index = self.parse_optional_degree()?;
@@ -607,15 +932,110 @@ impl Parser {
                                 sub: None,
                             });
                         }
-                        "log" | "ln" | "exp" | "sin" | "cos" | "tan" | "max" | "min" => {
+                        "log" | "ln" | "exp" | "sin" | "cos" | "tan" | "max" | "min" | "det"
+                        | "gcd" | "deg" | "arg" | "ker" | "hom" => {
                             nodes.push(Node::Symbol {
                                 text: command,
-                                class: Class::Ord,
+                                class: Class::Op,
                             });
                         }
+                        "operatorname" => {
+                            self.skip_spaces();
+                            let star = if self.peek() == Some('*') {
+                                self.pos += 1;
+                                true
+                            } else {
+                                false
+                            };
+                            let text = self.read_raw_group()?;
+                            nodes.push(Node::OpName {
+                                text,
+                                limits: star,
+                                sup: None,
+                                sub: None,
+                            });
+                        }
+                        "limits" | "nolimits" => {
+                            let want = command == "limits";
+                            if let Some(last) = nodes.last_mut() {
+                                match last {
+                                    Node::Big { stacked, .. } => *stacked = want,
+                                    Node::OpName { limits, .. } => *limits = want,
+                                    _ => {}
+                                }
+                            }
+                        }
+                        "mathop" | "mathbin" | "mathrel" | "mathopen" | "mathclose"
+                        | "mathpunct" | "mathinner" | "mathord" => {
+                            let class = match command.as_str() {
+                                "mathop" => Class::Op,
+                                "mathbin" => Class::Bin,
+                                "mathrel" => Class::Rel,
+                                "mathopen" => Class::Open,
+                                "mathclose" => Class::Close,
+                                "mathpunct" => Class::Punct,
+                                "mathinner" => Class::Inner,
+                                _ => Class::Ord,
+                            };
+                            let body = self.parse_group()?;
+                            nodes.push(Node::Classed {
+                                class,
+                                body: Box::new(body),
+                            });
+                        }
+                        "hat" | "widehat" | "bar" | "vec" | "tilde" => {
+                            let body = self.parse_group()?;
+                            let (mark, wide) = match command.as_str() {
+                                "hat" => ("\u{2c6}", false),
+                                "widehat" => ("\u{2c6}", true),
+                                "bar" => ("\u{af}", false),
+                                "vec" => ("\u{20d7}", false),
+                                _ => ("\u{2dc}", false),
+                            };
+                            nodes.push(Node::Accent {
+                                mark,
+                                body: Box::new(body),
+                                wide,
+                            });
+                        }
+                        "overline" | "underline" => {
+                            let body = self.parse_group()?;
+                            nodes.push(Node::Bar {
+                                body: Box::new(body),
+                                over: command == "overline",
+                            });
+                        }
+                        "stackrel" => {
+                            let over = self.parse_group()?;
+                            let base = self.parse_group()?;
+                            nodes.push(Node::Stack {
+                                over: Box::new(over),
+                                base: Box::new(base),
+                            });
+                        }
+                        "displaystyle" | "textstyle" | "scriptstyle" | "scriptscriptstyle" => {
+                            let level = match command.as_str() {
+                                "displaystyle" => StyleLevel::Display,
+                                "textstyle" => StyleLevel::Text,
+                                "scriptstyle" => StyleLevel::Script,
+                                _ => StyleLevel::ScriptScript,
+                            };
+                            let body = self.parse_list(in_group)?;
+                            nodes.push(Node::Style { level, body });
+                            return Ok(nodes);
+                        }
+                        "middle" => {
+                            let text = self.read_delimiter_text()?;
+                            if !text.is_empty() {
+                                nodes.push(Node::Middle(text));
+                            }
+                        }
                         "," => nodes.push(Node::Space(167)),
+                        ":" => nodes.push(Node::Space(222)),
                         ";" => nodes.push(Node::Space(278)),
-                        "!" => nodes.push(Node::Space(0)),
+                        "!" => nodes.push(Node::Space(-167)),
+                        "thinspace" => nodes.push(Node::Space(167)),
+                        "negthinspace" => nodes.push(Node::Space(-167)),
                         "quad" => nodes.push(Node::Space(1000)),
                         "qquad" => nodes.push(Node::Space(2000)),
                         "overbrace" | "underbrace" => {
@@ -856,6 +1276,39 @@ impl Parser {
         self.skip_spaces();
         match self.peek() {
             Some('{') => self.parse_group(),
+            Some('\\') => {
+                self.pos += 1;
+                let command = self.read_command();
+                if let Some(text) = symbol(&command) {
+                    return Ok(Node::Symbol {
+                        text: text.to_string(),
+                        class: class_of(text),
+                    });
+                }
+                if matches!(
+                    command.as_str(),
+                    "log"
+                        | "ln"
+                        | "exp"
+                        | "sin"
+                        | "cos"
+                        | "tan"
+                        | "max"
+                        | "min"
+                        | "det"
+                        | "gcd"
+                        | "deg"
+                        | "arg"
+                        | "ker"
+                        | "hom"
+                ) {
+                    return Ok(Node::Symbol {
+                        text: command,
+                        class: Class::Op,
+                    });
+                }
+                Err(MathError::UnsupportedCommand(command))
+            }
             Some(_) => {
                 let character = self.bump().expect("peeked");
                 Ok(Node::Symbol {
@@ -1144,6 +1597,63 @@ pub fn layout(
     Ok(lay_out(&nodes, style.size, style, metrics))
 }
 
+/// One piece of an inline formula that may sit on its own line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Segment {
+    pub nodes: Vec<Node>,
+    /// Space before this piece, already scaled to the formula's base size.
+    /// The first piece has zero.
+    pub gap: Width,
+    /// Cost of breaking before this piece (`\relpenalty` / `\binoppenalty`).
+    pub penalty: i32,
+}
+
+/// Split a formula at the relations and binaries TeX allows a line break at.
+///
+/// The split points are the boundaries *before* a Rel or a Bin (after Bin
+/// normalisation), so a broken line starts with the operator. The spacing that
+/// the boundary removes from the line is returned so the caller can put it back
+/// as inter-atom glue.
+pub fn segments(source: &str, style: &MathStyle) -> Result<Vec<Segment>, MathError> {
+    let nodes = parse(source)?;
+    let (lefts, rights) = effective_classes(&nodes);
+    let mut starts = alloc::vec![0usize];
+    for index in 1..nodes.len() {
+        if matches!(rights[index], Class::Rel | Class::Bin)
+            && !matches!(lefts[index - 1], Class::Open | Class::Punct)
+        {
+            starts.push(index);
+        }
+    }
+    let mut out = Vec::with_capacity(starts.len());
+    for (part, &start) in starts.iter().enumerate() {
+        let end = starts.get(part + 1).copied().unwrap_or(nodes.len());
+        let (gap, penalty) = if part == 0 {
+            (Width::ZERO, 0)
+        } else {
+            let gap = gap(
+                lefts[start - 1],
+                rights[start],
+                StyleLevel::Text,
+                style,
+                style.size,
+            );
+            let penalty = if rights[start] == Class::Rel {
+                500
+            } else {
+                700
+            };
+            (Width(gap), penalty)
+        };
+        out.push(Segment {
+            nodes: nodes[start..end].to_vec(),
+            gap,
+            penalty,
+        });
+    }
+    Ok(out)
+}
+
 /// Lay out a parsed node list at `size`.
 pub fn lay_out(
     nodes: &[Node],
@@ -1160,23 +1670,30 @@ pub fn lay_out(
         number: RowNumber::Auto,
         matrix_depth: 0,
         cursor: 0,
+        base_size: style.size,
+        level: if style.display {
+            StyleLevel::Display
+        } else {
+            StyleLevel::Text
+        },
+        cramped: false,
+        fence_size: None,
     };
-    let mut previous: Option<Class> = None;
-    for node in nodes {
-        let class = node.class();
-        if let Some(left) = previous {
-            context.cursor += gap(left, class, style, size);
+    let (lefts, rights) = effective_classes(nodes);
+    for (index, node) in nodes.iter().enumerate() {
+        if index > 0 {
+            context.cursor += gap(lefts[index - 1], rights[index], context.level, style, size);
         }
         context.node(node, size, 0);
-        previous = Some(class);
     }
     let items = context.items;
     let rules = context.rules;
     let mut height = 0i32;
     let mut depth = 0i32;
     for item in &items {
-        height = height.max(-item.y.0 + metrics.ascent(item.size).0);
-        depth = depth.max(item.y.0 + metrics.descent(item.size).0);
+        let (above, below) = item_ink(metrics, item);
+        height = height.max(-item.y.0 + above);
+        depth = depth.max(item.y.0 + below);
     }
     for rule in &rules {
         height = height.max(-rule.y.0);
@@ -1207,6 +1724,15 @@ struct Context<'a> {
     /// does not turn one numbered formula into several.
     matrix_depth: u32,
     cursor: i32,
+    /// The formula's base size; script sizes are percentages of this, never of
+    /// the enclosing script's size.
+    base_size: Width,
+    /// Current TeX style.
+    level: StyleLevel,
+    /// Cramped variant: the denominator of a fraction, and anything inside it.
+    cramped: bool,
+    /// Size chosen by an enclosing `\left…\right`, for `\middle`.
+    fence_size: Option<Width>,
 }
 
 impl Context<'_> {
@@ -1227,10 +1753,7 @@ impl Context<'_> {
                 // A variable is italic when the face carries the italic letter;
                 // otherwise it stays upright, which is ugly but honest — the
                 // alternative is `.notdef` in the middle of a formula.
-                let text = italic_letter(*character)
-                    .filter(|italic| self.metrics.has(*italic))
-                    .unwrap_or(*character)
-                    .to_string();
+                let text = self.letter_text(*character);
                 self.items.push(MathItem {
                     text: text.clone(),
                     x: Width(self.cursor),
@@ -1244,12 +1767,12 @@ impl Context<'_> {
             Node::Group(nodes) => {
                 let mut previous: Option<Class> = None;
                 for child in nodes {
-                    let class = child.class();
+                    let class = child.first_class();
                     if let Some(left) = previous {
-                        self.cursor += gap(left, class, self.style, size);
+                        self.cursor += gap(left, class, self.level, self.style, size);
                     }
                     self.node(child, size, baseline);
-                    previous = Some(class);
+                    previous = Some(child.last_class());
                 }
             }
             Node::Space(permille) => {
@@ -1258,77 +1781,12 @@ impl Context<'_> {
             Node::Fraction {
                 numerator,
                 denominator,
+                rule,
             } => {
-                let scaled = Width(scale(size, self.style.fraction_scale()).max(1));
-                let numerator_box = self.measure(numerator, scaled);
-                let denominator_box = self.measure(denominator, scaled);
-                let width = numerator_box.0.max(denominator_box.0);
-                let axis = scale(size, self.style.axis_height);
-                let thickness = scale(size, self.style.rule_thickness).max(1);
-                let gap = scale(size, self.style.fraction_gap());
-                let rule_y = baseline - axis;
-                // A fraction clears the bar by its *depth* above and its
-                // *height* below: the numerator's bottom edge and the
-                // denominator's top edge are what must not touch the rule.
-                // Using the height for the numerator (as this did) lifted it by
-                // its whole cap height, and using the depth for the denominator
-                // dropped it by only a quarter em, so the two overlapped.
-                let numerator_baseline = rule_y - gap - numerator_box.2;
-                let denominator_baseline = rule_y + thickness + gap + denominator_box.1;
-                let left = self.cursor;
-                let num_x = left + (width - numerator_box.0) / 2;
-                let den_x = left + (width - denominator_box.0) / 2;
-                self.node_with_x(numerator, scaled, numerator_baseline, num_x);
-                self.node_with_x(denominator, scaled, denominator_baseline, den_x);
-                self.rules.push(MathRule {
-                    x: Width(left),
-                    y: Width(rule_y),
-                    width: Width(width),
-                    thickness: Width(thickness),
-                });
-                self.cursor = left + width;
+                self.fraction(numerator, denominator, *rule, size, baseline);
             }
             Node::Radical { index, body } => {
-                let thickness = scale(size, self.style.rule_thickness).max(1);
-                let index_width = match index {
-                    Some(index) => {
-                        let script = script_size(size, self.style);
-                        let measured = self.measure(index, script);
-                        let index_baseline = baseline - measured.1 - thickness;
-                        self.node_with_x(index, script, index_baseline, self.cursor);
-                        measured.0
-                    }
-                    None => 0,
-                };
-                let body_box = self.measure(body, size);
-                // The radical glyph must cover the body: pick the size whose
-                // ascent covers `body_box` height plus the bar.
-                let needed = (body_box.1 + thickness).max(1);
-                let unit_ascent = self.metrics.ascent(size).0.max(1);
-                let radical_size = Width(
-                    (size.0 as i64 * needed as i64 / unit_ascent as i64)
-                        .clamp(size.0 as i64 / 2, (size.0 as i64) * 4) as i32,
-                );
-                let glyph_advance = self.metrics.advance("√", radical_size).0.max(thickness);
-                let body_x = self.cursor + index_width + glyph_advance;
-                self.items.push(MathItem {
-                    text: String::from("√"),
-                    x: Width(self.cursor + index_width),
-                    // The surd's own baseline sits one bar-thickness below the
-                    // formula's, so its hook meets the bottom of the body.
-                    y: Width(baseline + thickness),
-                    size: radical_size,
-                    stretch: 1000,
-                    color: None,
-                });
-                self.node_with_x(body, size, baseline, body_x);
-                self.rules.push(MathRule {
-                    x: Width(body_x),
-                    y: Width(baseline - needed),
-                    width: Width(body_box.0),
-                    thickness: Width(thickness),
-                });
-                self.cursor = body_x + body_box.0;
+                self.radical(index.as_deref(), body, size, baseline);
             }
             Node::Big {
                 text,
@@ -1336,68 +1794,24 @@ impl Context<'_> {
                 sup,
                 sub,
             } => {
-                let big = Width(scale(size, self.style.big_per_mille()).max(size.0));
-                let advance = self.metrics.advance(text, big).0;
-                let ascent = self.metrics.ascent(big).0;
-                let descent = self.metrics.descent(big).0;
-                let script = script_size(size, self.style);
-                let gap = scale(size, self.style.frac_gap).max(1);
-
-                let sup_box = sup.as_ref().map(|node| self.measure_ink(node, script));
-                let sub_box = sub.as_ref().map(|node| self.measure_ink(node, script));
-
-                if *stacked && self.style.display {
-                    let width = advance
-                        .max(sup_box.map(|b| b.0).unwrap_or(0))
-                        .max(sub_box.map(|b| b.0).unwrap_or(0));
-                    let left = self.cursor;
-                    let operator_x = left + (width - advance) / 2;
-                    self.items.push(MathItem {
-                        text: String::from(*text),
-                        x: Width(operator_x),
-                        y: Width::ZERO,
-                        size: big,
-                        stretch: 1000,
-                        color: None,
-                    });
-                    if let (Some(node), Some(box_)) = (sup.as_ref(), sup_box) {
-                        let baseline = -(ascent + gap + box_.2);
-                        self.node_with_x(node, script, baseline, left + (width - box_.0) / 2);
-                    }
-                    if let (Some(node), Some(box_)) = (sub.as_ref(), sub_box) {
-                        let baseline = descent + gap + box_.1;
-                        self.node_with_x(node, script, baseline, left + (width - box_.0) / 2);
-                    }
-                    self.cursor = left + width;
-                } else {
-                    self.items.push(MathItem {
-                        text: String::from(*text),
-                        x: Width(self.cursor),
-                        y: Width::ZERO,
-                        size: big,
-                        stretch: 1000,
-                        color: None,
-                    });
-                    self.cursor += advance;
-                    let base_end = self.cursor;
-                    let shift = scale(size, self.style.sup_shift);
-                    if let (Some(node), Some(box_)) = (sup.as_ref(), sup_box) {
-                        let baseline = -(shift.max(ascent) + box_.2);
-                        self.node_with_x(node, script, baseline, base_end);
-                    }
-                    if let (Some(node), Some(box_)) = (sub.as_ref(), sub_box) {
-                        let baseline = scale(size, self.style.sub_shift).max(descent) + box_.1;
-                        self.node_with_x(node, script, baseline, base_end);
-                    }
-                    self.cursor = self.cursor.max(base_end);
-                }
+                self.big(
+                    text,
+                    *stacked,
+                    sup.as_deref(),
+                    sub.as_deref(),
+                    size,
+                    baseline,
+                );
             }
             Node::Delimited { left, body, right } => {
-                let body_box = self.measure(body, size);
+                let body_box = self.measure_ink(body, size);
                 let (delim_size, baseline_off) = self.fence_geometry(body_box, size);
                 self.delimiter(left, delim_size, baseline + baseline_off);
                 let body_x = self.cursor;
+                let saved = self.fence_size;
+                self.fence_size = Some(delim_size);
                 self.node_with_x(body, size, baseline, body_x);
+                self.fence_size = saved;
                 self.cursor = body_x + body_box.0;
                 self.delimiter(right, delim_size, baseline + baseline_off);
             }
@@ -1426,15 +1840,7 @@ impl Context<'_> {
                 // items it produced is simpler than threading a colour through
                 // every branch.
                 let first = self.items.len();
-                let mut previous: Option<Class> = None;
-                for child in body {
-                    let class = child.class();
-                    if let Some(left) = previous {
-                        self.cursor += gap(left, class, self.style, size);
-                    }
-                    self.node(child, size, baseline);
-                    previous = Some(class);
-                }
+                self.list(body, size, baseline);
                 for item in &mut self.items[first..] {
                     if item.color.is_none() {
                         item.color = Some(*color);
@@ -1442,53 +1848,609 @@ impl Context<'_> {
                 }
             }
             Node::Script { base, sup, sub } => {
-                // A brace takes its label centred over (or under) the ink band
-                // rather than after it: `\overbrace{a+b}^{n}` means the `n`
-                // sits on top of the brace, not to its right.
-                if let Node::Brace { body, over } = &**base {
-                    let geo = self.brace(body, *over, size, baseline);
-                    let script = script_size(size, self.style);
-                    let gap = scale(size, 80).max(1);
-                    if *over {
-                        if let Some(sup) = sup {
-                            let measured = self.measure(sup, script);
-                            let depth = measured.2.min(scale(script, 150));
-                            let y = geo.ink_top - gap - depth;
-                            let x = geo.left + (geo.width - measured.0).max(0) / 2;
-                            self.node_with_x(sup, script, y, x);
-                        }
-                    } else if let Some(sub) = sub {
-                        let measured = self.measure(sub, script);
-                        let height = measured.1.min(scale(script, 720));
-                        let y = geo.ink_bottom + gap + height;
-                        let x = geo.left + (geo.width - measured.0).max(0) / 2;
-                        self.node_with_x(sub, script, y, x);
-                    }
-                    self.cursor = self.cursor.max(geo.left + geo.width);
-                    return;
+                self.script(base, sup.as_deref(), sub.as_deref(), size, baseline);
+            }
+            Node::Accent { mark, body, wide } => {
+                self.accent(mark, body, *wide, size, baseline);
+            }
+            Node::Bar { body, over } => {
+                self.bar(body, *over, size, baseline);
+            }
+            Node::OpName {
+                text,
+                limits,
+                sup,
+                sub,
+            } => {
+                self.op_name(
+                    text,
+                    *limits,
+                    sup.as_deref(),
+                    sub.as_deref(),
+                    size,
+                    baseline,
+                );
+            }
+            Node::Classed { body, .. } => self.node(body, size, baseline),
+            Node::Stack { over, base } => {
+                self.stack(over, base, size, baseline);
+            }
+            Node::Style { level, body } => {
+                let saved = (self.level, self.cramped);
+                self.level = *level;
+                self.cramped = false;
+                let restyled = size_for(*level, self.base_size, self.style);
+                self.list(body, restyled, baseline);
+                self.level = saved.0;
+                self.cramped = saved.1;
+            }
+            Node::Middle(text) => {
+                if let Some(fence) = self.fence_size {
+                    self.delimiter(text, fence, baseline);
                 }
-                self.node(base, size, baseline);
-                let base_end = self.cursor;
-                let script = script_size(size, self.style);
-                let shift = scale(size, self.style.sup_shift);
-                let sub_shift = scale(size, self.style.sub_shift);
-                if let Some(sup) = sup {
-                    let measured = self.measure(sup, script);
-                    // A superscript's baseline sits `sup_shift` above the base's;
-                    // it moves up further only when its own *depth* would bring
-                    // its bottom closer than the gap. Using its height (as this
-                    // did) lifted every script clear of the base's cap height,
-                    // which floats `2` in `mc²` halfway up the line.
-                    let lift = shift.max(measured.2 + scale(size, 80));
-                    let y = baseline - lift;
-                    self.node_with_x(sup, script, y, base_end);
-                }
-                if let Some(sub) = sub {
-                    self.node_with_x(sub, script, baseline + sub_shift, base_end);
-                }
-                self.cursor = self.cursor.max(base_end);
             }
         }
+    }
+
+    /// Lay out a node list with inter-atom spacing, using the current style.
+    fn list(&mut self, nodes: &[Node], size: Width, baseline: i32) {
+        let (lefts, rights) = effective_classes(nodes);
+        for (index, child) in nodes.iter().enumerate() {
+            if index > 0 {
+                self.cursor += gap(
+                    lefts[index - 1],
+                    rights[index],
+                    self.level,
+                    self.style,
+                    size,
+                );
+            }
+            self.node(child, size, baseline);
+        }
+    }
+
+    /// Absolute size of a script at the current style. Percentages are of the
+    /// formula's base size, so a script inside a script does not shrink again.
+    fn script_size(&self, _size: Width) -> Width {
+        let percent = if self.level.is_script() {
+            self.style.scriptscript_scale
+        } else {
+            self.style.script_scale
+        };
+        Width(scale(self.base_size, percent).max(1))
+    }
+
+    /// Run `apply` with a temporarily changed style.
+    fn in_style<T>(
+        &mut self,
+        level: StyleLevel,
+        cramped: bool,
+        apply: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let saved = (self.level, self.cramped);
+        self.level = level;
+        self.cramped = cramped;
+        let out = apply(self);
+        self.level = saved.0;
+        self.cramped = saved.1;
+        out
+    }
+
+    fn letter_text(&self, character: char) -> String {
+        italic_letter(character)
+            .filter(|italic| self.metrics.has(*italic))
+            .unwrap_or(character)
+            .to_string()
+    }
+
+    /// A fraction or binomial at the current style.
+    fn fraction(
+        &mut self,
+        numerator: &Node,
+        denominator: &Node,
+        rule: bool,
+        size: Width,
+        baseline: i32,
+    ) {
+        let level = fraction_level(self.level);
+        let frac_size = size_for(level, size, self.style);
+        let num_cramped = self.cramped;
+        let (num_w, num_h, num_d) =
+            self.in_style(level, num_cramped, |c| c.measure_ink(numerator, frac_size));
+        let (den_w, den_h, _den_d) =
+            self.in_style(level, true, |c| c.measure_ink(denominator, frac_size));
+        let _ = num_h;
+        let width = num_w.max(den_w).max(1);
+        let axis = scale(size, self.style.axis_height);
+        let thickness = if rule {
+            scale(size, self.style.rule_thickness).max(1)
+        } else {
+            0
+        };
+        let bar_y = baseline - axis;
+        let num_shift = scale(
+            size,
+            if self.level == StyleLevel::Display {
+                self.style.num_shift_display
+            } else {
+                self.style.num_shift
+            },
+        );
+        let den_shift = scale(
+            size,
+            if self.level == StyleLevel::Display {
+                self.style.denom_shift_display
+            } else {
+                self.style.denom_shift
+            },
+        );
+        let num_gap = scale(size, self.style.num_gap).max(1);
+        let den_gap = scale(size, self.style.denom_gap).max(1);
+        // TeX's num/denom shifts are baselines from the bar; the ink depth and
+        // height then guarantee the minimum clearance so a descender never
+        // touches the rule.
+        let num_baseline = bar_y - num_shift.max(num_d + num_gap);
+        let den_baseline = bar_y + thickness + den_shift.max(den_h + den_gap);
+        let left = self.cursor;
+        self.in_style(level, num_cramped, |c| {
+            c.node_with_x(
+                numerator,
+                frac_size,
+                num_baseline,
+                left + (width - num_w) / 2,
+            )
+        });
+        self.in_style(level, true, |c| {
+            c.node_with_x(
+                denominator,
+                frac_size,
+                den_baseline,
+                left + (width - den_w) / 2,
+            )
+        });
+        if rule {
+            self.rules.push(MathRule {
+                x: Width(left),
+                y: Width(bar_y),
+                width: Width(width),
+                thickness: Width(thickness),
+            });
+        }
+        self.cursor = left + width;
+    }
+
+    /// `\sqrt[...]{...}`, with the vinculum on the body's ink top.
+    fn radical(&mut self, index: Option<&Node>, body: &Node, size: Width, baseline: i32) {
+        let rule = scale(size, self.style.radical_rule).max(1);
+        let extra = scale(size, self.style.radical_extra);
+        let (body_w, body_h, body_d) = self.measure_ink(body, size);
+        let target = (body_h + body_d + rule + extra).max(1) as i64;
+        let surd_extent = |metrics: &dyn MathMetrics, at: Width| -> i64 {
+            match metrics.ink("√", at) {
+                Some((above, below)) => (above.0 + below.0).max(1) as i64,
+                None => (metrics.ascent(at).0 + metrics.descent(at).0).max(1) as i64,
+            }
+        };
+        let unit = surd_extent(self.metrics, size);
+        let mut radical_size = Width(
+            ((size.0 as i64 * target + unit - 1) / unit).clamp(size.0 as i64 / 2, size.0 as i64 * 4)
+                as i32,
+        );
+        let mut guard = 0;
+        while surd_extent(self.metrics, radical_size) < target && guard < 8 {
+            radical_size = Width((radical_size.0 * 9 / 8).max(1));
+            guard += 1;
+        }
+        let (surd_above, _surd_below) = self.metrics.ink("√", radical_size).unwrap_or((
+            self.metrics.ascent(radical_size),
+            self.metrics.descent(radical_size),
+        ));
+        let glyph_advance = self.metrics.advance("√", radical_size).0.max(rule);
+        let bar_y = baseline - body_h - rule;
+
+        let script_size = self.script_size(size);
+        let index_width = match index {
+            Some(index) => {
+                let before = scale(size, self.style.radical_kern_before);
+                let after = scale(size, self.style.radical_kern_after).max(0);
+                let (index_w, index_h, _index_d) =
+                    self.in_style(StyleLevel::Script, self.cramped, |c| {
+                        c.measure_ink(index, script_size)
+                    });
+                let raise = scale(script_size, self.style.radical_degree_raise) / 1000;
+                let y = bar_y + index_h - raise;
+                let x = self.cursor + before;
+                self.in_style(StyleLevel::Script, self.cramped, |c| {
+                    c.node_with_x(index, script_size, y, x)
+                });
+                index_w + before + after
+            }
+            None => 0,
+        };
+        let surd_x = self.cursor + index_width;
+        self.items.push(MathItem {
+            text: String::from("√"),
+            x: Width(surd_x),
+            // The surd's ink top meets the vinculum.
+            y: Width(bar_y + surd_above.0),
+            size: radical_size,
+            stretch: 1000,
+            color: None,
+        });
+        let body_x = surd_x + glyph_advance;
+        self.node_with_x(body, size, baseline, body_x);
+        self.rules.push(MathRule {
+            x: Width(body_x),
+            y: Width(bar_y),
+            width: Width(body_w),
+            thickness: Width(rule),
+        });
+        self.cursor = body_x + body_w;
+    }
+
+    /// A large operator, with stacked limits in display style.
+    fn big(
+        &mut self,
+        text: &str,
+        stacked: bool,
+        sup: Option<&Node>,
+        sub: Option<&Node>,
+        size: Width,
+        baseline: i32,
+    ) {
+        let big = if self.level == StyleLevel::Display {
+            Width(scale(size, self.style.display_operator_min).max(size.0))
+        } else {
+            size
+        };
+        let advance = self.metrics.advance(text, big).0;
+        let (above, below) = self
+            .metrics
+            .ink(text, big)
+            .map(|(a, d)| (a.0, d.0))
+            .unwrap_or((self.metrics.ascent(big).0, self.metrics.descent(big).0));
+        if stacked && self.level == StyleLevel::Display {
+            let script_size = self.script_size(size);
+            let level = self.level.script();
+            let sup_box = sup.map(|node| {
+                self.in_style(level, self.cramped, |c| c.measure_ink(node, script_size))
+            });
+            let sub_box =
+                sub.map(|node| self.in_style(level, true, |c| c.measure_ink(node, script_size)));
+            let width = advance
+                .max(sup_box.map(|b| b.0).unwrap_or(0))
+                .max(sub_box.map(|b| b.0).unwrap_or(0));
+            let left = self.cursor;
+            self.items.push(MathItem {
+                text: text.to_string(),
+                x: Width(left + (width - advance) / 2),
+                y: Width::ZERO,
+                size: big,
+                stretch: 1000,
+                color: None,
+            });
+            let gap = scale(size, self.style.limit_above_gap);
+            let rise = scale(size, self.style.limit_above_rise);
+            if let (Some(node), Some(box_)) = (sup, sup_box) {
+                let baseline = -(above + (gap + box_.2).max(rise));
+                self.in_style(level, self.cramped, |c| {
+                    c.node_with_x(node, script_size, baseline, left + (width - box_.0) / 2)
+                });
+            }
+            let gap = scale(size, self.style.limit_below_gap);
+            let drop = scale(size, self.style.limit_below_drop);
+            if let (Some(node), Some(box_)) = (sub, sub_box) {
+                let baseline = below + (gap + box_.1).max(drop);
+                self.in_style(level, true, |c| {
+                    c.node_with_x(node, script_size, baseline, left + (width - box_.0) / 2)
+                });
+            }
+            self.cursor = left + width;
+        } else {
+            let left = self.cursor;
+            self.items.push(MathItem {
+                text: text.to_string(),
+                x: Width(left),
+                y: Width::ZERO,
+                size: big,
+                stretch: 1000,
+                color: None,
+            });
+            self.cursor = left + advance;
+            let end = self.side_scripts((advance, above, below), 0, sup, sub, size, baseline);
+            self.cursor = end;
+        }
+    }
+
+    /// `\hat`, `\bar`, `\vec`, `\tilde`.
+    fn accent(&mut self, mark: &str, body: &Node, wide: bool, size: Width, baseline: i32) {
+        let (width, height, _depth) = self.measure_ink(body, size);
+        let body_x = self.cursor;
+        self.node_with_x(body, size, baseline, body_x);
+        let mut glyph = mark;
+        let mut advance = self.metrics.advance(glyph, size).0;
+        if advance <= 0 {
+            // A combining mark has no advance; use a spacing arrow for `\vec`.
+            glyph = "→";
+            advance = self.metrics.advance(glyph, size).0;
+        }
+        let (mark_above, mark_below) = self
+            .metrics
+            .ink(glyph, size)
+            .map(|(a, d)| (a.0, d.0))
+            .unwrap_or((self.metrics.ascent(size).0, self.metrics.descent(size).0));
+        let gap = scale(size, 40).max(1);
+        let y = baseline - height - gap - mark_below - scale(size, 20);
+        let _ = mark_above;
+        let stretch = if wide && advance > 0 && width > advance {
+            ((width as i64 * 1000) / advance as i64).clamp(1000, 6000) as u16
+        } else {
+            1000
+        };
+        self.items.push(MathItem {
+            text: glyph.to_string(),
+            x: Width(body_x + (width - advance) / 2),
+            y: Width(y),
+            size,
+            stretch,
+            color: None,
+        });
+        self.cursor = body_x + width;
+    }
+
+    /// `\overline` / `\underline`.
+    fn bar(&mut self, body: &Node, over: bool, size: Width, baseline: i32) {
+        let (width, height, depth) = self.measure_ink(body, size);
+        let body_x = self.cursor;
+        self.node_with_x(body, size, baseline, body_x);
+        let rule = scale(
+            size,
+            if over {
+                self.style.overbar_rule
+            } else {
+                self.style.underbar_rule
+            },
+        )
+        .max(1);
+        let gap = scale(
+            size,
+            if over {
+                self.style.overbar_gap
+            } else {
+                self.style.underbar_gap
+            },
+        );
+        let y = if over {
+            baseline - height - gap - rule
+        } else {
+            baseline + depth + gap
+        };
+        self.rules.push(MathRule {
+            x: Width(body_x),
+            y: Width(y),
+            width: Width(width),
+            thickness: Width(rule),
+        });
+        self.cursor = body_x + width;
+    }
+
+    /// `\operatorname` and its starred form.
+    fn op_name(
+        &mut self,
+        text: &str,
+        limits: bool,
+        sup: Option<&Node>,
+        sub: Option<&Node>,
+        size: Width,
+        baseline: i32,
+    ) {
+        let advance = self.metrics.advance(text, size).0;
+        let (above, below) = self
+            .metrics
+            .ink(text, size)
+            .map(|(a, d)| (a.0, d.0))
+            .unwrap_or((self.metrics.ascent(size).0, self.metrics.descent(size).0));
+        let left = self.cursor;
+        if limits && self.level == StyleLevel::Display && (sup.is_some() || sub.is_some()) {
+            let script_size = self.script_size(size);
+            let level = self.level.script();
+            let sup_box = sup.map(|node| {
+                self.in_style(level, self.cramped, |c| c.measure_ink(node, script_size))
+            });
+            let sub_box =
+                sub.map(|node| self.in_style(level, true, |c| c.measure_ink(node, script_size)));
+            let width = advance
+                .max(sup_box.map(|b| b.0).unwrap_or(0))
+                .max(sub_box.map(|b| b.0).unwrap_or(0));
+            self.items.push(MathItem {
+                text: text.to_string(),
+                x: Width(left + (width - advance) / 2),
+                y: Width::ZERO,
+                size,
+                stretch: 1000,
+                color: None,
+            });
+            let gap = scale(size, self.style.limit_above_gap);
+            let rise = scale(size, self.style.limit_above_rise);
+            if let (Some(node), Some(box_)) = (sup, sup_box) {
+                let baseline = -(above + (gap + box_.2).max(rise));
+                self.in_style(level, self.cramped, |c| {
+                    c.node_with_x(node, script_size, baseline, left + (width - box_.0) / 2)
+                });
+            }
+            let gap = scale(size, self.style.limit_below_gap);
+            let drop = scale(size, self.style.limit_below_drop);
+            if let (Some(node), Some(box_)) = (sub, sub_box) {
+                let baseline = below + (gap + box_.1).max(drop);
+                self.in_style(level, true, |c| {
+                    c.node_with_x(node, script_size, baseline, left + (width - box_.0) / 2)
+                });
+            }
+            self.cursor = left + width;
+        } else {
+            self.items.push(MathItem {
+                text: text.to_string(),
+                x: Width(left),
+                y: Width::ZERO,
+                size,
+                stretch: 1000,
+                color: None,
+            });
+            self.cursor = left + advance;
+            let end = self.side_scripts((advance, above, below), 0, sup, sub, size, baseline);
+            self.cursor = end;
+        }
+    }
+
+    /// `\stackrel`.
+    fn stack(&mut self, over: &Node, base: &Node, size: Width, baseline: i32) {
+        let (base_w, base_h, _base_d) = self.measure_ink(base, size);
+        let script_size = self.script_size(size);
+        let level = self.level.script();
+        let (over_w, _over_h, over_d) =
+            self.in_style(level, self.cramped, |c| c.measure_ink(over, script_size));
+        let width = base_w.max(over_w);
+        let left = self.cursor;
+        self.node_with_x(base, size, baseline, left + (width - base_w) / 2);
+        let gap = scale(size, self.style.stack_gap).max(1);
+        let y = baseline - base_h - gap - over_d;
+        self.in_style(level, self.cramped, |c| {
+            c.node_with_x(over, script_size, y, left + (width - over_w) / 2)
+        });
+        self.cursor = left + width;
+    }
+
+    /// A base with its scripts to the right. Returns the cursor after them.
+    fn side_scripts(
+        &mut self,
+        base: (i32, i32, i32),
+        italic: i32,
+        sup: Option<&Node>,
+        sub: Option<&Node>,
+        size: Width,
+        baseline: i32,
+    ) -> i32 {
+        let script_size = self.script_size(size);
+        let level = self.level.script();
+        let sup_box = sup
+            .map(|node| self.in_style(level, self.cramped, |c| c.measure_ink(node, script_size)));
+        let sub_box =
+            sub.map(|node| self.in_style(level, true, |c| c.measure_ink(node, script_size)));
+        let x = self.cursor + italic;
+        // TeX rule 18: the superscript's baseline is at least `sup_shift` above
+        // the base's, and at most `sup_drop` below the base's *top*. The
+        // subscript's baseline is at least `sub_shift` below the base's, and at
+        // most `sub_drop` below the base's *bottom*.
+        let mut lift = scale(
+            size,
+            if self.cramped {
+                self.style.sup_shift_cramped
+            } else {
+                self.style.sup_shift
+            },
+        );
+        lift = lift.max(base.1 - scale(size, self.style.sup_drop));
+        if let Some((_, _, depth)) = sup_box {
+            lift = lift.max(depth + scale(size, self.style.sup_bottom_min));
+        }
+        let mut drop = scale(size, self.style.sub_shift);
+        drop = drop.max(base.2 + scale(size, self.style.sub_drop));
+        if let (Some((_, _, sd)), Some((_, sh, _))) = (sup_box, sub_box) {
+            // With a subscript present the superscript may not float higher
+            // than `sup_bottom_max_sub` above the baseline, as long as the
+            // minimum gap still holds afterwards.
+            let cap = scale(size, self.style.sup_bottom_max_sub) + sd;
+            let floor = sd + scale(size, self.style.sup_bottom_min);
+            if cap < lift && cap >= floor {
+                lift = cap;
+            }
+            let wanted = scale(size, self.style.sub_sup_gap);
+            let present = lift + drop - sd - sh;
+            if present < wanted {
+                lift += wanted - present;
+            }
+        }
+        let mut end = x;
+        let mut had_script = false;
+        if let (Some(node), Some((width, _, _))) = (sup, sup_box) {
+            self.in_style(level, self.cramped, |c| {
+                c.node_with_x(node, script_size, baseline - lift, x)
+            });
+            end = end.max(x + width);
+            had_script = true;
+        }
+        if let (Some(node), Some((width, _, _))) = (sub, sub_box) {
+            self.in_style(level, true, |c| {
+                c.node_with_x(node, script_size, baseline + drop, x)
+            });
+            end = end.max(x + width);
+            had_script = true;
+        }
+        if had_script {
+            end + scale(size, self.style.script_space)
+        } else {
+            end
+        }
+    }
+
+    fn script(
+        &mut self,
+        base: &Node,
+        sup: Option<&Node>,
+        sub: Option<&Node>,
+        size: Width,
+        baseline: i32,
+    ) {
+        // A brace takes its label centred over (or under) the ink band rather
+        // than after it: `\overbrace{a+b}^{n}` means the `n` sits on top of the
+        // brace, not to its right.
+        if let Node::Brace { body, over } = base {
+            let geo = self.brace(body, *over, size, baseline);
+            let script_size = self.script_size(size);
+            let level = self.level.script();
+            let gap = scale(size, 80).max(1);
+            if *over {
+                if let Some(sup) = sup {
+                    let measured =
+                        self.in_style(level, self.cramped, |c| c.measure_ink(sup, script_size));
+                    let depth = measured.2.min(scale(script_size, 150));
+                    let y = geo.ink_top - gap - depth;
+                    let x = geo.left + (geo.width - measured.0).max(0) / 2;
+                    self.in_style(level, self.cramped, |c| {
+                        c.node_with_x(sup, script_size, y, x)
+                    });
+                }
+            } else if let Some(sub) = sub {
+                let measured = self.in_style(level, true, |c| c.measure_ink(sub, script_size));
+                let height = measured.1.min(scale(script_size, 720));
+                let y = geo.ink_bottom + gap + height;
+                let x = geo.left + (geo.width - measured.0).max(0) / 2;
+                self.in_style(level, true, |c| c.node_with_x(sub, script_size, y, x));
+            }
+            self.cursor = self.cursor.max(geo.left + geo.width);
+            return;
+        }
+        let base_box = self.measure_ink(base, size);
+        let italic = self.italic_correction(base, size);
+        self.node(base, size, baseline);
+        let end = self.side_scripts(
+            (base_box.0, base_box.1, base_box.2),
+            italic,
+            sup,
+            sub,
+            size,
+            baseline,
+        );
+        self.cursor = end;
+    }
+
+    fn italic_correction(&self, base: &Node, size: Width) -> i32 {
+        let text = match base {
+            Node::Letter(character) => self.letter_text(*character),
+            Node::Symbol { text, .. } if text.chars().count() == 1 => text.clone(),
+            _ => return 0,
+        };
+        self.metrics.italic_correction(&text, size).0.max(0)
     }
 
     fn node_with_x(&mut self, node: &Node, size: Width, baseline: i32, x: i32) {
@@ -1497,16 +2459,6 @@ impl Context<'_> {
         self.node(node, size, baseline);
         let end = self.cursor;
         self.cursor = saved.max(end);
-    }
-
-    /// Lay out a node temporarily to measure width/height/depth.
-    fn measure(&mut self, node: &Node, size: Width) -> (i32, i32, i32) {
-        self.measure_nodes(core::slice::from_ref(node), size)
-    }
-
-    /// Lay out a node list temporarily to measure width/height/depth.
-    fn measure_nodes(&mut self, nodes: &[Node], size: Width) -> (i32, i32, i32) {
-        self.measure_impl(nodes, size, false)
     }
 
     /// Measure the *ink* box of a node: words count for a cap height and a
@@ -1534,36 +2486,30 @@ impl Context<'_> {
         let saved_rows = self.rows.len();
         let saved_cursor = self.cursor;
         self.cursor = 0;
-        let mut previous: Option<Class> = None;
-        for child in nodes {
-            let class = child.class();
-            if let Some(left) = previous {
-                self.cursor += gap(left, class, self.style, size);
+        let (lefts, rights) = effective_classes(nodes);
+        for (index, child) in nodes.iter().enumerate() {
+            if index > 0 {
+                self.cursor += gap(
+                    lefts[index - 1],
+                    rights[index],
+                    self.level,
+                    self.style,
+                    size,
+                );
             }
             self.node(child, size, 0);
-            previous = Some(class);
         }
         let width = self.cursor;
         let mut height = 0i32;
         let mut depth = 0i32;
         for item in &self.items[saved_items..] {
-            // Stretchy braces carry their ink in a narrow band far from the
-            // em box: the font-wide ascent would inflate the measured height
-            // by roughly an em, leaving a visible hole above the formula.
-            let (above, below) = match brace_ink(&item.text) {
-                Some((top, bottom)) => (per_mille(item.size, top), per_mille(item.size, bottom)),
-                None => {
-                    let above = self.metrics.ascent(item.size).0;
-                    let below = self.metrics.descent(item.size).0;
-                    if ink {
-                        (
-                            above.min(per_mille(item.size, 720)),
-                            below.min(per_mille(item.size, 220)),
-                        )
-                    } else {
-                        (above, below)
-                    }
-                }
+            let (above, below) = if ink {
+                item_ink(self.metrics, item)
+            } else {
+                (
+                    self.metrics.ascent(item.size).0,
+                    self.metrics.descent(item.size).0,
+                )
             };
             height = height.max(-item.y.0 + above);
             depth = depth.max(item.y.0 + below);
@@ -1583,14 +2529,18 @@ impl Context<'_> {
     fn place_nodes(&mut self, nodes: &[Node], size: Width, baseline: i32, x: i32) {
         let saved = self.cursor;
         self.cursor = x;
-        let mut previous: Option<Class> = None;
-        for child in nodes {
-            let class = child.class();
-            if let Some(left) = previous {
-                self.cursor += gap(left, class, self.style, size);
+        let (lefts, rights) = effective_classes(nodes);
+        for (index, child) in nodes.iter().enumerate() {
+            if index > 0 {
+                self.cursor += gap(
+                    lefts[index - 1],
+                    rights[index],
+                    self.level,
+                    self.style,
+                    size,
+                );
             }
             self.node(child, size, baseline);
-            previous = Some(class);
         }
         let end = self.cursor;
         self.cursor = saved.max(end);
@@ -1600,29 +2550,35 @@ impl Context<'_> {
     fn fence_geometry(&self, body: (i32, i32, i32), size: Width) -> (Width, i32) {
         let (_, height, depth) = body;
         let needed = (height + depth).max(1);
-        let unit = (self.metrics.ascent(size).0 + self.metrics.descent(size).0).max(1);
+        let extent = |metrics: &dyn MathMetrics, at: Width| -> i32 {
+            match metrics.ink("(", at) {
+                Some((above, below)) => (above.0 + below.0).max(1),
+                None => (metrics.ascent(at).0 + metrics.descent(at).0).max(1),
+            }
+        };
+        let unit = extent(self.metrics, size);
         let mut delim_size = if unit < needed {
-            // Round up, then nudge until the measured extent really covers the
-            // body: every metrics lookup truncates, so the ratio alone can be
-            // one unit short.
             let estimate = size.0 as i64 * needed as i64;
             let target = (estimate + unit as i64 - 1) / unit as i64;
             Width(target.clamp(size.0 as i64, size.0 as i64 * 4) as i32)
         } else {
             size
         };
-        let extent = |context: &Self, size: Width| {
-            context.metrics.ascent(size).0 + context.metrics.descent(size).0
-        };
         let mut guard = 0;
-        while extent(self, delim_size) < needed && delim_size.0 < size.0 * 4 && guard < 64 {
+        while extent(self.metrics, delim_size) < needed && delim_size.0 < size.0 * 4 && guard < 64 {
             delim_size = Width(delim_size.0 + (delim_size.0 / 64).max(1));
             guard += 1;
         }
-        let ascent = self.metrics.ascent(delim_size).0;
-        let descent = self.metrics.descent(delim_size).0;
-        // Centre the delimiter box on the body's vertical centre.
-        let baseline_off = (depth - height) / 2 + (ascent - descent) / 2;
+        let (ascent, descent) = self
+            .metrics
+            .ink("(", delim_size)
+            .map(|(a, d)| (a.0, d.0))
+            .unwrap_or((
+                self.metrics.ascent(delim_size).0,
+                self.metrics.descent(delim_size).0,
+            ));
+        // Align the delimiter's ink centre with the body's ink centre.
+        let baseline_off = (depth - height) / 2 - (descent - ascent) / 2;
         (delim_size, baseline_off)
     }
 
@@ -1662,7 +2618,7 @@ impl Context<'_> {
         let outermost =
             self.matrix_depth == 0 && kind == MatrixKind::Aligned && self.rows.is_empty();
         self.matrix_depth += 1;
-        let row_gap = scale(size, self.style.frac_gap).max(1);
+        let row_gap = scale(size, self.style.jot).max(1);
         let col_gap = if kind == MatrixKind::Aligned {
             0
         } else {
@@ -1678,7 +2634,7 @@ impl Context<'_> {
             for (c, width) in widths.iter_mut().enumerate() {
                 let empty: &[Node] = &[];
                 let nodes = row.get(c).map(|nodes| nodes.as_slice()).unwrap_or(empty);
-                let measured = self.measure_nodes(nodes, size);
+                let measured = self.measure_nodes_ink(nodes, size);
                 *width = (*width).max(measured.0);
                 ascent[r] = ascent[r].max(measured.1);
                 descent[r] = descent[r].max(measured.2);
@@ -1747,7 +2703,9 @@ impl Context<'_> {
         if rows.is_empty() {
             return;
         }
-        let gap = scale(size, self.style.frac_gap).max(1);
+        // `\substack` lines are set on a `\jot` of leading, as TeX does
+        // inside limits.
+        let gap = scale(size, self.style.jot).max(1);
         let mut widths = Vec::with_capacity(rows.len());
         let mut heights = Vec::with_capacity(rows.len());
         let mut depths = Vec::with_capacity(rows.len());
@@ -1786,7 +2744,7 @@ impl Context<'_> {
         let (width, height, depth) = self.measure_ink(body, size);
         let left = self.cursor;
         self.node_with_x(body, size, baseline, left);
-        let gap = scale(size, self.style.frac_gap).max(1);
+        let gap = scale(size, self.style.stack_gap).max(1);
         let natural = self.metrics.advance(glyph, size).0.max(1);
         let target = width.max(1) as i64;
         let grown = (target * 1000 / natural as i64).clamp(1000, 2200) as u16;
@@ -1957,23 +2915,125 @@ fn fence_text(kind: MatrixKind) -> (&'static str, &'static str) {
     }
 }
 
-fn gap(left: Class, right: Class, style: &MathStyle, size: Width) -> i32 {
-    if left == Class::Open || right == Class::Close || right == Class::Punct {
+/// TeX's inter-atom spacing table: 0 = none, 1 = thin (3mu), 2 = medium
+/// (4mu), 3 = thick (5mu), -1 = impossible (a Bin there is really an Ord).
+const SPACING: [[i8; 8]; 8] = [
+    // Ord  Op  Bin  Rel  Open Close Punct Inner
+    [0, 1, 2, 3, 0, 0, 0, 1],       // Ord
+    [1, 1, -1, 3, 0, 0, 0, 1],      // Op
+    [2, -1, -1, -1, 2, -1, -1, -1], // Bin
+    [3, 3, -1, 0, 3, 0, 0, 3],      // Rel
+    [0, 0, -1, 0, 0, 0, 0, 0],      // Open
+    [0, 1, 2, 3, 0, 0, 0, 1],       // Close
+    [1, 1, -1, 1, 1, 1, 1, 1],      // Punct
+    [1, 1, 2, 3, 1, 0, 1, 1],       // Inner
+];
+
+fn class_index(class: Class) -> usize {
+    match class {
+        Class::Ord => 0,
+        Class::Op => 1,
+        Class::Bin => 2,
+        Class::Rel => 3,
+        Class::Open => 4,
+        Class::Close => 5,
+        Class::Punct => 6,
+        Class::Inner => 7,
+    }
+}
+
+fn gap(left: Class, right: Class, level: StyleLevel, style: &MathStyle, size: Width) -> i32 {
+    let mut value = SPACING[class_index(left)][class_index(right)];
+    if value < 0 {
+        // A `*` entry: that Bin is really an Ord.
+        let left = if left == Class::Bin { Class::Ord } else { left };
+        let right = if right == Class::Bin {
+            Class::Ord
+        } else {
+            right
+        };
+        value = SPACING[class_index(left)][class_index(right)].max(0);
+    }
+    if level.is_script() && value >= 2 {
+        // `\nonscript`: medium and thick spaces vanish in script styles.
         return 0;
     }
-    if left == Class::Bin || right == Class::Bin {
-        scale(size, style.bin_gap)
-    } else if left == Class::Rel || right == Class::Rel {
-        scale(size, style.rel_gap)
-    } else {
-        0
+    let permille = match value {
+        1 => style.punct_gap,
+        2 => style.bin_gap,
+        3 => style.rel_gap,
+        _ => 0,
+    };
+    scale(size, permille)
+}
+
+/// Effective classes for a list: a Bin at a list edge, or after another
+/// Bin/Op/Rel/Open/Punct, is an Ord (TeX rules 5/6). The pair is returned as
+/// "class used on the left of each node" and "class used on the right".
+fn effective_classes(nodes: &[Node]) -> (Vec<Class>, Vec<Class>) {
+    let firsts: Vec<Class> = nodes.iter().map(Node::first_class).collect();
+    let lasts: Vec<Class> = nodes.iter().map(Node::last_class).collect();
+    let mut rights = firsts.clone();
+    let mut lefts = lasts.clone();
+    // Left to right: a Bin at the start, or after Bin/Op/Rel/Open/Punct, is an
+    // Ord. A lone atom keeps the same class on both sides, so the conversion
+    // also applies to the gap that follows it.
+    for index in 0..nodes.len() {
+        if rights[index] == Class::Bin
+            && (index == 0
+                || matches!(
+                    lefts[index - 1],
+                    Class::Bin | Class::Op | Class::Rel | Class::Open | Class::Punct
+                ))
+        {
+            rights[index] = Class::Ord;
+            if firsts[index] == lasts[index] {
+                lefts[index] = Class::Ord;
+            }
+        }
+    }
+    // Right to left: a Bin before Rel/Close/Punct, or at the end, is an Ord.
+    for index in (0..nodes.len()).rev() {
+        if lefts[index] == Class::Bin
+            && (index + 1 == nodes.len()
+                || matches!(rights[index + 1], Class::Rel | Class::Close | Class::Punct))
+        {
+            lefts[index] = Class::Ord;
+            if firsts[index] == lasts[index] {
+                rights[index] = Class::Ord;
+            }
+        }
+    }
+    (lefts, rights)
+}
+
+fn fraction_level(level: StyleLevel) -> StyleLevel {
+    match level {
+        StyleLevel::Display => StyleLevel::Text,
+        StyleLevel::Text => StyleLevel::Script,
+        StyleLevel::Script | StyleLevel::ScriptScript => StyleLevel::ScriptScript,
     }
 }
 
-fn script_size(size: Width, style: &MathStyle) -> Width {
-    Width(scale(size, style.script_scale).max(1))
+fn size_for(level: StyleLevel, size: Width, style: &MathStyle) -> Width {
+    match level {
+        StyleLevel::Display | StyleLevel::Text => size,
+        StyleLevel::Script => Width(scale(size, style.script_scale).max(1)),
+        StyleLevel::ScriptScript => Width(scale(size, style.scriptscript_scale).max(1)),
+    }
 }
 
-fn scale(size: Width, permille: u16) -> i32 {
-    (size.0 as i64 * permille as i64 / 1000) as i32
+/// Ink extents of one item, with the brace band and the em box as fallbacks.
+fn item_ink(metrics: &dyn MathMetrics, item: &MathItem) -> (i32, i32) {
+    if let Some((top, bottom)) = brace_ink(&item.text) {
+        return (per_mille(item.size, top), per_mille(item.size, bottom));
+    }
+    match metrics.ink(&item.text, item.size) {
+        Some((above, below)) => (above.0, below.0),
+        None => (metrics.ascent(item.size).0, metrics.descent(item.size).0),
+    }
+}
+
+fn scale(size: Width, permille: impl Into<i64>) -> i32 {
+    (size.0 as i64 * permille.into() / 1000) as i32
 }
