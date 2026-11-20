@@ -309,6 +309,29 @@ impl Default for NumberingSpec {
 pub struct IndexSpec {
     /// Heading above the entries; `None` prints no heading.
     pub title: Option<String>,
+    /// How entries are ordered. A Chinese book wants pinyin; code-point order
+    /// stays the default because it needs no table and never changes.
+    pub sort: IndexSort,
+}
+
+/// Index ordering.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum IndexSort {
+    /// Unicode code point order: stable and table-free.
+    #[default]
+    Codepoint,
+    /// Pinyin, with Latin and digits before Han.
+    Pinyin,
+}
+
+impl IndexSort {
+    /// The name the template and the canonical form use.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Codepoint => "codepoint",
+            Self::Pinyin => "pinyin",
+        }
+    }
 }
 
 /// Cover page settings. The *content* comes from the document metadata; the
@@ -642,7 +665,10 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
     let index = match fields.optional("index") {
         Some(value) if !value.is_null() => Some(parse_index(value, "index")?),
         // `index:` with an empty value asks for an untitled index.
-        Some(_) => Some(IndexSpec { title: None }),
+        Some(_) => Some(IndexSpec {
+            title: None,
+            sort: IndexSort::default(),
+        }),
         None => None,
     };
     let numbering = match fields.optional("numbering") {
@@ -903,9 +929,18 @@ fn parse_numbering(value: &Value, path: &str) -> Result<NumberingSpec, TemplateE
 
 fn parse_index(value: &Value, path: &str) -> Result<IndexSpec, TemplateError> {
     let fields = Fields::new(value, path)?;
-    fields.reject_unknown(&["title"])?;
+    fields.reject_unknown(&["title", "sort"])?;
+    let sort = match fields.optional_str("sort")?.as_deref() {
+        None | Some("codepoint") => IndexSort::Codepoint,
+        Some("pinyin") => IndexSort::Pinyin,
+        Some(other) => {
+            let _ = other;
+            return Err(fields.error("sort must be codepoint or pinyin"));
+        }
+    };
     Ok(IndexSpec {
         title: fields.optional_str("title")?,
+        sort,
     })
 }
 

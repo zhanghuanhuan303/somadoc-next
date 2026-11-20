@@ -19,6 +19,7 @@
 extern crate alloc;
 
 pub mod canonical;
+pub mod index;
 pub mod math;
 pub mod metrics;
 mod pagination;
@@ -796,6 +797,8 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
         front_matter_items: 0,
         pending_index: Vec::new(),
         index_terms: Vec::new(),
+        note_index_terms: note_index_terms(doc),
+        defer_index: false,
         index_entries: index.to_vec(),
         figure_refs: Vec::new(),
         table_refs: Vec::new(),
@@ -1396,9 +1399,14 @@ struct Builder<'a> {
     /// only hold these are front matter.
     front_matter_items: usize,
     /// Index terms seen while compiling the current block.
-    pending_index: Vec<String>,
+    pending_index: Vec<index::IndexTerm>,
     /// Index terms with the flow item they occur in, in document order.
-    index_terms: Vec<(String, usize)>,
+    index_terms: Vec<(index::IndexTerm, usize)>,
+    /// Index terms inside each footnote definition, by definition index.
+    note_index_terms: Vec<Vec<index::IndexTerm>>,
+    /// While compiling a table cell the flow item is not known yet, so the
+    /// markers stay in `pending_index` until the table has been placed.
+    defer_index: bool,
     /// Entries from the previous index pass; empty on the first pass.
     index_entries: Vec<TocEntry>,
     /// Figure and table captions found in this pass, with their flow item.
@@ -1628,6 +1636,12 @@ impl Builder<'_> {
                     }
                     let mut occupied = vec![vec![false; columns]; row_count];
                     let mut cells: Vec<TableCellLayout> = Vec::new();
+                    // Markers inside cells are collected while the cells are
+                    // compiled and attached to the table once it is placed.
+                    let outer_defer = self.defer_index;
+                    if collect_index {
+                        self.defer_index = true;
+                    }
 
                     for (row_index, row) in node.rows.iter().enumerate() {
                         let row_style = self.style(row.meta.id, style);
@@ -1647,7 +1661,14 @@ impl Builder<'_> {
                             let mut cell_items = Vec::new();
                             let saved = self.content_width;
                             self.content_width = width;
-                            self.flow_into(&cell.blocks, cell_style, &mut cell_items, false)?;
+                            // A cell's blocks are not flow items, so their
+                            // markers wait for the table item to exist.
+                            self.flow_into(
+                                &cell.blocks,
+                                cell_style,
+                                &mut cell_items,
+                                collect_index,
+                            )?;
                             self.content_width = saved;
 
                             let mut blocks = Vec::new();
@@ -1694,6 +1715,9 @@ impl Builder<'_> {
                             column += colspan;
                         }
                     }
+
+                    let cell_index_terms = core::mem::take(&mut self.pending_index);
+                    self.defer_index = outer_defer;
 
                     // Row gaps are part of the row height (except above row 0).
                     let mut row_heights = vec![Width::ZERO; row_count];
@@ -1998,6 +2022,12 @@ impl Builder<'_> {
                         }),
                     });
 
+                    if collect_index && !outer_defer {
+                        for term in cell_index_terms {
+                            self.index_terms.push((term, table_index));
+                        }
+                    }
+
                     if !node.caption.is_empty() {
                         let caption_node = node
                             .caption
@@ -2138,8 +2168,9 @@ impl Builder<'_> {
             }
 
             // Index markers belong to the block that was just compiled; the
-            // last item is the caption when a float added one.
-            if collect_index {
+            // last item is the caption when a float added one. Markers inside a
+            // table cell are attached by the table, once its item exists.
+            if collect_index && !self.defer_index {
                 if items.len() > before && !self.pending_index.is_empty() {
                     let item = items.len() - 1;
                     for term in self.pending_index.drain(..) {
@@ -2148,7 +2179,18 @@ impl Builder<'_> {
                 } else {
                     self.pending_index.clear();
                 }
-            } else {
+                // A footnote is printed on the page that refers to it, so its
+                // markers belong to the referring item, not to the note area.
+                for item in before..items.len() {
+                    for note in items[item].footnotes.clone() {
+                        if let Some(terms) = self.note_index_terms.get(note) {
+                            for term in terms {
+                                self.index_terms.push((term.clone(), item));
+                            }
+                        }
+                    }
+                }
+            } else if !collect_index {
                 self.pending_index.clear();
             }
 
@@ -2548,7 +2590,7 @@ impl Builder<'_> {
                     decor,
                     link: link.map(String::from),
                 }),
-                Inline::Index(node) => self.pending_index.push(node.term.clone()),
+                Inline::Index(node) => self.pending_index.push(index::parse(&node.term)),
                 Inline::LineBreak(_) => out.push(OwnedSpan {
                     text: String::new(),
                     style,
@@ -3212,30 +3254,22 @@ impl Builder<'_> {
 
     /// Sorted, de-duplicated index entries with their page labels.
     fn index_entries_found(&self, label_of: &dyn Fn(usize) -> String) -> Vec<TocEntry> {
-        let mut terms: Vec<&String> = self.index_terms.iter().map(|(term, _)| term).collect();
-        terms.sort();
-        terms.dedup();
-        let mut found = Vec::new();
-        for term in terms {
-            let mut pages: Vec<String> = Vec::new();
-            for (candidate, item) in &self.index_terms {
-                if candidate != term {
-                    continue;
-                }
-                let label = label_of(*item);
-                if !label.is_empty() && !pages.contains(&label) {
-                    pages.push(label);
-                }
-            }
-            if !pages.is_empty() {
-                found.push(TocEntry {
-                    level: 0,
-                    text: term.clone(),
-                    page: pages.join(", "),
-                });
-            }
-        }
-        found
+        let collation = match self.styled.index().map(|spec| spec.sort) {
+            Some(soma_template::IndexSort::Pinyin) => soma_collate::Collation::Pinyin,
+            _ => soma_collate::Collation::Codepoint,
+        };
+        index::rows(&self.index_terms, label_of, collation)
+            .into_iter()
+            .filter(|row| !row.text.is_empty())
+            .map(|row| TocEntry {
+                level: row.level,
+                text: row.text,
+                page: match row.see {
+                    Some((kind, target)) => alloc::format!("{} {}", kind.label(), target),
+                    None => row.pages.join(", "),
+                },
+            })
+            .collect()
     }
 
     /// Emit the index at the tail of the flow.
@@ -3274,15 +3308,37 @@ impl Builder<'_> {
             });
         }
         let entries = self.index_entries.clone();
+        // A sub-entry is set in from its parent by one ideograph of its own
+        // size: an index is scanned by silhouette, and a depth proportional to
+        // the page would drift as the entry style changes.
+        let step = Width(
+            self.metrics
+                .advance("中", entry_style)
+                .0
+                .max(Width::EM.0 / 2),
+        );
         for entry in &entries {
-            self.toc_entry_row(
-                entry_style,
-                &entry.text,
-                &entry.page,
-                Width::ZERO,
-                true,
-                items,
-            )?;
+            let indent = Width(step.0 * entry.level as i32);
+            if entry.page.is_empty() {
+                // A parent line exists only to hold its children: no page
+                // number, and no leader dots running to the margin.
+                let node = self.generated_id();
+                let mut row = self.text_item_at(
+                    node,
+                    BoxKind::Paragraph,
+                    &entry.text,
+                    entry_style,
+                    Slot {
+                        x: indent,
+                        width: Width(self.content_width.0 - indent.0),
+                        align: Align::Left,
+                    },
+                )?;
+                row.before = Glue::ZERO;
+                items.push(row);
+                continue;
+            }
+            self.toc_entry_row(entry_style, &entry.text, &entry.page, indent, true, items)?;
         }
         if items.len() > first {
             // An index starts on its own page unless it is empty.
@@ -3490,6 +3546,81 @@ impl Builder<'_> {
         }
         self.notes.blocks = compiled;
         Ok(())
+    }
+}
+
+/// Index markers inside each footnote definition, in definition order.
+///
+/// A footnote is printed on the page that refers to it, so a marker in a note
+/// belongs to the referring item; `flow_into` looks the terms up by note index.
+fn note_index_terms(doc: &Document) -> Vec<Vec<index::IndexTerm>> {
+    doc.footnotes
+        .iter()
+        .map(|definition| {
+            let mut terms = Vec::new();
+            for block in &definition.blocks {
+                block_index_terms(block, &mut terms);
+            }
+            terms
+        })
+        .collect()
+}
+
+fn block_index_terms(block: &Block, terms: &mut Vec<index::IndexTerm>) {
+    match block {
+        Block::Paragraph(node) => inline_index_terms(&node.inlines, terms),
+        Block::Heading(node) => inline_index_terms(&node.inlines, terms),
+        Block::List(node) => {
+            for item in &node.items {
+                for block in &item.blocks {
+                    block_index_terms(block, terms);
+                }
+            }
+        }
+        Block::BlockQuote(node) => {
+            for block in &node.blocks {
+                block_index_terms(block, terms);
+            }
+        }
+        Block::Figure(node) => inline_index_terms(&node.caption, terms),
+        Block::Table(node) => {
+            inline_index_terms(&node.caption, terms);
+            for row in &node.rows {
+                for cell in &row.cells {
+                    for block in &cell.blocks {
+                        block_index_terms(block, terms);
+                    }
+                }
+            }
+        }
+        Block::Generated(node) => {
+            for block in &node.blocks {
+                block_index_terms(block, terms);
+            }
+        }
+        Block::CodeBlock(_)
+        | Block::MathBlock(_)
+        | Block::ThematicBreak(_)
+        | Block::PageBreak(_)
+        | Block::Section(_)
+        | Block::Raw(_) => {}
+    }
+}
+
+fn inline_index_terms(inlines: &[Inline], terms: &mut Vec<index::IndexTerm>) {
+    for inline in inlines {
+        match inline {
+            Inline::Index(node) => terms.push(index::parse(&node.term)),
+            Inline::Strong(node)
+            | Inline::Emphasis(node)
+            | Inline::Underline(node)
+            | Inline::Strikethrough(node)
+            | Inline::SmallCaps(node)
+            | Inline::Superscript(node)
+            | Inline::Subscript(node) => inline_index_terms(&node.children, terms),
+            Inline::Link(node) => inline_index_terms(&node.children, terms),
+            _ => {}
+        }
     }
 }
 

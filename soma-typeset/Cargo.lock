@@ -21,6 +21,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "soma-collate"
+version = "0.1.0"
+
+[[package]]
 name = "soma-core"
 version = "0.1.0"
 
@@ -88,6 +92,7 @@ dependencies = [
 name = "soma-layout"
 version = "0.1.0"
 dependencies = [
+ "soma-collate",
  "soma-core",
  "soma-doc",
  "soma-math",

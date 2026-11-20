@@ -58,7 +58,7 @@ check_deps() {
     done
 }
 
-check_deps soma-layout "soma-layout soma-core soma-doc soma-math soma-metrics soma-rules soma-template"
+check_deps soma-layout "soma-collate soma-layout soma-core soma-doc soma-math soma-metrics soma-rules soma-template"
 check_deps soma-md "soma-md soma-doc"
 check_deps soma-html "soma-html soma-doc"
 check_deps soma-latex "soma-latex soma-doc"

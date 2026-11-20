@@ -31,9 +31,9 @@ pub use style::{
 };
 pub use template::{
     parse_template, CoverSpec, Declaration, FontSlant, FontWeight, FootnoteNumbering, FootnoteSpec,
-    FrontMatterNumbering, HeadingNumbering, IndexSpec, MasterSpec, NumberingSpec, PageSize,
-    PageSpec, Property, PropertyValue, RuleStyle, Selector, StyleRule, TableSpec, Template,
-    TocSpec, ELEMENTS, SCHEMA,
+    FrontMatterNumbering, HeadingNumbering, IndexSort, IndexSpec, MasterSpec, NumberingSpec,
+    PageSize, PageSpec, Property, PropertyValue, RuleStyle, Selector, StyleRule, TableSpec,
+    Template, TocSpec, ELEMENTS, SCHEMA,
 };
 pub use units::{LengthSpec, LineHeightSpec, Rational, Unit, UNITS_PER_EM};
 

@@ -545,14 +545,8 @@ fn letter_spacing_widens_the_gaps_between_atoms() {
     let tracked = styled(&doc, TRACKED);
     let plain = layout(&doc, &tight, &metrics(), &engine()).expect("layout");
     let spaced = layout(&doc, &tracked, &metrics(), &engine()).expect("layout");
-    let plain_width = plain.pages[0].blocks[0].lines[0]
-        .line
-        .natural_width
-        .0;
-    let spaced_width = spaced.pages[0].blocks[0].lines[0]
-        .line
-        .natural_width
-        .0;
+    let plain_width = plain.pages[0].blocks[0].lines[0].line.natural_width.0;
+    let spaced_width = spaced.pages[0].blocks[0].lines[0].line.natural_width.0;
 
     assert_eq!(
         spaced_width - plain_width,

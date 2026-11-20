@@ -121,6 +121,14 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
         Some(index) => {
             out.write_str("{\"title\":")?;
             write_opt_string(out, index.title.as_deref())?;
+            // The default order writes no key, so templates that do not ask
+            // for pinyin keep the canonical bytes they had before the field
+            // existed.
+            if index.sort != crate::template::IndexSort::default() {
+                out.write_str(",\"sort\":\"")?;
+                out.write_str(index.sort.as_str())?;
+                out.write_char('\"')?;
+            }
             out.write_char('}')?;
         }
         None => out.write_str("null")?,

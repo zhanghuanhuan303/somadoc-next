@@ -618,4 +618,21 @@ styles:
     let error =
         parse_template(&source.replace("title: 索引", "entries: 3")).expect_err("unknown key");
     assert!(error.reason.contains("unknown"));
+
+    // The order is a template decision; the default writes no canonical key so
+    // existing templates keep their bytes.
+    let pinyin = source.replace("  title: 索引\n", "  title: 索引\n  sort: pinyin\n");
+    let template = parse_template(&pinyin).expect("sort parses");
+    assert_eq!(
+        template.index.as_ref().map(|index| index.sort),
+        Some(soma_template::IndexSort::Pinyin)
+    );
+    let json = template.canonical_json();
+    assert!(
+        json.contains("\"index\":{\"title\":\"索引\",\"sort\":\"pinyin\"}"),
+        "{json}"
+    );
+    let bad = source.replace("  title: 索引\n", "  title: 索引\n  sort: stroke\n");
+    let error = parse_template(&bad).expect_err("unknown order");
+    assert!(error.reason.contains("codepoint or pinyin"));
 }
