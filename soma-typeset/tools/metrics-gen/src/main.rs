@@ -22,7 +22,7 @@ use std::process::ExitCode;
 
 const UNIT: i32 = 4096;
 const MAGIC: u32 = 0x534d_5431; // "SMT1"
-const VERSION: u16 = 3;
+const VERSION: u16 = 4;
 
 /// Codepoint blocks whose advance is expected to be uniform (CJK).
 const UNIFORM_BLOCKS: &[(u32, u32)] = &[
@@ -821,6 +821,14 @@ fn row(measure: &Measure, path: String, face: usize) -> AuditRow {
     }
 }
 
+fn write_varint(out: &mut Vec<u8>, mut value: u32) {
+    while value >= 0x80 {
+        out.push((value as u8 & 0x7f) | 0x80);
+        value >>= 7;
+    }
+    out.push(value as u8);
+}
+
 /// One byte holds a bearing with 16 units of 1/4096 em of resolution.
 fn quantise(units: i32) -> u8 {
     let clamped = units.clamp(0, UNIT) as i64;
@@ -1379,6 +1387,12 @@ fn run() -> Result<(), String> {
         ink.sort_unstable_by_key(|(cp, _, _)| *cp);
         ink.dedup_by_key(|(cp, _, _)| *cp);
 
+        // Version 4 carries punctuation ink inside the per-glyph section, so the
+        // version 2 section becomes redundant.
+        if VERSION >= 4 {
+            ink = Vec::new();
+        }
+
         // Every glyph's edges, quantised to a byte each. A line end can land on
         // any character, and with fallback it can land on a face other than the
         // body's (ADR-0038).
@@ -1469,8 +1483,10 @@ fn run() -> Result<(), String> {
             bytes.extend_from_slice(&(*right as i16).to_le_bytes());
         }
         bytes.extend_from_slice(&(face.glyph_ink.len() as u32).to_le_bytes());
+        let mut previous = 0u32;
         for (cp, left, right) in &face.glyph_ink {
-            bytes.extend_from_slice(&cp.to_le_bytes());
+            write_varint(&mut bytes, cp - previous);
+            previous = *cp;
             bytes.push(*left);
             bytes.push(*right);
         }

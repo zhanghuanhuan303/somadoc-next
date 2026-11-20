@@ -17,9 +17,13 @@
 //!   per entry: u32 codepoint | i32 advance
 //!   u32 ink_count
 //!   per ink: u32 codepoint | i16 ink_left | i16 ink_right
-//!   u32 glyph_ink_count                         (version 3)
-//!   per glyph: u32 codepoint | u8 left | u8 right
+//!   u32 glyph_ink_count                         (version 3+)
+//!   per glyph: varint(codepoint delta) | u8 left | u8 right
 //! ```
+//!
+//! Version 3 stored the codepoint as a `u32`; version 4 uses a delta from the
+//! previous entry as a LEB128 varint. Adjacent Han glyphs cost one byte instead
+//! of four, which halves the blob without changing a single measurement.
 //!
 //! `ink_left`/`ink_right` are the gaps between the glyph outline and its
 //! advance box. Version 2 recorded them for punctuation only (ADR-0037);
@@ -39,7 +43,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 pub const MAGIC: u32 = 0x534d_5431;
-pub const VERSION: u16 = 3;
+pub const VERSION: u16 = 4;
 /// Oldest blob layout this parser still reads.
 pub const VERSION_MIN: u16 = 1;
 pub const UNIT: i32 = 4096;
@@ -271,7 +275,13 @@ impl MetricsTable {
                 glyph_ink.reserve(count.min(1 << 18));
                 let mut previous = 0u32;
                 for index in 0..count {
-                    let codepoint = cursor.u32()?;
+                    let codepoint = if version >= 4 {
+                        previous
+                            .checked_add(cursor.varint()?)
+                            .ok_or(MetricsError::new("codepoint delta overflows"))?
+                    } else {
+                        cursor.u32()?
+                    };
                     let left = dequantise(cursor.u8()?);
                     let right = dequantise(cursor.u8()?);
                     if index > 0 && codepoint <= previous {
@@ -412,6 +422,22 @@ impl<'a> Cursor<'a> {
 
     fn i32(&mut self) -> Result<i32, MetricsError> {
         Ok(self.u32()? as i32)
+    }
+
+    fn varint(&mut self) -> Result<u32, MetricsError> {
+        let mut value = 0u32;
+        let mut shift = 0u32;
+        loop {
+            let byte = self.u8()?;
+            value |= ((byte & 0x7f) as u32) << shift;
+            if byte & 0x80 == 0 {
+                return Ok(value);
+            }
+            shift += 7;
+            if shift >= 35 {
+                return Err(MetricsError::new("varint is too long"));
+            }
+        }
     }
 
     fn remaining(&self) -> usize {

@@ -126,7 +126,7 @@ Cumulative public test files:
 | `effect.rs` (eval) | 7 | Gate Q′ structural claims on the scorecard |
 | `engine.rs` | 15 | `soma.engine/1`: parse, reject, canonical hash, layout equivalence |
 | `corpus.rs` (eval) | 9 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
-| `a5_md.rs` | 12 | Markdown subset, inlines, spans, index extension, validity |
+| `a5_md.rs` | 14 | Markdown subset, inlines, spans, index extension, front matter, validity |
 | `html.rs` (html) | 9 | HTML subset shapes, table grid, degradation, recovery, pipeline |
 | `latex.rs` (latex) | 15 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, recovery, pipeline |
 | `math.rs` (soma-math) | 26 | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, spacing, styles, errors |
@@ -166,7 +166,7 @@ Cumulative public test files:
 | core unit | 24 | IR, units, breaker, result, presets |
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 
-Total: **550 tests**.
+Total: **552 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.
