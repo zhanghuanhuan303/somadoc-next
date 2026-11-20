@@ -8,10 +8,12 @@
 //!   and every other glyph becomes a single `endchar`;
 //! * the charset is rewritten to identity, so the CID a PDF viewer reads out
 //!   of the embedded font is the glyph id this crate already uses;
-//! * a name-keyed face is promoted to CID-keyed with a synthesised
-//!   `ROS`/`FDArray`/`FDSelect`;
 //! * the FDArray, the private dicts and the local subrs move as one blob, so
 //!   only absolute `Private` offsets are re-encoded.
+//!
+//! Only CID-keyed programs are embedded. A name-keyed face would have to be
+//! re-charseted, and that breaks the name lookup `seac` accent composition
+//! depends on, so it is refused with an error that says so.
 
 use alloc::format;
 use alloc::string::String;
