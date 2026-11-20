@@ -5,10 +5,12 @@ use soma_doc::block::Heading;
 use soma_doc::node::NodeMeta;
 use soma_doc::{Block, Document, Text};
 use soma_layout::{layout, PagedLayout};
-use soma_render_pdf::{render, PdfFont, PdfFonts, PdfMetadata};
+use soma_render_pdf::{render, PdfFont, PdfFonts, PdfMetadata, ProgramKind};
 use soma_template::{parse_template, resolve, StyledDoc};
 
 const FONT: &[u8] = include_bytes!("fixtures/tiny.ttf");
+const CFF: &[u8] = include_bytes!("fixtures/tiny-cff.otf");
+const CFF_NAME: &[u8] = include_bytes!("fixtures/tiny-cff-name.otf");
 
 const TEMPLATE: &str = r#"
 name: pdf
@@ -55,10 +57,17 @@ fn build(blocks: Vec<Block>) -> (PagedLayout, StyledDoc) {
 }
 
 fn render_pdf(layout: &PagedLayout, styled: &StyledDoc) -> Vec<u8> {
-    let font = PdfFont::from_bytes(FONT.to_vec(), 0).expect("tiny font");
+    render_pdf_with(
+        layout,
+        styled,
+        &PdfFont::from_bytes(FONT.to_vec(), 0).expect("tiny font"),
+    )
+}
+
+fn render_pdf_with(layout: &PagedLayout, styled: &StyledDoc, font: &PdfFont) -> Vec<u8> {
     let fonts = PdfFonts {
         fallback: None,
-        regular: &font,
+        regular: font,
         bold: None,
         math: None,
     };
@@ -89,7 +98,9 @@ fn the_tiny_fixture_maps_bmp_characters() {
 #[test]
 fn a_subset_is_a_standalone_sfnt() {
     let font = PdfFont::from_bytes(FONT.to_vec(), 0).expect("tiny font");
-    let program = font.subset(&[1, 3]);
+    let subset = font.subset(&[1, 3]).expect("subset");
+    assert_eq!(subset.kind, ProgramKind::TrueType);
+    let program = subset.program;
     assert_eq!(&program[..4], &[0, 1, 0, 0], "sfnt version");
     assert!(program.windows(4).any(|window| window == b"glyf"));
     assert!(program.windows(4).any(|window| window == b"loca"));
@@ -97,14 +108,57 @@ fn a_subset_is_a_standalone_sfnt() {
 }
 
 #[test]
-fn cff_fonts_are_rejected_with_a_clear_error() {
-    let mut data = vec![0u8; 64];
-    data[..4].copy_from_slice(b"OTTO");
+fn a_cid_keyed_cff_is_read_like_any_other_face() {
+    let font = PdfFont::from_bytes(CFF.to_vec(), 0).expect("cff font");
+    assert_eq!(font.program_kind(), ProgramKind::CidCff);
+    assert_eq!(font.glyph('A' as u32), 1);
+    assert_eq!(font.glyph(0x4E2D), 3);
+    assert_eq!(font.glyph('Z' as u32), 0, "missing characters use .notdef");
+    assert_eq!(font.width_1000(3), 1000);
+    assert_eq!(font.cid_system().ordering, "Identity");
+}
+
+#[test]
+fn a_name_keyed_cff_says_why_it_cannot_be_embedded() {
+    let font = PdfFont::from_bytes(CFF_NAME.to_vec(), 0).expect("name-keyed cff");
+    let error = font
+        .subset(&[1, 2])
+        .expect_err("name-keyed CFF is out of scope");
+    assert!(error.reason.contains("name-keyed"), "{}", error.reason);
+}
+
+#[test]
+fn a_cff_face_is_embedded_as_a_cidfonttype0() {
+    let blocks = vec![Block::Paragraph(soma_doc::block::Paragraph::new(
+        NodeMeta::synthesized(),
+        vec![text("A B 中")],
+    ))];
+    let (layout, styled) = build(blocks);
+    let font = PdfFont::from_bytes(CFF.to_vec(), 0).expect("cff font");
+    let pdf = render_pdf_with(&layout, &styled, &font);
+    let text = String::from_utf8_lossy(&pdf);
+    assert!(text.contains("/FontFile3"), "CFF is a FontFile3");
+    assert!(
+        text.contains("/Subtype /CIDFontType0C"),
+        "Type 2 charstrings"
+    );
+    assert!(text.contains("/Subtype /CIDFontType0 "), "CIDFontType0");
+    assert!(!text.contains("/FontFile2"), "no TrueType program");
+}
+
+#[test]
+fn cff2_is_rejected_with_a_clear_error() {
+    let mut data = CFF_NAME.to_vec();
+    let at = data
+        .windows(4)
+        .position(|window| window == b"CFF ")
+        .expect("cff table tag");
+    data[at..at + 4].copy_from_slice(b"CFF2");
     let error = match PdfFont::from_bytes(data, 0) {
-        Ok(_) => panic!("CFF is unsupported"),
+        Ok(_) => panic!("CFF2 is unsupported"),
         Err(error) => error,
     };
-    assert!(error.reason.contains("CFF"), "{}", error.reason);
+    assert!(error.reason.contains("CFF2"), "{}", error.reason);
 }
 
 #[test]

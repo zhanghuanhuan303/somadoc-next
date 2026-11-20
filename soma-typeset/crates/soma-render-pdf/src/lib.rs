@@ -10,9 +10,11 @@
 
 extern crate alloc;
 
+mod cff;
 mod font;
 
-pub use font::{PdfError, PdfFont, PdfFontDescriptor};
+pub use cff::CidSystem;
+pub use font::{PdfError, PdfFont, PdfFontDescriptor, ProgramKind, Subset};
 
 use alloc::format;
 use alloc::string::String;
@@ -100,8 +102,8 @@ pub fn render(
         let font = fonts.font(role);
         let entries = used.entries(role);
         let gids: Vec<u16> = entries.iter().map(|(gid, _)| *gid).collect();
-        let program = font.subset(&gids);
-        embedded.push((role, embed_font(&mut pdf, font, role, program, &entries)));
+        let subset = font.subset(&gids)?;
+        embedded.push((role, embed_font(&mut pdf, font, role, &subset, &entries)));
     }
 
     let mut page_ids = Vec::with_capacity(layout.pages.len());
@@ -339,7 +341,7 @@ fn embed_font(
     pdf: &mut Pdf,
     font: &PdfFont,
     role: Role,
-    program: Vec<u8>,
+    subset: &Subset,
     entries: &[(u16, u32)],
 ) -> EmbeddedFont {
     let descriptor = font.descriptor();
@@ -351,10 +353,12 @@ fn embed_font(
     };
 
     let file = pdf.reserve();
-    pdf.set(
-        file,
-        stream(format!("/Length1 {}", program.len()).as_bytes(), &program),
-    );
+    let program = &subset.program;
+    let stream_dict = match subset.kind {
+        ProgramKind::TrueType => format!("/Length1 {}", program.len()),
+        ProgramKind::CidCff => String::from("/Subtype /CIDFontType0C"),
+    };
+    pdf.set(file, stream(stream_dict.as_bytes(), program));
 
     let unicode = pdf.reserve();
     pdf.set(unicode, to_unicode(entries));
@@ -364,11 +368,15 @@ fn embed_font(
         let _ = write!(widths, "{} [{}] ", gid, font.width_1000(*gid));
     }
 
+    let file_key = match subset.kind {
+        ProgramKind::TrueType => "FontFile2",
+        ProgramKind::CidCff => "FontFile3",
+    };
     let descriptor_id = pdf.reserve();
     pdf.set(
         descriptor_id,
         format!(
-            "<< /Type /FontDescriptor /FontName /{name} /Flags {} /FontBBox [{} {} {} {}] /ItalicAngle {} /Ascent {} /Descent {} /CapHeight {} /StemV 80 /FontFile2 {file} 0 R >>",
+            "<< /Type /FontDescriptor /FontName /{name} /Flags {} /FontBBox [{} {} {} {}] /ItalicAngle {} /Ascent {} /Descent {} /CapHeight {} /StemV 80 /{file_key} {file} 0 R >>",
             descriptor.flags,
             descriptor.bbox[0],
             descriptor.bbox[1],
@@ -382,11 +390,19 @@ fn embed_font(
         .into_bytes(),
     );
 
+    let system = font.cid_system();
+    let (subtype, glyph_map) = match subset.kind {
+        ProgramKind::TrueType => ("CIDFontType2", " /CIDToGIDMap /Identity"),
+        // A CIDFontType0 reads the CID-to-glyph mapping out of the embedded
+        // font's charset, which the subsetter rewrote to identity.
+        ProgramKind::CidCff => ("CIDFontType0", ""),
+    };
     let cid = pdf.reserve();
     pdf.set(
         cid,
         format!(
-            "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /{name} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor {descriptor_id} 0 R /DW 1000 /W [{widths}] /CIDToGIDMap /Identity >>"
+            "<< /Type /Font /Subtype /{subtype} /BaseFont /{name} /CIDSystemInfo << /Registry ({}) /Ordering ({}) /Supplement {} >> /FontDescriptor {descriptor_id} 0 R /DW 1000 /W [{widths}]{glyph_map} >>",
+            system.registry, system.ordering, system.supplement
         )
         .into_bytes(),
     );

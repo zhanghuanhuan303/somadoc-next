@@ -1,14 +1,16 @@
-//! TrueType parsing and subsetting for the PDF backend.
+//! TrueType and CFF parsing and subsetting for the PDF backend.
 //!
-//! Only fonts with `glyf` outlines are supported: a PDF font program is built
-//! by copying the used glyphs, rebuilding `loca`/`glyf`, and embedding the
-//! result as `FontFile2`. CFF/OTF faces are rejected with a clear error rather
-//! than emitting a font most readers cannot use.
+//! A TrueType program is built by copying the used glyphs, rebuilding
+//! `loca`/`glyf`, and embedding the result as `FontFile2`. A CFF program is
+//! rebuilt as CID-keyed Type 2 charstrings and embedded as `FontFile3`
+//! (ADR-0039). Both keep glyph ids, so one id space reaches the text operator.
 
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+
+use crate::cff::{self, CidSystem};
 
 /// A PDF renderer error (font, layout, or document size).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,14 +39,26 @@ struct Table {
     length: usize,
 }
 
+/// Where the outlines live.
+#[derive(Clone)]
+enum Outlines {
+    TrueType {
+        loca: Vec<u32>,
+        glyf_offset: usize,
+        glyf_length: usize,
+    },
+    Cff {
+        offset: usize,
+        length: usize,
+    },
+}
+
 /// Parsed tables that do not depend on the used glyph set.
 #[derive(Clone)]
 struct Face {
     tables: Vec<Table>,
-    loca: Vec<u32>,
+    outlines: Outlines,
     num_glyphs: u16,
-    glyf_offset: usize,
-    glyf_length: usize,
 }
 
 /// An embeddable TrueType face.
@@ -64,6 +78,7 @@ pub struct PdfFont {
     cap_height: i16,
     bold: bool,
     serif: bool,
+    cid: Option<CidSystem>,
 }
 
 impl PdfFont {
@@ -110,6 +125,10 @@ impl PdfFont {
                 }
             }
         }
+        let cid = match face.outlines {
+            Outlines::Cff { offset, length } => cff::cid_system(&data[offset..offset + length]),
+            Outlines::TrueType { .. } => None,
+        };
         Ok(Self {
             data,
             face,
@@ -123,6 +142,7 @@ impl PdfFont {
             cap_height,
             bold,
             serif: false,
+            cid,
         })
     }
 
@@ -154,11 +174,49 @@ impl PdfFont {
         advance * 1000 / self.upem.max(1) as u32
     }
 
-    /// Build a standalone TrueType program containing only `used` glyphs.
+    /// Build a font program containing only `used` glyphs.
     ///
     /// Glyph ids are preserved (unused glyphs become empty), so `Identity-H`
     /// CIDs stay equal to the ids the shaper and this renderer already use.
-    pub fn subset(&self, used: &[u16]) -> Vec<u8> {
+    pub fn subset(&self, used: &[u16]) -> Result<Subset, PdfError> {
+        match self.face.outlines {
+            Outlines::Cff { offset, length } => Ok(Subset {
+                program: cff::subset(&self.data[offset..offset + length], used, self.num_glyphs())?,
+                kind: ProgramKind::CidCff,
+            }),
+            Outlines::TrueType { .. } => Ok(Subset {
+                program: self.subset_true_type(used),
+                kind: ProgramKind::TrueType,
+            }),
+        }
+    }
+
+    /// What kind of program [`PdfFont::subset`] builds for this face.
+    pub fn program_kind(&self) -> ProgramKind {
+        match self.face.outlines {
+            Outlines::Cff { .. } => ProgramKind::CidCff,
+            Outlines::TrueType { .. } => ProgramKind::TrueType,
+        }
+    }
+
+    /// `/CIDSystemInfo` values for an embedded CID-keyed program.
+    pub fn cid_system(&self) -> CidSystem {
+        self.cid.clone().unwrap_or_default()
+    }
+
+    fn num_glyphs(&self) -> u16 {
+        self.face.num_glyphs
+    }
+
+    fn subset_true_type(&self, used: &[u16]) -> Vec<u8> {
+        let (loca_table, glyf_offset, glyf_length) = match self.face.outlines {
+            Outlines::TrueType {
+                ref loca,
+                glyf_offset,
+                glyf_length,
+            } => (loca, glyf_offset, glyf_length),
+            Outlines::Cff { .. } => unreachable!("only called for TrueType outlines"),
+        };
         let mut include = vec![false; self.face.num_glyphs as usize];
         let mut queue: Vec<u16> = Vec::with_capacity(used.len() + 1);
         include[0] = true;
@@ -183,12 +241,10 @@ impl PdfFont {
         offsets.push(0u32);
         for (gid, &used) in include.iter().enumerate() {
             if used {
-                let start = self.face.loca[gid] as usize;
-                let end = self.face.loca[gid + 1] as usize;
-                if end > start && end <= self.face.glyf_length {
-                    glyf.extend_from_slice(
-                        &self.data[self.face.glyf_offset + start..self.face.glyf_offset + end],
-                    );
+                let start = loca_table[gid] as usize;
+                let end = loca_table[gid + 1] as usize;
+                if end > start && end <= glyf_length {
+                    glyf.extend_from_slice(&self.data[glyf_offset + start..glyf_offset + end]);
                     while glyf.len() % 4 != 0 {
                         glyf.push(0);
                     }
@@ -262,16 +318,24 @@ impl PdfFont {
     /// Composite glyph components, resolved from `glyf`.
     fn components(&self, gid: u16) -> Vec<u16> {
         let mut out = Vec::new();
+        let Outlines::TrueType {
+            ref loca,
+            glyf_offset,
+            glyf_length,
+        } = self.face.outlines
+        else {
+            return out;
+        };
         let index = gid as usize;
-        if index + 1 >= self.face.loca.len() {
+        if index + 1 >= loca.len() {
             return out;
         }
-        let start = self.face.loca[index] as usize;
-        let end = self.face.loca[index + 1] as usize;
-        if end <= start || end > self.face.glyf_length {
+        let start = loca[index] as usize;
+        let end = loca[index + 1] as usize;
+        if end <= start || end > glyf_length {
             return out;
         }
-        let data = &self.data[self.face.glyf_offset + start..self.face.glyf_offset + end];
+        let data = &self.data[glyf_offset + start..glyf_offset + end];
         if data.len() < 10 {
             return out;
         }
@@ -300,6 +364,22 @@ impl PdfFont {
         }
         out
     }
+}
+
+/// Which stream a subset has to be written as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProgramKind {
+    /// `glyf` outlines: `/FontFile2` and `/CIDFontType2`.
+    TrueType,
+    /// CID-keyed Type 2 charstrings: `/FontFile3` and `/CIDFontType0`.
+    CidCff,
+}
+
+/// A font program ready for `/FontFile2` or `/FontFile3`.
+#[derive(Clone, Debug)]
+pub struct Subset {
+    pub program: Vec<u8>,
+    pub kind: ProgramKind,
 }
 
 /// Descriptor values already scaled to 1000 units per em.
@@ -334,12 +414,7 @@ impl Face {
             0
         };
         let version = read_u32(data, base)?;
-        if version == 0x4F54_544F {
-            return Err(PdfError::new(
-                "PDF output needs a TrueType (glyf) font; CFF/OTF is not supported",
-            ));
-        }
-        if version != 0x0001_0000 && version != 0x7472_7565 {
+        if version != 0x0001_0000 && version != 0x7472_7565 && version != 0x4F54_544F {
             return Err(PdfError::new("unsupported sfnt version"));
         }
         let count = read_u16(data, base + 4)? as usize;
@@ -359,18 +434,34 @@ impl Face {
                 length,
             });
         }
-        let face = Self {
-            tables: tables.clone(),
-            loca: Vec::new(),
+        let mut face = Self {
+            tables,
+            outlines: Outlines::Cff {
+                offset: 0,
+                length: 0,
+            },
             num_glyphs: 0,
-            glyf_offset: 0,
-            glyf_length: 0,
         };
         let head = face.required(b"head")?;
         let maxp = face.required(b"maxp")?;
-        let loca = face.required(b"loca")?;
-        let glyf = face.required(b"glyf")?;
         let num_glyphs = read_u16(data, maxp.offset + 4)?;
+        face.num_glyphs = num_glyphs;
+        if let Some(table) = face.find(b"CFF2") {
+            let _ = table;
+            return Err(PdfError::new(
+                "CFF2 (variable) outlines are not supported; use a static OTF or a TrueType face",
+            ));
+        }
+        if let Some(table) = face.find(b"CFF ") {
+            face.outlines = Outlines::Cff {
+                offset: table.offset,
+                length: table.length,
+            };
+            return Ok(face);
+        }
+        let glyf = face.required(b"glyf")?;
+        let loca = face.required(b"loca")?;
+        let _ = head;
         let format = read_i16(data, head.offset + 50)?;
         let mut offsets = Vec::with_capacity(num_glyphs as usize + 1);
         for index in 0..=num_glyphs as usize {
@@ -386,13 +477,12 @@ impl Face {
                 return Err(PdfError::new("font loca is not monotonic"));
             }
         }
-        Ok(Self {
-            tables,
+        face.outlines = Outlines::TrueType {
             loca: offsets,
-            num_glyphs,
             glyf_offset: glyf.offset,
             glyf_length: glyf.length,
-        })
+        };
+        Ok(face)
     }
 
     fn find(&self, tag: &[u8; 4]) -> Option<Table> {
