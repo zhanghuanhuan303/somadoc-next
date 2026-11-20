@@ -12,18 +12,19 @@ Design record: ADR-0029.
 soma render --input <file> [--template <file>] [--engine <file>] \
             [--format html|svg|json|pdf] [--out <file>] [--metrics <file>] \
             [--font <file[#index]>] [--font-bold <file[#index]>] \
-            [--font-math <file[#index]>]
+            [--font-math <file[#index]>] [--hyphenation <patterns>]
 soma check  --input <file> [--template <file>] [--engine <file>]
 soma --help
 ```
 
 | Flag | Meaning |
 |---|---|
-| `--input`, `-i` | Source document. Extension picks the frontend. |
+| `--input`, `-i` | Source document. Extension picks the frontend: `.md`, `.html`, `.tex`, or `.docx` (read as binary and imported; no layout fidelity). |
 | `--template`, `-t` | Pure-YAML template. Omitted: a built-in A4 template (20 mm margins, 10.5 pt / 1.6, justified). |
 | `--engine` | `soma.engine/1` file. Omitted: `publish-v1` defaults. |
 | `--format`, `-f` | `html` (default), `svg`, `json` (canonical page result), or `pdf`. |
 | `--font-fallback` | Optional rescue face for glyphs `--font` lacks. Layout must have measured it: add a `fallback:` face to the metrics table (`tools/metrics-gen --face fallback:normal:<file>`). Without it, missing glyphs render as `.notdef`. |
+| `--hyphenation` | TeX pattern file for Liang hyphenation of Latin words. Omitted: no word is broken. |
 | `--metrics` | `soma.metrics/2` table; omitted uses the embedded Noto table. Version 1 tables still load. A version 2 table built from the PDF font also carries punctuation ink, so layout can land a line end on the ink instead of a class average. |
 
 `tools/metrics-gen` also audits installed fonts (`--audit <dir>`), writes a fingerprint library (`--fingerprints <csv>`) and recognises an unknown face against one (`--identify <font> --library <csv>`), checks a face against a document's character set (`--coverage`) and ranks rescue faces (`--fallback`). See [`docs/fonts.md`](fonts.md) and [`docs/mixed-font.md`](mixed-font.md). `scripts/fonts.sh` picks a face and writes the table in one step.
