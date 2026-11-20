@@ -288,13 +288,14 @@ scripts/
   wasm-hash.sh # native vs wasm32-wasip1 canonical bytes
   kp-verify.sh # K-P closure: gates + bench budget + length policy
 docs/
+  soma-atlas.html     # single-file research atlas: capability map, gates, numbers, pitfalls
   architecture-v2.md  # frozen architecture
   fonts.md            # how a body font is scored and a metrics table is built
   mixed-font.md       # coverage, rescue faces, and the fallback plan
   font-preset.md      # proposal: ink-aware line width, one profile per font
-  adr/                # accepted decisions (ADR-0001 … 0053)
+  adr/                # accepted decisions (ADR-0001 … 0070)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
-  debt.md             # global not-done register (D01–D77, N1–N6)
+  debt.md             # global not-done register (D01–D93, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
   e1-q-report.md      # E1–Q′ delivery report
   engine.md           # soma.engine/1: shape, defaults, errors, usage
