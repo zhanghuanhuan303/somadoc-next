@@ -95,6 +95,21 @@ styles:
     declarations:
       font-size: 11pt
 
+  # A code block is not prose: smaller, tighter, in the sans family, and no
+  # first-line indent.
+  - selector:
+      element: codeBlock
+    declarations:
+      family: sans
+      font-size: 9pt
+      line-height: 1.5
+      # Justification would redistribute the spaces that carry a diagram's
+      # indentation.
+      align: left
+      first-indent: 0
+      space-before: 0.6em
+      space-after: 0.6em
+
   - selector:
       element: blockQuote
     declarations:
@@ -116,7 +131,24 @@ styles:
       element: listItem
     declarations:
       indent-left: 1.2em
-      first-indent: -1.2em
+
+  # The item is indented as a whole (list + listItem), so its first line needs
+  # no paragraph indent of its own. A true hanging indent — bullet out in the
+  # margin, text aligned after it — needs a negative `first-indent`, which the
+  # kernel refuses by design (D89).
+  - selector:
+      element: paragraph
+      within: listItem
+    declarations:
+      first-indent: 0
+
+  # A quotation is indented on both sides; that indent is the "this is another
+  # voice" signal, so its paragraphs do not add a first-line indent on top.
+  - selector:
+      element: paragraph
+      within: blockQuote
+    declarations:
+      first-indent: 0
 
   - selector:
       element: paragraph

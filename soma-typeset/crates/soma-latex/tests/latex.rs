@@ -236,6 +236,28 @@ fn unknown_commands_keep_their_braced_content() {
 }
 
 #[test]
+fn an_item_that_opens_with_an_inline_command_stays_one_paragraph() {
+    // `\textbf{...}` at the start of a block is an inline run, not an unknown
+    // block command: it must not split the item into two paragraphs.
+    let source = r"\begin{itemize}
+\item \textbf{甲}：正文
+\end{itemize}";
+    let document = parse_latex(source);
+    let Block::List(list) = &document.blocks[0] else {
+        panic!("list");
+    };
+    assert_eq!(list.items.len(), 1);
+    assert_eq!(list.items[0].blocks.len(), 1, "one paragraph per item");
+    let Block::Paragraph(paragraph) = &list.items[0].blocks[0] else {
+        panic!("paragraph");
+    };
+    assert!(
+        paragraph.inlines.len() >= 2,
+        "the bold run and the text that follows it"
+    );
+}
+
+#[test]
 fn malformed_latex_is_recovered_without_panicking() {
     let source = r"\section{未闭合
 正文 \textbf{粗体

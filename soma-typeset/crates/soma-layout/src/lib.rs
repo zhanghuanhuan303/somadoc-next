@@ -790,6 +790,8 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
         heading_counts: [0; 3],
         figure_count: 0,
         equation_count: 0,
+        extra_left: Width::ZERO,
+        extra_right: Width::ZERO,
         table_count: 0,
         front_matter_items: 0,
         pending_index: Vec::new(),
@@ -1320,6 +1322,11 @@ struct Builder<'a> {
     metrics: &'a dyn Metrics,
     engine: &'a BreakConfig,
     content_width: Width,
+    /// Indent contributed by enclosing quotes and lists: a block inside a
+    /// quote is narrowed by the quote's `indent-left`/`indent-right` as well as
+    /// by its own.
+    extra_left: Width,
+    extra_right: Width,
     text: TextIndex,
     notes: NoteMap,
     /// `(flow item index, node, plain text)` for headings, in document order.
@@ -1427,14 +1434,61 @@ impl Builder<'_> {
                 }
                 Block::List(node) => {
                     let style = self.style(node.meta.id, fallback);
-                    for item in &node.items {
+                    let list_indent = self.computed(style).indent_left;
+                    for (index, item) in node.items.iter().enumerate() {
                         let item_style = self.style(item.meta.id, style);
-                        self.flow_into(&item.blocks, item_style, items, collect_index)?;
+                        let item_indent = self.computed(item_style).indent_left;
+                        self.extra_left = self
+                            .extra_left
+                            .saturating_add(list_indent)
+                            .saturating_add(item_indent);
+                        // `•` for a bullet, `1.` for a number. The marker goes
+                        // into the item's first paragraph so it shares that
+                        // paragraph's first line.
+                        let marker = if node.ordered {
+                            alloc::format!("{}.", node.start + index as u32)
+                        } else {
+                            String::from("\u{2022}")
+                        };
+                        let mut marked = false;
+                        for block in &item.blocks {
+                            if !marked {
+                                if let Block::Paragraph(paragraph) = block {
+                                    let inlines =
+                                        self.prefixed_inlines(&paragraph.inlines, &marker);
+                                    let style = self.style(paragraph.meta.id, item_style);
+                                    if let Some(item) = self.paragraph_item(
+                                        paragraph.meta.id,
+                                        BoxKind::Paragraph,
+                                        &inlines,
+                                        style,
+                                    )? {
+                                        items.push(item);
+                                        marked = true;
+                                        continue;
+                                    }
+                                }
+                            }
+                            self.flow_into(
+                                core::slice::from_ref(block),
+                                item_style,
+                                items,
+                                collect_index,
+                            )?;
+                            marked = true;
+                        }
+                        self.extra_left = Width(self.extra_left.0 - list_indent.0 - item_indent.0);
                     }
                 }
                 Block::BlockQuote(node) => {
                     let style = self.style(node.meta.id, fallback);
-                    self.flow_into(&node.blocks, style, items, collect_index)?;
+                    let computed = self.computed(style);
+                    self.extra_left = self.extra_left.saturating_add(computed.indent_left);
+                    self.extra_right = self.extra_right.saturating_add(computed.indent_right);
+                    let result = self.flow_into(&node.blocks, style, items, collect_index);
+                    self.extra_left = Width(self.extra_left.0 - computed.indent_left.0);
+                    self.extra_right = Width(self.extra_right.0 - computed.indent_right.0);
+                    result?;
                 }
                 Block::CodeBlock(node) => {
                     let style = self.style(node.meta.id, fallback);
@@ -2041,7 +2095,11 @@ impl Builder<'_> {
         style_id: StyleId,
     ) -> Result<Option<FlowItem>, LayoutError> {
         let computed = self.computed(style_id);
-        let consumed = computed.indent_left.saturating_add(computed.indent_right);
+        // A quote or a list indents the blocks it holds; the blocks declare
+        // their own indent on top of it.
+        let left = computed.indent_left.saturating_add(self.extra_left);
+        let right = computed.indent_right.saturating_add(self.extra_right);
+        let consumed = left.saturating_add(right);
         let inner = Width(self.content_width.0 - consumed.0);
         let paragraph_style = ParagraphStyle {
             width: inner,
@@ -2196,7 +2254,7 @@ impl Builder<'_> {
                 node,
                 kind,
                 style: style_id,
-                x: computed.indent_left,
+                x: left,
                 y: Width::ZERO,
                 width: inner,
                 height: y,

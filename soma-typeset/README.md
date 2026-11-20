@@ -151,6 +151,12 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   (`left`/`center`/`right`) is a layout pass, so titles and cover lines can be
   centred. The build has 0 overflow pages and 0 degraded lines;
   `docs/first-release.md` lists the remaining design gaps.
+- Delivery brief (`examples/book/brief.tex`, `scripts/brief.sh`): a twelve-page
+  PDF about the engine itself — cover, contents with figure and table lists,
+  bulleted capability lists, numbered formulas with a `\tag` and a `\notag`
+  row, a code block with a pipeline diagram, two images, a data table, a
+  quotation, and an index — written in the LaTeX subset and set with the Song
+  template. It is the shortest end-to-end exercise of everything above.
 - Blind-test tooling: kit generation, key unmapping, Wilson interval, Fleiss'
   kappa, and a committable Markdown report (`soma-eval blind --out`). A
   **simulated** dry run proves the chain (`docs/blind-dry-run.md`); the human
@@ -212,7 +218,7 @@ tools/dry-run-panel/ # simulated blind-test panel generator (not human data)
 tools/
   metrics-gen/ # offline OTF/TTC -> soma.metrics/1 (numbers only)
 examples/
-  book/        # first-release book: book.tex + book.yaml (scripts/book.sh)
+  book/        # first-release book: book.tex + song.tex + brief.tex (+ .yaml)
 corpus/
   zh/          # self-authored evaluation corpus (five genres)
   README.md    # provenance and corpus rules

@@ -552,7 +552,7 @@ impl<'a> Parser<'a> {
                     self.read_command();
                     continue;
                 }
-                Some(_) => {
+                Some(command) if !starts_inline_run(command) => {
                     // An unknown block command: keep a braced argument as text.
                     self.read_command();
                     if let Some(group) = self.read_group() {
@@ -566,7 +566,10 @@ impl<'a> Parser<'a> {
                     }
                     continue;
                 }
-                None => {}
+                // An inline command (`\textbf`, `\verb`, …) at the start of a
+                // block is not a block command: fall through and let
+                // `parse_inlines` read it as part of the paragraph.
+                Some(_) | None => {}
             }
 
             let before = self.pos;
@@ -1373,4 +1376,24 @@ fn read_group_at<'a>(source: &'a str, cursor: &mut usize) -> Option<&'a str> {
         index += 1;
     }
     None
+}
+
+/// Commands that begin an inline run rather than a block. `parse_blocks` must
+/// not treat them as unknown block commands when they open a paragraph — that
+/// split `\item \textbf{…}：rest` into two paragraphs.
+fn starts_inline_run(command: &str) -> bool {
+    matches!(
+        command,
+        "textbf"
+            | "emph"
+            | "textit"
+            | "textsl"
+            | "underline"
+            | "textsc"
+            | "textsuperscript"
+            | "textsubscript"
+            | "texttt"
+            | "verb"
+            | "href"
+    )
 }

@@ -110,7 +110,7 @@ Cumulative public test files:
 | `a2_cell_context.rs` | 1 | `within: cell` overrides body rules and sets cell padding |
 | `a3_layout.rs` | 7 | paragraph boxes match the kernel, text index, stacking |
 | `a4_pagination.rs` | 13 | vertical K-P optimality, page breaks, keep-with-next, splitting, overflow |
-| `a6_blocks.rs` | 20 | code (one atom table, spaces kept), display math box, figures, tables (+colspan), rules, raw, footnotes, marker width, numbered equations, tags and notags, a tag carrying maths |
+| `a6_blocks.rs` | 23 | code (one atom table, spaces kept), display math box, figures, tables (+colspan), rules, raw, footnotes, marker width, numbered equations, tags and notags, a tag carrying maths, list markers and container indent |
 | `metrics.rs` (layout) | 10 | table-backed metrics, per-style scaling, bold face, determinism, outline ink, rescue face, Han inside a formula measured with the text face |
 | `e2_split.rs` | 7 | line conservation, widows/orphans, footnote lines, glue, vertical hash |
 | `e3_typography.rs` | 2 | hanging punctuation is post-processing and respects the cap |
@@ -128,7 +128,7 @@ Cumulative public test files:
 | `corpus.rs` (eval) | 9 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
 | `a5_md.rs` | 15 | Markdown subset, inlines (including GFM `~~`), spans, index extension, front matter, validity |
 | `html.rs` (html) | 9 | HTML subset shapes, table grid, degradation, recovery, pipeline |
-| `latex.rs` (latex) | 15 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, recovery, pipeline |
+| `latex.rs` (latex) | 16 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, inline command opening a block, recovery, pipeline |
 | `math.rs` (soma-math) | 43 | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, spacing, styles, errors, italic variables, `array` formats, `\substack`, brace ink and labels, assembled braces, `\color`, text-mode maths, tags |
 | `e11_math.rs` (layout) | 8 | centring, baseline inside the box, flow, canonical `math` field |
 | `e12_inline_math.rs` (layout) | 11 | marker atoms, line-box growth, text style, placeholder, canonical `inlineMath` |
@@ -170,7 +170,7 @@ Cumulative public test files:
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 | render-pdf unit | 26 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing |
 
-Total: **625 tests**.
+Total: **629 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

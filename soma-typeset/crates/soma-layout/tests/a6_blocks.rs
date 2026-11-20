@@ -5,7 +5,8 @@ mod common;
 use common::{document, engine, metrics, paragraph, paragraph_with, styled, text, TIGHT};
 use soma_core::Width;
 use soma_doc::block::{
-    Cell, CodeBlock, Column, Figure, MathBlock, Paragraph, RawBlock, Row, Table, ThematicBreak,
+    BlockQuote, Cell, CodeBlock, Column, Figure, List, ListItem, MathBlock, Paragraph, RawBlock,
+    Row, Table, ThematicBreak,
 };
 use soma_doc::inline::{FootnoteRef, Image};
 use soma_doc::meta::ImageRef;
@@ -516,4 +517,122 @@ fn a_footnote_marker_is_narrower_than_a_character() {
         character.advance.0
     );
     assert!(marker.advance.0 > 0, "the number still needs room");
+}
+
+const LISTS: &str = r#"
+name: lists
+page:
+  size: custom
+  width: 100mm
+  height: 60mm
+  margin: 4mm
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+  - selector:
+      element: paragraph
+    declarations:
+      first-indent: 2em
+  - selector:
+      element: list
+    declarations:
+      indent-left: 2em
+  - selector:
+      element: listItem
+    declarations:
+      indent-left: 1.2em
+  - selector:
+      element: paragraph
+      within: listItem
+    declarations:
+      first-indent: 0
+  - selector:
+      element: blockQuote
+    declarations:
+      indent-left: 2em
+      indent-right: 2em
+  - selector:
+      element: paragraph
+      within: blockQuote
+    declarations:
+      first-indent: 0
+"#;
+
+#[test]
+fn a_bullet_item_starts_with_its_marker_and_is_indented() {
+    let doc = document(vec![
+        paragraph("正文"),
+        Block::List(List::new(
+            NodeMeta::synthesized(),
+            false,
+            1,
+            vec![ListItem::new(
+                NodeMeta::synthesized(),
+                vec![paragraph("第一项")],
+            )],
+        )),
+    ]);
+    let styled = styled(&doc, LISTS);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let body = &layout.pages[0].blocks[0];
+    let block = &layout.pages[0].blocks[1];
+
+    assert_eq!(
+        layout.text.atom_text(block.node, 0),
+        "\u{2022}",
+        "the item is marked"
+    );
+    assert_eq!(block.x.0, 8192 + 4915, "2em list + 1.2em item");
+    assert_eq!(
+        block.x.0 + block.width.0,
+        body.width.0,
+        "the measure shrinks with the indent"
+    );
+}
+
+#[test]
+fn an_ordered_item_counts_from_its_start() {
+    let doc = document(vec![Block::List(List::new(
+        NodeMeta::synthesized(),
+        true,
+        3,
+        vec![
+            ListItem::new(NodeMeta::synthesized(), vec![paragraph("甲")]),
+            ListItem::new(NodeMeta::synthesized(), vec![paragraph("乙")]),
+        ],
+    ))]);
+    let styled = styled(&doc, LISTS);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let markers: Vec<&str> = layout.pages[0]
+        .blocks
+        .iter()
+        .map(|block| layout.text.atom_text(block.node, 0))
+        .collect();
+
+    assert_eq!(markers, ["3", "4"], "numbering starts at `start`");
+}
+
+#[test]
+fn a_quote_indents_the_blocks_it_holds() {
+    let doc = document(vec![
+        paragraph("正文"),
+        Block::BlockQuote(BlockQuote::new(
+            NodeMeta::synthesized(),
+            vec![paragraph("引文")],
+        )),
+    ]);
+    let styled = styled(&doc, LISTS);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let body = &layout.pages[0].blocks[0];
+    let block = &layout.pages[0].blocks[1];
+
+    assert_eq!(block.x.0, 8192, "2em on the left");
+    assert_eq!(
+        block.x.0 + block.width.0,
+        body.width.0 - 8192,
+        "and 2em on the right"
+    );
 }
