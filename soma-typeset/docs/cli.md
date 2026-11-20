@@ -25,7 +25,7 @@ soma --help
 | `--format`, `-f` | `html` (default), `svg`, `json` (canonical page result), or `pdf`. |
 | `--metrics` | `soma.metrics/2` table; omitted uses the embedded Noto table. Version 1 tables still load. A version 2 table built from the PDF font also carries punctuation ink, so layout can land a line end on the ink instead of a class average. |
 
-`tools/metrics-gen` also audits installed fonts (`--audit <dir>`), writes a fingerprint library (`--fingerprints <csv>`) and recognises an unknown face against one (`--identify <font> --library <csv>`). See [`docs/fonts.md`](fonts.md). `scripts/fonts.sh` picks a face and writes the table in one step.
+`tools/metrics-gen` also audits installed fonts (`--audit <dir>`), writes a fingerprint library (`--fingerprints <csv>`) and recognises an unknown face against one (`--identify <font> --library <csv>`), checks a face against a document's character set (`--coverage`) and ranks rescue faces (`--fallback`). See [`docs/fonts.md`](fonts.md) and [`docs/mixed-font.md`](mixed-font.md). `scripts/fonts.sh` picks a face and writes the table in one step.
 | `--font` | TrueType font for `--format pdf`; `path#index` selects a TTC face. Required for PDF. |
 | `--font-bold`, `--font-math` | Optional bold/math faces; fall back to `--font`. |
 | `--out`, `-o` | Output path; `-` or omitted writes to stdout. |

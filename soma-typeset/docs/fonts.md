@@ -149,6 +149,21 @@ token is the `OS/2` weight class. Style — Song, Hei, Kai, Yuan — is **not**
 guessed: it is a design decision that the outline bounding box cannot recover
 reliably, so the fingerprint stops at what it can measure.
 
+## Coverage and fallback
+
+The fingerprint says what a face *is*; it says nothing about what it *lacks*.
+Two more commands close that gap — see [`docs/mixed-font.md`](mixed-font.md):
+
+```sh
+metrics-gen --coverage serif:normal:/path/Body.ttf --text book.tex
+metrics-gen --fallback serif:normal:/path/Body.ttf --text book.tex --audit /usr/share/fonts
+```
+
+`--coverage` reports how much of a document's character set the face can draw
+and lists what is missing. `--fallback` ranks installed faces by how many of
+those characters they rescue, preferring a matching weight before a matching
+style, and skips CFF faces because a rescue face must be embeddable.
+
 ## Producing a table for the chosen face
 
 ```sh

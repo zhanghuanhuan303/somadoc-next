@@ -15,7 +15,7 @@
 //!   --face sans:bold:/path/NotoSansCJK-Bold.ttc#2
 //! ```
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::process::ExitCode;
@@ -847,6 +847,169 @@ fn write_fingerprints(rows: &[(String, usize, Measure)], out: &str) -> Result<()
     Ok(())
 }
 
+/// Every non-whitespace character a document actually uses. Reading the source
+/// rather than the IR is deliberate: coverage is a property of the text, and
+/// this runs before any parsing.
+fn read_char_set(path: &str) -> Result<Vec<char>, String> {
+    let text = fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))?;
+    let mut set: BTreeSet<u32> = BTreeSet::new();
+    for character in text.chars() {
+        if !character.is_control() && !character.is_whitespace() {
+            set.insert(character as u32);
+        }
+    }
+    Ok(set.into_iter().filter_map(char::from_u32).collect())
+}
+
+fn coverage(spec: &FaceSpec, text_path: &str) -> Result<(), String> {
+    let data = fs::read(&spec.path).map_err(|error| format!("{}: {error}", spec.path))?;
+    let font = Font::open(&data, spec.index)
+        .map_err(|error| format!("{}#{}: {error}", spec.path, spec.index))?;
+    let map = font.cmap()?;
+    let characters = read_char_set(text_path)?;
+
+    let missing: Vec<char> = characters
+        .iter()
+        .copied()
+        .filter(|character| !map.contains_key(&(*character as u32)))
+        .collect();
+    let covered = characters.len() - missing.len();
+    println!("primary: {}#{}", spec.path, spec.index);
+    println!(
+        "characters: {}, covered: {} ({:.1}%), missing: {}",
+        characters.len(),
+        covered,
+        percentage(covered, characters.len()),
+        missing.len()
+    );
+    if !missing.is_empty() {
+        let sample: String = missing.iter().take(60).collect();
+        println!("missing-chars: {sample}");
+    }
+    Ok(())
+}
+
+/// Which installed face would rescue the characters the primary face lacks,
+/// and how close it is in style.
+fn fallback(spec: &FaceSpec, text_path: &str, directories: &[String]) -> Result<(), String> {
+    let data = fs::read(&spec.path).map_err(|error| format!("{}: {error}", spec.path))?;
+    let primary = measure(&data, spec.index)
+        .ok_or_else(|| format!("{}#{}: cannot measure", spec.path, spec.index))?;
+    let font = Font::open(&data, spec.index)
+        .map_err(|error| format!("{}#{}: {error}", spec.path, spec.index))?;
+    let primary_map = font.cmap()?;
+
+    let characters = read_char_set(text_path)?;
+    let missing_len = characters
+        .iter()
+        .filter(|character| !primary_map.contains_key(&(**character as u32)))
+        .count();
+    let missing: Vec<u32> = characters
+        .iter()
+        .map(|character| *character as u32)
+        .filter(|codepoint| !primary_map.contains_key(codepoint))
+        .collect();
+    let (probe, probe_ink) = fingerprint(&primary);
+
+    println!("primary: {}#{}", spec.path, spec.index);
+    println!(
+        "characters: {}, missing: {}",
+        characters.len(),
+        missing.len()
+    );
+    if missing.is_empty() {
+        println!("nothing to rescue");
+        return Ok(());
+    }
+
+    let mut paths: Vec<std::path::PathBuf> = Vec::new();
+    for directory in directories {
+        collect_fonts(std::path::Path::new(directory), &mut paths);
+    }
+    paths.sort();
+    paths.dedup();
+
+    // (rescued, weight gap, distance, path, face, profile)
+    let mut hits: Vec<(usize, u16, f64, String, usize, String)> = Vec::new();
+    for path in &paths {
+        if path == std::path::Path::new(&spec.path) {
+            continue;
+        }
+        let Ok(candidate_data) = fs::read(path) else {
+            continue;
+        };
+        for face in 0..face_count(&candidate_data) {
+            let Some(measure) = measure(&candidate_data, face) else {
+                continue;
+            };
+            // A rescue face has to be drawable by the backend, not just
+            // measurable: CFF outlines cannot be embedded.
+            if !measure.outlines {
+                continue;
+            }
+            let Ok(candidate) = Font::open(&candidate_data, face) else {
+                continue;
+            };
+            let Ok(candidate_map) = candidate.cmap() else {
+                continue;
+            };
+            let rescued = missing
+                .iter()
+                .filter(|codepoint| candidate_map.contains_key(codepoint))
+                .count();
+            if rescued == 0 {
+                continue;
+            }
+            let (reference, reference_ink) = fingerprint(&measure);
+            let distance = fingerprint_distance(&probe, probe_ink, &reference, reference_ink);
+            let weight_gap = primary.weight_class.abs_diff(measure.weight_class);
+            hits.push((
+                rescued,
+                weight_gap,
+                distance,
+                path.display().to_string(),
+                face,
+                profile(&measure),
+            ));
+        }
+    }
+
+    // Rescue as many characters as possible first; among equals prefer the
+    // weight that matches the primary face — a Light rescue next to a Regular
+    // body is visible on every fallback glyph — then the closest style. One row
+    // per family, like --identify.
+    hits.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then(left.1.cmp(&right.1))
+            .then(left.2.total_cmp(&right.2))
+            .then(left.3.cmp(&right.3))
+    });
+    println!("rescued,weight_gap,distance,path,face,profile");
+    let mut seen = std::collections::BTreeSet::new();
+    let mut printed = 0;
+    for (rescued, weight_gap, distance, path, face, profile) in &hits {
+        if !seen.insert(family_key(path)) {
+            continue;
+        }
+        println!("{rescued}/{missing_len},{weight_gap},{distance:.4},{path},{face},{profile}");
+        printed += 1;
+        if printed == 5 {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn percentage(part: usize, whole: usize) -> f64 {
+    if whole == 0 {
+        0.0
+    } else {
+        100.0 * part as f64 / whole as f64
+    }
+}
+
 fn identify(spec: &FaceSpec, library: &str) -> Result<(), String> {
     let data = fs::read(&spec.path).map_err(|error| format!("{}: {error}", spec.path))?;
     let measure = measure(&data, spec.index)
@@ -952,6 +1115,9 @@ fn run() -> Result<(), String> {
     let mut top = 40usize;
     let mut fingerprints_out: Option<String> = None;
     let mut identify_spec: Option<FaceSpec> = None;
+    let mut coverage_spec: Option<FaceSpec> = None;
+    let mut fallback_spec: Option<FaceSpec> = None;
+    let mut text_path: Option<String> = None;
     let mut library: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -976,9 +1142,31 @@ fn run() -> Result<(), String> {
                     &args.next().ok_or("--identify needs a font")?,
                 )?)
             }
+            "--coverage" => {
+                coverage_spec = Some(FaceSpec::parse(
+                    &args.next().ok_or("--coverage needs a font")?,
+                )?)
+            }
+            "--fallback" => {
+                fallback_spec = Some(FaceSpec::parse(
+                    &args.next().ok_or("--fallback needs a font")?,
+                )?)
+            }
+            "--text" => text_path = Some(args.next().ok_or("--text needs a file")?),
             "--library" => library = Some(args.next().ok_or("--library needs a file")?),
             other => return Err(format!("unknown argument {other}")),
         }
+    }
+    if let Some(spec) = fallback_spec {
+        let text = text_path.ok_or("--fallback needs --text <file>")?;
+        if audit_dirs.is_empty() {
+            return Err("--fallback needs at least one --audit <dir>".into());
+        }
+        return fallback(&spec, &text, &audit_dirs);
+    }
+    if let Some(spec) = coverage_spec {
+        let text = text_path.ok_or("--coverage needs --text <file>")?;
+        return coverage(&spec, &text);
     }
     if let Some(spec) = identify_spec {
         let library = library.ok_or("--identify needs --library <fingerprints.csv>")?;
