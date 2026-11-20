@@ -279,7 +279,7 @@ cargo run -p soma-eval --release -- blind preferences.csv
 scripts/gates.sh
 ```
 
-The gate runs format, clippy, 553 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 555 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-template`,
 `soma-layout`, `soma-md`, `soma-render-html`, `soma-render-svg`, and
 `soma-render-pdf`, a
