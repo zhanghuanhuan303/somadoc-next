@@ -11,7 +11,7 @@
 //! Both are pure functions of `(table, style)`; no state, no cache, no fonts.
 
 use soma_core::{LineMetrics, Metrics, StyleId, Width};
-use soma_metrics::MetricsTable;
+use soma_metrics::{Face, MetricsTable};
 use soma_template::{ComputedStyle, FontWeight, StyledDoc};
 
 /// Em size used by the kernel: one em is 4096 units.
@@ -142,13 +142,20 @@ impl<'a> StyledMetrics<'a> {
             .or(Some(primary))
     }
 
-    fn face_of(&self, computed: &ComputedStyle) -> Option<&soma_metrics::Face> {
-        let index = face_index(computed);
-        // Faces are laid out as regular(serif, sans), bold(serif, sans).
-        // Fall back to the same family when the bold face is missing.
-        self.table
-            .face(index)
-            .or_else(|| self.table.face(index % 2))
+    fn face_of(&self, computed: &ComputedStyle) -> Option<&Face> {
+        // Search by family and weight rather than by slot: a table written in
+        // any order then still answers with the face the style asked for.
+        let family = if soma_template::family_is_sans(computed.family.as_deref()) {
+            soma_metrics::FAMILY_SANS
+        } else {
+            soma_metrics::FAMILY_SERIF
+        };
+        let bold = computed.weight == FontWeight::Bold;
+        let faces = self.table.faces();
+        faces
+            .iter()
+            .find(|face| face.family == family && (face.weight != 0) == bold)
+            .or_else(|| faces.iter().find(|face| face.family == family))
             .or_else(|| self.table.face(0))
     }
 }
@@ -247,36 +254,6 @@ impl Metrics for StyledMetrics<'_> {
     fn hash(&self) -> u64 {
         self.table.hash()
     }
-}
-
-/// `sans`/`mono`/`hei`/`gothic` select the second face; everything else the
-/// first. Matching is ASCII case-insensitive and allocation-free.
-fn face_index(computed: &ComputedStyle) -> usize {
-    let family = computed.family.as_deref().unwrap_or("");
-    let sans = contains_ignore_ascii_case(family, "sans")
-        || contains_ignore_ascii_case(family, "mono")
-        || contains_ignore_ascii_case(family, "hei")
-        || contains_ignore_ascii_case(family, "gothic");
-    let base = if sans { 1 } else { 0 };
-    if computed.weight == FontWeight::Bold {
-        base + 2
-    } else {
-        base
-    }
-}
-
-fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
-    let haystack = haystack.as_bytes();
-    let needle = needle.as_bytes();
-    if needle.is_empty() {
-        return true;
-    }
-    if needle.len() > haystack.len() {
-        return false;
-    }
-    haystack
-        .windows(needle.len())
-        .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 /// The first glyph of an atom. A Latin atom is a whole run; its leading edge is

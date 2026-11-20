@@ -67,6 +67,7 @@ only).
 | [0049](0049-svg-coordinate-units.md) | SVG coordinates are layout units; the root viewport is pixels | Accepted |
 | [0050](0050-table-structure.md) | A table is a real structure tree: Table, TR, TD with spans | Accepted |
 | [0051](0051-trim-caps-are-a-budget.md) | A trim cap is a budget, not a measurement | Accepted |
+| [0052](0052-family-aware-faces.md) | A style picks its face by family, not by slot | Accepted |
 
 ## Rules
 

@@ -25,6 +25,30 @@ use alloc::vec::Vec;
 use soma_core::{Align, StyleId, Width};
 use soma_doc::{Block, Document, Inline, NodeId};
 
+/// Whether a `font-family` value asks for the sans face.
+///
+/// `sans`/`mono`/`hei`/`gothic` select the second family; everything else,
+/// including an empty value, selects the first. The layout and the PDF backend
+/// must agree on this, so it lives next to [`ComputedStyle`] rather than in
+/// each of them.
+pub fn family_is_sans(family: Option<&str>) -> bool {
+    let family = family.unwrap_or("");
+    ["sans", "mono", "hei", "gothic"]
+        .iter()
+        .any(|needle| contains_ignore_ascii_case(family, needle))
+}
+
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    let haystack = haystack.as_bytes();
+    let needle = needle.as_bytes();
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    haystack
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle))
+}
+
 use crate::template::{FontSlant, FontWeight, Property, PropertyValue, StyleRule, Template};
 use crate::units::Rational;
 use crate::TemplateError;

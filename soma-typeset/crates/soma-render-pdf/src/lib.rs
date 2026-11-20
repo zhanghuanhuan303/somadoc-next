@@ -41,10 +41,17 @@ use soma_template::{ComputedStyle, FontWeight, StyledDoc};
 const UNITS_PER_EM: i64 = 4096;
 const FOOTNOTE_MARKER: char = '\u{e000}';
 
-/// Fonts available to the PDF renderer. Bold and math fall back to `regular`.
+/// Fonts available to the PDF renderer.
+///
+/// A style picks its face by `font-family` and `font-weight` (the same rule the
+/// layout uses to measure), so a book can set its body in a serif face and its
+/// headings in a sans face. Anything missing falls back to `regular`.
 pub struct PdfFonts<'a> {
     pub regular: &'a PdfFont,
     pub bold: Option<&'a PdfFont>,
+    /// The sans family: `font-family: sans` (or `hei`, `gothic`, `mono`).
+    pub sans: Option<&'a PdfFont>,
+    pub sans_bold: Option<&'a PdfFont>,
     pub math: Option<&'a PdfFont>,
     /// A rescue face for glyphs the body face lacks. Omit it and those glyphs
     /// render as `.notdef`; layout will still have measured them correctly.
@@ -63,19 +70,30 @@ pub struct PdfMetadata<'a> {
 enum Role {
     Regular,
     Bold,
+    Sans,
+    SansBold,
     Math,
     Fallback,
 }
 
 impl Role {
-    const ALL: [Role; 4] = [Role::Regular, Role::Bold, Role::Math, Role::Fallback];
+    const ALL: [Role; 6] = [
+        Role::Regular,
+        Role::Bold,
+        Role::Sans,
+        Role::SansBold,
+        Role::Math,
+        Role::Fallback,
+    ];
 
     fn resource(self) -> &'static str {
         match self {
             Role::Regular => "F1",
             Role::Bold => "F2",
-            Role::Math => "F3",
-            Role::Fallback => "F4",
+            Role::Sans => "F3",
+            Role::SansBold => "F4",
+            Role::Math => "F5",
+            Role::Fallback => "F6",
         }
     }
 }
@@ -430,6 +448,8 @@ fn color(number: u32) -> (i64, i64, i64) {
 struct Used {
     regular: Vec<(u16, u32)>,
     bold: Vec<(u16, u32)>,
+    sans: Vec<(u16, u32)>,
+    sans_bold: Vec<(u16, u32)>,
     math: Vec<(u16, u32)>,
     fallback: Vec<(u16, u32)>,
 }
@@ -449,6 +469,8 @@ impl Used {
         match role {
             Role::Regular => &mut self.regular,
             Role::Bold => &mut self.bold,
+            Role::Sans => &mut self.sans,
+            Role::SansBold => &mut self.sans_bold,
             Role::Math => &mut self.math,
             Role::Fallback => &mut self.fallback,
         }
@@ -458,6 +480,8 @@ impl Used {
         match role {
             Role::Regular => !self.regular.is_empty(),
             Role::Bold => fonts.bold.is_some() && !self.bold.is_empty(),
+            Role::Sans => fonts.sans.is_some() && !self.sans.is_empty(),
+            Role::SansBold => fonts.sans_bold.is_some() && !self.sans_bold.is_empty(),
             Role::Math => fonts.math.is_some() && !self.math.is_empty(),
             Role::Fallback => fonts.fallback.is_some() && !self.fallback.is_empty(),
         }
@@ -469,6 +493,8 @@ impl Used {
         let mut list = match role {
             Role::Regular => self.regular.clone(),
             Role::Bold => self.bold.clone(),
+            Role::Sans => self.sans.clone(),
+            Role::SansBold => self.sans_bold.clone(),
             Role::Math => self.math.clone(),
             Role::Fallback => self.fallback.clone(),
         };
@@ -482,6 +508,8 @@ impl PdfFonts<'_> {
     fn font(&self, role: Role) -> &PdfFont {
         match role {
             Role::Bold => self.bold.unwrap_or(self.regular),
+            Role::Sans => self.sans.unwrap_or(self.regular),
+            Role::SansBold => self.sans_bold.or(self.sans).unwrap_or(self.regular),
             Role::Math => self.math.unwrap_or(self.regular),
             Role::Fallback => self.fallback.unwrap_or(self.regular),
             Role::Regular => self.regular,
@@ -490,8 +518,16 @@ impl PdfFonts<'_> {
 
     fn role_for(&self, style: &ComputedStyle, fallback: bool) -> Role {
         if fallback && self.fallback.is_some() {
-            Role::Fallback
-        } else if style.weight == FontWeight::Bold && self.bold.is_some() {
+            return Role::Fallback;
+        }
+        let bold = style.weight == FontWeight::Bold;
+        if soma_template::family_is_sans(style.family.as_deref()) {
+            match (bold, self.sans_bold, self.sans) {
+                (true, Some(_), _) => Role::SansBold,
+                (_, _, Some(_)) => Role::Sans,
+                _ => Role::Regular,
+            }
+        } else if bold && self.bold.is_some() {
             Role::Bold
         } else {
             Role::Regular
@@ -568,6 +604,8 @@ fn embed_font(
     let name = match role {
         Role::Regular => "SomaSerif",
         Role::Bold => "SomaSerif-Bold",
+        Role::Sans => "SomaSans",
+        Role::SansBold => "SomaSans-Bold",
         Role::Math => "SomaMath",
         Role::Fallback => "SomaSerif-Fallback",
     };

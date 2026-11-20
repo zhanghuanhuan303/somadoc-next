@@ -1099,7 +1099,13 @@ impl Context<'_> {
                 let sub_shift = scale(size, self.style.sub_shift);
                 if let Some(sup) = sup {
                     let measured = self.measure(sup, script);
-                    let y = baseline - shift.max(measured.1 + scale(size, 80));
+                    // A superscript's baseline sits `sup_shift` above the base's;
+                    // it moves up further only when its own *depth* would bring
+                    // its bottom closer than the gap. Using its height (as this
+                    // did) lifted every script clear of the base's cap height,
+                    // which floats `2` in `mc²` halfway up the line.
+                    let lift = shift.max(measured.2 + scale(size, 80));
+                    let y = baseline - lift;
                     self.node_with_x(sup, script, y, base_end);
                 }
                 if let Some(sub) = sub {

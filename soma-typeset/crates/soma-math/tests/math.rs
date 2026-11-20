@@ -37,6 +37,22 @@ fn superscripts_are_smaller_and_above_the_baseline() {
 }
 
 #[test]
+fn a_superscript_is_lifted_by_its_depth_not_its_height() {
+    // `mc^2` used to raise the `2` by its own full height, which floats it
+    // halfway to the cap line. The lift is `sup_shift` unless the script's
+    // depth would bring its bottom closer than the gap.
+    let result = formula("x^2");
+    let base = &result.items[0];
+    let sup = &result.items[1];
+    let style = MathStyle::default();
+    let shift = base.size.0 as i64 * i64::from(style.sup_shift) / 1000;
+    let depth = sup.size.0 as i64 / 4;
+    let gap = base.size.0 as i64 * 80 / 4096;
+    let expected = shift.max(depth + gap);
+    assert_eq!(i64::from(-sup.y.0), expected);
+}
+
+#[test]
 fn subscripts_sit_below_the_baseline() {
     let result = formula("x_1");
     let sub = result.items.last().expect("subscript");

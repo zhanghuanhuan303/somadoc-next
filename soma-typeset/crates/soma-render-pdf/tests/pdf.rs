@@ -86,6 +86,8 @@ fn render_pdf_with(
         fallback: None,
         regular: font,
         bold: None,
+        sans: None,
+        sans_bold: None,
         math: None,
     };
     render(

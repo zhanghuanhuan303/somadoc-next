@@ -82,3 +82,16 @@ fn line_height_multiplier_uses_the_resolved_font_size() {
     let fixed = LineHeightSpec::Length(parse("10.5pt"));
     assert_eq!(fixed.resolve(Width::EM, body()), Width::EM);
 }
+
+#[test]
+fn family_names_select_the_sans_face() {
+    use soma_template::family_is_sans;
+    assert!(!family_is_sans(None), "no family means serif");
+    assert!(!family_is_sans(Some("")));
+    assert!(!family_is_sans(Some("Songti SC")));
+    assert!(family_is_sans(Some("sans-serif")));
+    assert!(family_is_sans(Some("SANS")));
+    assert!(family_is_sans(Some("Heiti SC")), "无衬线的中文名");
+    assert!(family_is_sans(Some("Source Han Gothic")));
+    assert!(family_is_sans(Some("monospace")));
+}

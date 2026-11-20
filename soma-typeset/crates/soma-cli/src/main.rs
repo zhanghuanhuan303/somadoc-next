@@ -29,6 +29,7 @@ usage:
               [--format html|svg|json|pdf] [--out <file>]
               [--metrics <file>]
               [--font <file[#index]>] [--font-bold <file[#index]>]
+              [--font-sans <file[#index]>] [--font-sans-bold <file[#index]>]
               [--font-math <file[#index]>] [--font-fallback <file[#index]>]
   soma check  --input <file> [--template <file>] [--engine <file>]
 
@@ -99,6 +100,8 @@ struct Options {
     metrics: Option<String>,
     font: Option<String>,
     font_bold: Option<String>,
+    font_sans: Option<String>,
+    font_sans_bold: Option<String>,
     font_math: Option<String>,
     font_fallback: Option<String>,
 }
@@ -138,6 +141,8 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
     let mut metrics = None;
     let mut font = None;
     let mut font_bold = None;
+    let mut font_sans = None;
+    let mut font_sans_bold = None;
     let mut font_math = None;
     let mut font_fallback = None;
 
@@ -158,6 +163,8 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
             "--metrics" => metrics = Some(value()?),
             "--font" => font = Some(value()?),
             "--font-bold" => font_bold = Some(value()?),
+            "--font-sans" => font_sans = Some(value()?),
+            "--font-sans-bold" => font_sans_bold = Some(value()?),
             "--font-math" => font_math = Some(value()?),
             "--font-fallback" => font_fallback = Some(value()?),
             "--stats" => stats = true,
@@ -185,6 +192,8 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
         metrics,
         font,
         font_bold,
+        font_sans,
+        font_sans_bold,
         font_math,
         font_fallback,
     })
@@ -234,6 +243,8 @@ fn render(args: &[String]) -> Result<(), String> {
             let fonts = PdfFonts {
                 regular: &faces.regular,
                 bold: faces.bold.as_ref(),
+                sans: faces.sans.as_ref(),
+                sans_bold: faces.sans_bold.as_ref(),
                 math: faces.math.as_ref(),
                 fallback: faces.fallback.as_ref(),
             };
@@ -367,6 +378,8 @@ fn layout(
 struct PdfFaceSet {
     regular: PdfFont,
     bold: Option<PdfFont>,
+    sans: Option<PdfFont>,
+    sans_bold: Option<PdfFont>,
     math: Option<PdfFont>,
     fallback: Option<PdfFont>,
 }
@@ -381,6 +394,14 @@ fn load_pdf_fonts(options: &Options) -> Result<PdfFaceSet, String> {
         Some(spec) => Some(load_pdf_font(spec)?),
         None => None,
     };
+    let sans = match options.font_sans.as_deref() {
+        Some(spec) => Some(load_pdf_font(spec)?),
+        None => None,
+    };
+    let sans_bold = match options.font_sans_bold.as_deref() {
+        Some(spec) => Some(load_pdf_font(spec)?),
+        None => None,
+    };
     let math = match options.font_math.as_deref() {
         Some(spec) => Some(load_pdf_font(spec)?),
         None => None,
@@ -392,6 +413,8 @@ fn load_pdf_fonts(options: &Options) -> Result<PdfFaceSet, String> {
     Ok(PdfFaceSet {
         regular,
         bold,
+        sans,
+        sans_bold,
         math,
         fallback,
     })
