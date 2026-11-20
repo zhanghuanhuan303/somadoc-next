@@ -84,14 +84,14 @@ only gap was that it fired **only** when a line was overfull.
 - The example book keeps 11 pages but its breaks move: a line that ends in
   punctuation now has half an em more room, so it can carry one more character.
   `canonicalHash` moves from `7953d75495e108c2` to `e195431d9622aa4e`.
-- `over_compress_lines` on the corpus rises from 0 to 4 of 1210 lines. A line
+- `over_compress_lines` on the corpus rises from 0 to 3 of 1213 lines. A line
   that is slightly overfull and ends in punctuation now has a lower badness,
   because it genuinely overruns by less; the model accepts a few of them. The
   5% budget in `compression_past_the_shrink_limit_is_rare` still holds and the
   calibration test documents the new baseline.
-- `ratio_jitter_p95` rises (337 → 413 on the corpus) because a trimmed line is
-  measured against a half-em smaller target. The metric sees the accounting
-  change; the eye sees a straighter edge.
+- The scorecard's `ratio_jitter_p95` drops 496 → 392: lines that end in a mark
+  and lines that do not are now measured against the width they actually
+  occupy. The corpus `jitter_p95` stays at 337.
 - `soma.layout/6` canonical bytes change (`trimRight`, `adjustment`, the last
   box's `advance` and the downstream `x`s). The schema id does not: the shape
   and the meaning of `trim_right` are unchanged.
