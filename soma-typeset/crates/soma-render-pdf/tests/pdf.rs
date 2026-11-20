@@ -57,6 +57,7 @@ fn build(blocks: Vec<Block>) -> (PagedLayout, StyledDoc) {
 fn render_pdf(layout: &PagedLayout, styled: &StyledDoc) -> Vec<u8> {
     let font = PdfFont::from_bytes(FONT.to_vec(), 0).expect("tiny font");
     let fonts = PdfFonts {
+        fallback: None,
         regular: &font,
         bold: None,
         math: None,

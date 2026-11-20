@@ -30,6 +30,9 @@ pub struct PdfFonts<'a> {
     pub regular: &'a PdfFont,
     pub bold: Option<&'a PdfFont>,
     pub math: Option<&'a PdfFont>,
+    /// A rescue face for glyphs the body face lacks. Omit it and those glyphs
+    /// render as `.notdef`; layout will still have measured them correctly.
+    pub fallback: Option<&'a PdfFont>,
 }
 
 /// Document metadata written to the PDF Info dictionary.
@@ -45,16 +48,18 @@ enum Role {
     Regular,
     Bold,
     Math,
+    Fallback,
 }
 
 impl Role {
-    const ALL: [Role; 3] = [Role::Regular, Role::Bold, Role::Math];
+    const ALL: [Role; 4] = [Role::Regular, Role::Bold, Role::Math, Role::Fallback];
 
     fn resource(self) -> &'static str {
         match self {
             Role::Regular => "F1",
             Role::Bold => "F2",
             Role::Math => "F3",
+            Role::Fallback => "F4",
         }
     }
 }
@@ -204,6 +209,7 @@ struct Used {
     regular: Vec<(u16, u32)>,
     bold: Vec<(u16, u32)>,
     math: Vec<(u16, u32)>,
+    fallback: Vec<(u16, u32)>,
 }
 
 impl Used {
@@ -222,6 +228,7 @@ impl Used {
             Role::Regular => &mut self.regular,
             Role::Bold => &mut self.bold,
             Role::Math => &mut self.math,
+            Role::Fallback => &mut self.fallback,
         }
     }
 
@@ -230,6 +237,7 @@ impl Used {
             Role::Regular => !self.regular.is_empty(),
             Role::Bold => fonts.bold.is_some() && !self.bold.is_empty(),
             Role::Math => fonts.math.is_some() && !self.math.is_empty(),
+            Role::Fallback => fonts.fallback.is_some() && !self.fallback.is_empty(),
         }
     }
 
@@ -240,6 +248,7 @@ impl Used {
             Role::Regular => self.regular.clone(),
             Role::Bold => self.bold.clone(),
             Role::Math => self.math.clone(),
+            Role::Fallback => self.fallback.clone(),
         };
         list.sort();
         list.dedup_by_key(|(gid, _)| *gid);
@@ -252,12 +261,15 @@ impl PdfFonts<'_> {
         match role {
             Role::Bold => self.bold.unwrap_or(self.regular),
             Role::Math => self.math.unwrap_or(self.regular),
+            Role::Fallback => self.fallback.unwrap_or(self.regular),
             Role::Regular => self.regular,
         }
     }
 
-    fn role_for(&self, style: &ComputedStyle) -> Role {
-        if style.weight == FontWeight::Bold && self.bold.is_some() {
+    fn role_for(&self, style: &ComputedStyle, fallback: bool) -> Role {
+        if fallback && self.fallback.is_some() {
+            Role::Fallback
+        } else if style.weight == FontWeight::Bold && self.bold.is_some() {
             Role::Bold
         } else {
             Role::Regular
@@ -294,7 +306,7 @@ fn collect_blocks(
                     .style(style_id)
                     .cloned()
                     .unwrap_or_else(ComputedStyle::base);
-                let role = fonts.role_for(&style);
+                let role = fonts.role_for(&style, text.uses_fallback(block.node, atom.atom));
                 for character in text.atom_text(block.node, atom.atom).chars() {
                     used.add(role, fonts.font(role), character);
                 }
@@ -335,6 +347,7 @@ fn embed_font(
         Role::Regular => "SomaSerif",
         Role::Bold => "SomaSerif-Bold",
         Role::Math => "SomaMath",
+        Role::Fallback => "SomaSerif-Fallback",
     };
 
     let file = pdf.reserve();
@@ -644,7 +657,7 @@ fn paint_block(
                 .style(style_id)
                 .cloned()
                 .unwrap_or_else(|| style.clone());
-            let role = fonts.role_for(&atom_style);
+            let role = fonts.role_for(&atom_style, text.uses_fallback(block.node, atom.atom));
             let font = fonts.font(role);
             let size = painter.scale.size(&atom_style);
             let x = layout.page.margin_left.0 + block.x.0 + atom.x.0;

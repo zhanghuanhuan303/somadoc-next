@@ -219,7 +219,16 @@ fn ink_right_comes_from_the_outline_and_scales_with_the_size() {
 
     assert_eq!(flat.ink_right("，", StyleId(0)).map(|w| w.0), Some(2900));
     assert_eq!(flat.ink_right("中", StyleId(0)), None, "no ink for a Han");
-    assert_eq!(flat.ink_right("，，", StyleId(0)), None, "one glyph only");
+    assert_eq!(
+        flat.ink_right("，，", StyleId(0)).map(|w| w.0),
+        Some(2900),
+        "a run trims by its last glyph"
+    );
+    assert_eq!(
+        flat.ink_left("，中", StyleId(0)).map(|w| w.0),
+        Some(700),
+        "a run starts from its first glyph"
+    );
 
     // The body style is 1em, which is exactly the table's unit.
     let body = styled
@@ -264,4 +273,58 @@ fn a_layout_with_outline_data_trims_by_the_real_bearing() {
         }
     }
     assert!(trimmed > 0, "some justified line must end in the mark");
+}
+
+/// A version 3 blob with two faces: the body draws only `中`, the rescue face
+/// only `龘` (U+9F98).
+fn fallback_table() -> MetricsTable {
+    let unit: i32 = 4096;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&soma_metrics::MAGIC.to_le_bytes());
+    bytes.extend_from_slice(&3u16.to_le_bytes());
+    bytes.extend_from_slice(&(unit as u16).to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+    for (family, codepoint) in [(0u8, 0x4E2Du32), (soma_metrics::FAMILY_FALLBACK, 0x9F98)] {
+        bytes.extend_from_slice(&[family, 0, 0, 0]);
+        for value in [unit * 4 / 5, unit / 5, 0, unit / 4, unit] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&codepoint.to_le_bytes());
+        bytes.extend_from_slice(&codepoint.to_le_bytes());
+        bytes.extend_from_slice(&unit.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&codepoint.to_le_bytes());
+        bytes.push(6);
+        bytes.push(18);
+    }
+    MetricsTable::parse(&bytes).expect("fixture blob")
+}
+
+#[test]
+fn a_glyph_the_body_lacks_is_measured_with_the_rescue_face() {
+    let table = fallback_table();
+    let doc = document(vec![paragraph("中龘")]);
+    let styled = styled(&doc, BOOK);
+    let metrics = StyledMetrics::new(&table, &styled);
+    let node = match &doc.blocks[0] {
+        Block::Paragraph(block) => block.meta.id,
+        other => panic!("expected a paragraph, got {other:?}"),
+    };
+    let style = common::style_of(&styled, node);
+
+    assert!(!metrics.uses_fallback("中", style));
+    assert!(metrics.uses_fallback("龘", style));
+    // The rescue face has a five-em body size in the fixture, so widths are
+    // scaled by 1.0 and the quantised bearings survive to within 16 units.
+    let right = metrics.ink_right("龘", style).expect("ink").0;
+    let left = metrics.ink_left("龘", style).expect("ink").0;
+    assert!((280..=300).contains(&right), "right {right}");
+    assert!((90..=100).contains(&left), "left {left}");
+    assert_eq!(metrics.advance("龘", style).0, 4096);
+    assert_eq!(metrics.advance("中", style).0, 4096);
 }

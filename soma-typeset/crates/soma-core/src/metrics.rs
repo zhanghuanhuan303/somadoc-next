@@ -87,13 +87,27 @@ pub trait Metrics: Sync {
     }
 
     /// Gap between the glyph outline and the right edge of its advance, in
-    /// 1/4096 em. `None` when the source has no outline data; the layout then
-    /// falls back to the rule table's class constant (`compress_right`).
+    /// 1/4096 em. For a Latin run this is the last character's bearing. `None`
+    /// when the source has no outline data; the layout then keeps the rule
+    /// table's constant (`compress_right`).
     ///
-    /// Only closing punctuation is asked for, and only for the last atom of a
-    /// justified line (ADR-0037).
+    /// Every atom can be the last one on a line (ADR-0038), so every atom is
+    /// asked, not only marks.
     fn ink_right(&self, _text: &str, _style: StyleId) -> Option<Width> {
         None
+    }
+
+    /// Gap between the left edge of a glyph's advance and its outline. For a
+    /// Latin run this is the first character's bearing.
+    fn ink_left(&self, _text: &str, _style: StyleId) -> Option<Width> {
+        None
+    }
+
+    /// True when a rescue face draws this text rather than the style's own.
+    /// The renderer asks the same question the breaker asked, so the two agree
+    /// on which face produced the widths (docs/mixed-font.md).
+    fn uses_fallback(&self, _text: &str, _style: StyleId) -> bool {
+        false
     }
 
     /// Advance of one math symbol at the style's size.

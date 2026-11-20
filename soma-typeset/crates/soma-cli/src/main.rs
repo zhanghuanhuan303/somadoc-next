@@ -31,7 +31,7 @@ usage:
               [--format html|svg|json|pdf] [--out <file>]
               [--metrics <file>]
               [--font <file[#index]>] [--font-bold <file[#index]>]
-              [--font-math <file[#index]>]
+              [--font-math <file[#index]>] [--font-fallback <file[#index]>]
   soma check  --input <file> [--template <file>] [--engine <file>]
 
   --input     .md / .markdown, .html / .htm, .tex / .latex
@@ -43,6 +43,7 @@ usage:
   --font      TrueType font for PDF output (required by --format pdf)
   --font-bold optional bold face; falls back to --font
   --font-math optional math face; falls back to --font
+  --font-fallback optional rescue face for glyphs --font lacks
   --out       output path; '-' or omitted writes to stdout
 
 exit codes:
@@ -101,6 +102,7 @@ struct Options {
     font: Option<String>,
     font_bold: Option<String>,
     font_math: Option<String>,
+    font_fallback: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -139,6 +141,7 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
     let mut font = None;
     let mut font_bold = None;
     let mut font_math = None;
+    let mut font_fallback = None;
 
     let mut index = 0;
     while index < args.len() {
@@ -158,6 +161,7 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
             "--font" => font = Some(value()?),
             "--font-bold" => font_bold = Some(value()?),
             "--font-math" => font_math = Some(value()?),
+            "--font-fallback" => font_fallback = Some(value()?),
             "--stats" => stats = true,
             "--format" | "-f" if allow_format => {
                 format = match value()?.as_str() {
@@ -184,6 +188,7 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
         font,
         font_bold,
         font_math,
+        font_fallback,
     })
 }
 
@@ -201,7 +206,7 @@ fn render(args: &[String]) -> Result<(), String> {
             write_output(&options, &json)?;
         }
         Format::Pdf => {
-            let (regular, bold, math) = load_pdf_fonts(&options)?;
+            let faces = load_pdf_fonts(&options)?;
             let title = document.title_text();
             let author = {
                 let names: Vec<&str> = document
@@ -222,9 +227,10 @@ fn render(args: &[String]) -> Result<(), String> {
                 language: document.meta.language.as_deref(),
             };
             let fonts = PdfFonts {
-                regular: &regular,
-                bold: bold.as_ref(),
-                math: math.as_ref(),
+                regular: &faces.regular,
+                bold: faces.bold.as_ref(),
+                math: faces.math.as_ref(),
+                fallback: faces.fallback.as_ref(),
             };
             let bytes = render_pdf(&pages, &styled, &pages.text, &fonts, &metadata)
                 .map_err(|error| format!("pdf: {error}"))?;
@@ -233,7 +239,7 @@ fn render(args: &[String]) -> Result<(), String> {
     }
     if options.stats {
         eprintln!(
-            "pages={} blocks={} lines={} canonicalHash={:016x}",
+            "pages={} blocks={} lines={} fallbacks={} canonicalHash={:016x}",
             pages.page_count(),
             pages
                 .pages
@@ -246,6 +252,7 @@ fn render(args: &[String]) -> Result<(), String> {
                 .flat_map(|page| page.blocks.iter())
                 .map(|block| block.lines_total)
                 .sum::<u32>(),
+            pages.text.fallback_count(),
             pages.hash()
         );
     }
@@ -351,9 +358,15 @@ fn layout(
 }
 
 /// Load the fonts requested by `--format pdf`.
-fn load_pdf_fonts(
-    options: &Options,
-) -> Result<(PdfFont, Option<PdfFont>, Option<PdfFont>), String> {
+/// The four faces a PDF can embed: body, bold, math and a rescue face.
+struct PdfFaceSet {
+    regular: PdfFont,
+    bold: Option<PdfFont>,
+    math: Option<PdfFont>,
+    fallback: Option<PdfFont>,
+}
+
+fn load_pdf_fonts(options: &Options) -> Result<PdfFaceSet, String> {
     let regular = options
         .font
         .as_deref()
@@ -367,7 +380,16 @@ fn load_pdf_fonts(
         Some(spec) => Some(load_pdf_font(spec)?),
         None => None,
     };
-    Ok((regular, bold, math))
+    let fallback = match options.font_fallback.as_deref() {
+        Some(spec) => Some(load_pdf_font(spec)?),
+        None => None,
+    };
+    Ok(PdfFaceSet {
+        regular,
+        bold,
+        math,
+        fallback,
+    })
 }
 
 fn load_pdf_font(spec: &str) -> Result<PdfFont, String> {

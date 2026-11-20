@@ -314,6 +314,13 @@ pub trait TextSource {
     fn atom_style(&self, _block: NodeId, _atom: u32) -> Option<StyleId> {
         None
     }
+
+    /// True when the atom is drawn by a rescue face rather than its style's
+    /// own. Layout measured it with the same rule, so the renderer and the
+    /// breaker agree (docs/mixed-font.md).
+    fn uses_fallback(&self, _block: NodeId, _atom: u32) -> bool {
+        false
+    }
 }
 
 /// Owned atom text per DocIR block. Built while laying out, so the renderer
@@ -321,6 +328,8 @@ pub trait TextSource {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TextIndex {
     entries: Vec<(NodeId, Vec<(String, StyleId)>)>,
+    /// Atoms drawn by a rescue face, `(node, atom)`, sorted at `finish`.
+    fallbacks: Vec<(u32, u32)>,
     /// Highest node id inserted so far. Tracked explicitly: `entries` is only
     /// sorted at `finish`, so the last element is not the maximum while blocks
     /// are still being added (the TOC adds ids above the document's).
@@ -337,12 +346,23 @@ impl TextIndex {
         self.entries.push((node, atoms));
     }
 
+    fn mark_fallback(&mut self, node: NodeId, atom: u32) {
+        self.fallbacks.push((node.0, atom));
+    }
+
     fn finish(&mut self) {
         self.entries.sort_by_key(|(node, _)| *node);
+        self.fallbacks.sort_unstable();
+        self.fallbacks.dedup();
     }
 
     fn max_node(&self) -> u32 {
         self.max
+    }
+
+    /// Atoms drawn by a rescue face (diagnostics).
+    pub fn fallback_count(&self) -> usize {
+        self.fallbacks.len()
     }
 }
 
@@ -366,6 +386,10 @@ impl TextSource for TextIndex {
                 .map(|(_, style)| *style),
             Err(_) => None,
         }
+    }
+
+    fn uses_fallback(&self, block: NodeId, atom: u32) -> bool {
+        self.fallbacks.binary_search(&(block.0, atom)).is_ok()
     }
 }
 
@@ -1845,6 +1869,13 @@ impl Builder<'_> {
                 .map(|atom| (atom.text.clone(), atom.style))
                 .collect(),
         );
+        // Record which atoms a rescue face draws, so the renderer picks the
+        // same font the breaker measured (ADR-0038, docs/mixed-font.md).
+        for (index, atom) in paragraph.atoms.iter().enumerate() {
+            if self.metrics.uses_fallback(&atom.text, atom.style) {
+                self.text.mark_fallback(node, index as u32);
+            }
+        }
 
         let grid = computed.baseline_grid;
         let mut placed_lines = Vec::with_capacity(result.lines.len());
@@ -3116,13 +3147,15 @@ fn scale_trim(paragraph: &mut Paragraph, metrics: &dyn Metrics, size_of: impl Fn
             atom.compress_left = Width(scale_units(atom.compress_left.0, size));
             atom.compress_right = Width(scale_units(atom.compress_right.0, size));
         }
-        // A real outline knows where the ink ends. Marks use it so a comma
-        // lands on the ink the way a period does; a table without outline data
-        // keeps the rule table's class constant (ADR-0037).
-        if atom.class != PunctClass::None {
-            if let Some(ink) = metrics.ink_right(&atom.text, atom.style) {
-                atom.compress_right = ink;
-            }
+        // A real outline knows where the ink ends, for every glyph: a line can
+        // end on a Han character or on a fallback face's glyph just as easily
+        // as on a mark (ADR-0038). A table without outline data keeps the rule
+        // table's constants.
+        if let Some(ink) = metrics.ink_left(&atom.text, atom.style) {
+            atom.compress_left = ink;
+        }
+        if let Some(ink) = metrics.ink_right(&atom.text, atom.style) {
+            atom.compress_right = ink;
         }
     }
 }

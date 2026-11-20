@@ -80,9 +80,16 @@ impl Metrics for TableMetrics<'_> {
 
     fn ink_right(&self, text: &str, _style: StyleId) -> Option<Width> {
         let face = self.face()?;
-        let codepoint = single_codepoint(text)?;
-        face.ink_right(codepoint)
-            .map(|right| Width(scale(right, self.size.0)))
+        let codepoint = last_codepoint(text)?;
+        face.ink(codepoint)
+            .map(|(_, right)| Width(scale(right, self.size.0)))
+    }
+
+    fn ink_left(&self, text: &str, _style: StyleId) -> Option<Width> {
+        let face = self.face()?;
+        let codepoint = first_codepoint(text)?;
+        face.ink(codepoint)
+            .map(|(left, _)| Width(scale(left, self.size.0)))
     }
 
     fn version(&self) -> u16 {
@@ -116,6 +123,25 @@ impl<'a> StyledMetrics<'a> {
             .unwrap_or_else(ComputedStyle::base)
     }
 
+    /// The face that draws `text`: the style's own face when it has every
+    /// glyph, otherwise the first rescue face that does. `None` when even the
+    /// rescue faces cannot draw it, and the caller falls back to the style face
+    /// (which will render `.notdef`, but the widths stay sane).
+    fn face_for(&self, text: &str, computed: &ComputedStyle) -> Option<&soma_metrics::Face> {
+        let primary = self.face_of(computed)?;
+        if primary.covers(text) {
+            return Some(primary);
+        }
+        self.table
+            .faces()
+            .iter()
+            .filter(|face| face.family == soma_metrics::FAMILY_FALLBACK)
+            .find(|face| face.covers(text))
+            // No rescue face either: keep the style's face so widths stay
+            // sane. The glyph will render as .notdef, which is visible.
+            .or(Some(primary))
+    }
+
     fn face_of(&self, computed: &ComputedStyle) -> Option<&soma_metrics::Face> {
         let index = face_index(computed);
         // Faces are laid out as regular(serif, sans), bold(serif, sans).
@@ -130,7 +156,7 @@ impl<'a> StyledMetrics<'a> {
 impl Metrics for StyledMetrics<'_> {
     fn advance(&self, text: &str, style: StyleId) -> Width {
         let computed = self.computed(style);
-        match self.face_of(&computed) {
+        match self.face_for(text, &computed) {
             Some(face) => Width(scale(face.advance(text), computed.font_size.0)),
             None => Width::ZERO,
         }
@@ -145,6 +171,20 @@ impl Metrics for StyledMetrics<'_> {
                 leading: Width(scale(face.leading, computed.font_size.0)),
             },
             None => LineMetrics::default(),
+        }
+    }
+
+    fn glyph_metrics(&self, text: &str, style: StyleId) -> soma_core::GlyphMetrics {
+        let computed = self.computed(style);
+        match self.face_for(text, &computed) {
+            Some(face) => soma_core::GlyphMetrics {
+                advance: Width(scale(face.advance(text), computed.font_size.0)),
+                ascent: Width(scale(face.ascent, computed.font_size.0)),
+                descent: Width(scale(face.descent, computed.font_size.0)),
+                leading: Width(scale(face.leading, computed.font_size.0)),
+                ..soma_core::GlyphMetrics::default()
+            },
+            None => soma_core::GlyphMetrics::default(),
         }
     }
 
@@ -176,12 +216,28 @@ impl Metrics for StyledMetrics<'_> {
         }
     }
 
+    fn uses_fallback(&self, text: &str, style: StyleId) -> bool {
+        let computed = self.computed(style);
+        match (self.face_of(&computed), self.face_for(text, &computed)) {
+            (Some(primary), Some(drawn)) => !core::ptr::eq(primary, drawn),
+            _ => false,
+        }
+    }
+
     fn ink_right(&self, text: &str, style: StyleId) -> Option<Width> {
         let computed = self.computed(style);
-        let face = self.face_of(&computed)?;
-        let codepoint = single_codepoint(text)?;
-        face.ink_right(codepoint)
-            .map(|right| Width(scale(right, computed.font_size.0)))
+        let face = self.face_for(text, &computed)?;
+        let codepoint = last_codepoint(text)?;
+        face.ink(codepoint)
+            .map(|(_, right)| Width(scale(right, computed.font_size.0)))
+    }
+
+    fn ink_left(&self, text: &str, style: StyleId) -> Option<Width> {
+        let computed = self.computed(style);
+        let face = self.face_for(text, &computed)?;
+        let codepoint = first_codepoint(text)?;
+        face.ink(codepoint)
+            .map(|(left, _)| Width(scale(left, computed.font_size.0)))
     }
 
     fn version(&self) -> u16 {
@@ -223,15 +279,15 @@ fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
         .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
-/// One codepoint, no more: ink data is recorded per glyph, and only marks are
-/// queried for it.
-fn single_codepoint(text: &str) -> Option<u32> {
-    let mut chars = text.chars();
-    let first = chars.next()?;
-    if chars.next().is_some() {
-        return None;
-    }
-    Some(first as u32)
+/// The first glyph of an atom. A Latin atom is a whole run; its leading edge is
+/// the first character's.
+fn first_codepoint(text: &str) -> Option<u32> {
+    text.chars().next().map(|character| character as u32)
+}
+
+/// The last glyph of an atom; its trailing edge is what a line end trims.
+fn last_codepoint(text: &str) -> Option<u32> {
+    text.chars().last().map(|character| character as u32)
 }
 
 /// Scale a table value (1/4096 em) by a font size (also 1/4096 em).
