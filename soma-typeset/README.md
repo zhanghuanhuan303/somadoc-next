@@ -358,7 +358,8 @@ For the visual demo and evaluation harness:
 ```sh
 scripts/demo.sh            # writes target/demo.html
 scripts/web.sh             # build the browser slice + W1-W6 gates
-(cd . && python3 -m http.server 8000)   # then open /web/demo.html
+scripts/web-bundle.sh      # -> target/soma-kp-standalone.html (open it, no server)
+(cd . && python3 -m http.server 8000)   # or browse /web/demo.html
 scripts/wasm-hash.sh       # native vs wasm32-wasip1 canonical bytes
 scripts/bench.sh           # 100..4,000 atoms, P50/P95, budget check
 scripts/sweep.sh           # tolerance x badness scale

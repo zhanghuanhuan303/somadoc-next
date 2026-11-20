@@ -84,7 +84,10 @@
 </main>
 
 <script type="module">
-import { Kp, UNITS_PER_EM, LINE_OVERFULL, LINE_EMERGENCY } from './soma-kp.js';
+// `scripts/web-bundle.sh` inlines the module and the wasm into one file; when it
+// does, it sets these two globals before this script runs.
+const { Kp, UNITS_PER_EM, LINE_OVERFULL, LINE_EMERGENCY } =
+  await import(window.__somaKpUrl || './soma-kp.js');
 
 const ui = {
   text: document.getElementById('text'),
@@ -108,7 +111,12 @@ const ui = {
 
 let kp = null;
 try {
-  kp = await Kp.load('./soma-kp.wasm');
+  if (window.__somaKpWasm) {
+    const bytes = Uint8Array.from(atob(window.__somaKpWasm), (c) => c.charCodeAt(0));
+    kp = await Kp.fromBytes(bytes);
+  } else {
+    kp = await Kp.load('./soma-kp.wasm');
+  }
   ui.hint.textContent = '已加载。改任何一项都会重排；数字是最近一次断行的耗时。';
 } catch (error) {
   ui.hint.textContent = `加载失败：${error.message}。请用 HTTP 打开本页（file:// 下浏览器禁止 fetch wasm）。`;

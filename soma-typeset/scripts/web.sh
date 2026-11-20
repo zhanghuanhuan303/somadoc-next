@@ -65,4 +65,8 @@ else
     echo "chromium not found; skipping the browser self-check" >&2
 fi
 
+echo "== gate W: standalone bundle =="
+bash scripts/web-bundle.sh
+echo "open target/soma-kp-standalone.html — it needs no server"
+
 echo "all web gates passed"

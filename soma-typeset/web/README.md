@@ -37,14 +37,30 @@ soma-kp.worker.js ~2 KB       Worker 包装
 </script>
 ```
 
-**必须用 HTTP 打开**（`python3 -m http.server` 即可）：`file://` 下浏览器禁止
-`fetch` 一个 wasm。临时预览可以给 Chromium 加 `--allow-file-access-from-files`。
+### 两种打开方式
+
+**A. 单文件（双击即用，零请求）**
+
+```sh
+bash scripts/web.sh          # 构建 wasm 并跑门禁
+bash scripts/web-bundle.sh   # 生成 target/soma-kp-standalone.html
+open target/soma-kp-standalone.html
+```
+
+生成的 HTML 把 ES 模块塞进 blob URL、把 wasm 内联成 base64，总共约 148 KB，
+`file://` 下不需要任何服务器或命令行开关。
+
+**B. 多文件（开发用，需要 HTTP）**
+
+`file://` 下浏览器禁止 `fetch` 一个 wasm，所以开发时起一个静态服务器：
 
 ```sh
 cd soma-typeset
 python3 -m http.server 8000
 # 打开 http://localhost:8000/web/demo.html
 ```
+
+自检页同理：`http://localhost:8000/web/harness.html`。
 
 ---
 
@@ -248,6 +264,12 @@ cargo run -p soma-web --example fixture > web/parity.txt
 ```
 
 并在提交信息里解释断点变化——否则浏览器和 PDF 会悄悄跑偏。
+
+生成单文件演示：
+
+```sh
+bash scripts/web-bundle.sh            # target/soma-kp-standalone.html
+```
 
 单独看浏览器自检：
 
