@@ -175,7 +175,9 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   feature in a single document — ruby, hyphenation, nested and description
   lists, a table with merged cells, PNG/JPEG figures at their true aspect
   ratio, numbered formulas, macros and counters, footnotes, and a pinyin index
-  with sub-entries, `see`/`see also`, and page ranges.
+  with sub-entries, `see`/`see also`, and page ranges. `full-html.pdf` is a
+  one-page supplement for the HTML-only constructs (`<colgroup>` widths and
+  native `<ruby>`).
 - First-release artifact (`examples/book`, ADR-0031/ADR-0032/ADR-0033): `scripts/book.sh`
   renders an eleven-page book from `examples/book/book.tex` + `book.yaml` — generated
   cover, roman-numbered front matter, contents with leaders plus figure/table

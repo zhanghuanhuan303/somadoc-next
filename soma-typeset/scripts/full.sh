@@ -53,4 +53,16 @@ set -- "$@" --format pdf --font "$serif"
 [ -f "$math" ] && set -- "$@" --font-math "$math"
 cargo run --quiet -p soma-cli -- render "$@" --out "$out/full.pdf"
 
-echo "wrote $out/full.pdf"
+# A one-page supplement for the two HTML-only constructs: `<colgroup>`
+# relative widths and native `<ruby>`.
+set -- --input examples/book/full-html.html --template "$out/full.yaml" \
+    --metrics "$out/full.smt" --format pdf --out "$out/full-html.pdf" \
+    --font "$serif"
+[ -f "$serif_bold" ] && set -- "$@" --font-bold "$serif_bold"
+[ -f "$sans" ] && set -- "$@" --font-sans "$sans"
+[ -f "$sans_bold" ] && set -- "$@" --font-sans-bold "$sans_bold"
+[ -f "$rescue" ] && set -- "$@" --font-fallback "$rescue"
+[ -f "$math" ] && set -- "$@" --font-math "$math"
+cargo run --quiet -p soma-cli -- render "$@" >/dev/null
+
+echo "wrote $out/full.pdf and $out/full-html.pdf"
