@@ -85,6 +85,12 @@ breaker already only asks for widths.
 This layer alone also fixes line-end trim for mixed lines: `scale_trim` asks the
 same question to pick the right `ink_right`.
 
+If the unified ink model in [`docs/font-preset.md`](font-preset.md) lands first,
+L1 is what feeds it: the width model needs `face(k)` for every atom in order to
+take that face's bearings. The model then handles mixed lines with no extra
+rule — the gap between two faces is normalised to the script pair's design gap,
+and a line ending in a fallback mark trims by that mark's own bearing.
+
 ### L2 — render fallback (needs `soma.layout/7`)
 
 `AtomBox` gains `face: u16`, written during layout from the same chain. Then:

@@ -54,6 +54,8 @@ glyphs and the 13 marks. They do not score either — they are the input to the
 font-profile proposal in [`docs/font-preset.md`](font-preset.md), and they show
 how much of its em box a face actually fills.
 
+Within one face the advance-versus-ink error is not a constant: lines differ in composition, and the example book's justified lines range from 0.753 to 0.841 ink/advance. [`docs/font-preset.md`](font-preset.md) turns that into a unified width model.
+
 `ink_mean` and `ink_range` are reported but do **not** score: how much of the
 advance a mark's ink fills is a weight and style decision, not a quality
 signal. Consistency is the signal — a face whose comma and full stop have very

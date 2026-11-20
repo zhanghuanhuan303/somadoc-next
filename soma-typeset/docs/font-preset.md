@@ -1,4 +1,4 @@
-# Proposal: a typographic profile per font
+# Proposal: one ink model for marks, fonts and fallback
 
 **Status**: proposal, not implemented. Touches no frozen interface yet.
 **Related**: ADR-0006 (determinism), ADR-0036/0037 (line-end bearing, ink),
@@ -6,182 +6,158 @@
 
 ## 1. The problem in one number
 
-The engine charges a line for the **advance** of every atom. A font's advance
-is not how much ink it puts on the page:
+The engine charges a line for the **advance** of every atom. Advance is not
+ink:
 
 | Face | Han ink / em | Mark ink / em |
 | --- | --- | --- |
 | MiSans Thin | 0.839 | 0.173 |
 | MiSans Normal | 0.861 | 0.233 |
 | MiSans Heavy | 0.904 | 0.343 |
-| LXGW WenKai Light | 0.892 | 0.233 |
+| LXGW WenKai | 0.906 | 0.241 |
 
 Measured on 256 sampled Han glyphs and 13 full-width marks (`--audit`, columns
 `han_density`, `punct_density`).
 
-A line of 30 Han characters is therefore **25.2 em of ink** in Thin and
-**27.1 em in Heavy**, while the DP sees 30 em for both. Every geometric decision
-downstream inherits that error:
+Within one face the error is not a constant offset, because lines differ in
+composition. Across the 68 justified lines of the example book:
 
-- `badness` compares a deficit against a target that does not match the ink;
-- `short_last` judges the last line by advance, not by what is visible;
-- the justified gaps are computed to fill 30 em of advance, so a loose face
-  ends up looking looser than the target and a heavy face tighter.
+```text
+ink/advance mean 0.804, std 0.018, min 0.753, max 0.841
+loosest  29 atoms, ink 21.8 em, ratio 0.753
+densest  31 atoms, ink 26.1 em, ratio 0.841
+```
 
-ADR-0037 fixed the largest single case (line-end marks, where the gap reaches
-0.7 em). The rest of the alphabet still runs on a class constant.
+Every one of those lines is "full" to the DP. Visually the loosest is 11.7%
+emptier than the densest. That is the error worth removing.
 
 ## 2. Why not one Rust engine per font
 
-The intuitive answer — "write an engine that recognises a font and customises
-the line breaker for it" — turns into unmaintainable code the moment there are
-more than three fonts:
+Because it does not scale and cannot be audited: there is no finite font list,
+behaviour would live in branches instead of data, and two faces with identical
+measurements would still get two code paths.
 
-- there is no finite set of fonts to write branches for;
-- behaviour would live in code rather than in data, so it cannot be audited,
-  diffed, or reproduced on another machine;
-- two fonts with the same measurements would still get two code paths.
+**One measurement engine + one deterministic derivation + one data record per
+font** adapts to every face, including one released tomorrow, and stays
+diffable.
 
-What *is* reproducible: **one measurement engine, one deterministic derivation,
-one data record per font.** The font supplies numbers; the algorithm is shared;
-the output is a small, printable profile. That is more "custom" than a hand
-written branch because it adapts to every face, including one released tomorrow.
+## 3. The unified model
 
-## 3. What a font may and may not decide
+Every difference between "how wide a line is" and "how wide it looks" is a
+**bearing**: empty space inside a glyph's advance box. Marks, Han, Latin,
+accented glyphs and fallback faces all have it. So stop treating the line-end
+mark as a special case and charge **ink plus designed gaps** everywhere.
 
-This is the load-bearing decision of the proposal.
+For a line covering atoms `[i, j)`:
+
+```text
+ink(k)          = advance(k) - bearing_left(k) - bearing_right(k)
+natural_gap(k)  = bearing_right(k) + bearing_left(k+1)
+designed_gap(k) = rule(script(k), script(k+1))      -- 0 for Han-Han
+visual(i,j)     = Σ ink(k) + Σ [designed_gap(k) - natural_gap(k)]
+```
+
+The bracket is the **boundary adjustment**: negative when the font already left
+more air than the design wants, positive when two scripts need more room than
+their bearings provide.
+
+### Four cases, one primitive
+
+| Case | `designed_gap` | `natural_gap` | Adjustment | Equals today's |
+| --- | --- | --- | --- | --- |
+| Han next to Han, same face | 0 | `right + left` | `-(right+left)` | ink accounting |
+| Line end | — | `bearing_right(last)` | `-bearing_right(last)` | **line-end trim (ADR-0036)** |
+| Line start | — | `bearing_left(first)` | `-bearing_left(first)` | leading trim |
+| Han next to Latin | `CJK_LATIN_GAP` | `right + left` | `gap - bearings` | boundary glue |
+| **Two different faces** | by script pair | `right(faceA) + left(faceB)` | automatic | **mixed typesetting** |
+
+The line-end trim does not need its own rule any more: it is the boundary
+adjustment of the **virtual** boundary after the last atom. The same holds for
+the line start. One formula, four behaviours, and no `trim_priority` flag.
+
+### Mixed fonts fall out for free
+
+A fallback run makes atom `k` draw with face B inside a line set in face A. The
+model only needs `bearing_*(k)` to come from **the face that draws atom k**:
+
+- the gap between A and B is normalised to the script pair's design gap, so a
+  fallback glyph does not open a hole;
+- a line ending in a fallback face's mark trims by **that face's** bearing, not
+  the body face's — which is exactly the "different font width at the line end"
+  problem, solved by the same expression;
+- line height becomes the max over the faces actually used (already the K3 rule).
+
+No new mechanism. This is why the unified model is the right home for fallback
+rather than a second, parallel code path.
+
+### Determinism and cost
+
+`ink` and `natural_gap` are integers from the metrics table; `designed_gap` is
+an integer from the rule table. `visual` is a prefix sum, so `eval_line` stays
+O(1) and the DP stays O(n²) with exactly today's shape. No floating point, no
+font access at layout time.
+
+## 4. What a font may and may not decide
 
 | Parameter | Decided by | Why |
 | --- | --- | --- |
-| advance, ink box, x-height, cap-height | **font** (measured) | facts about the file |
-| line-end trim | **font** (ADR-0037) | already implemented |
-| visual line width (ink accounting) | **font** (derived) | see §1 |
-| CJK/Latin gap | **font** (derived from x-height) | a design property of the pairing |
-| line height | **font** (ascent/descent), template may override | measured |
-| `line` penalty | **designer** | how strongly to discourage an extra line |
-| `badness` exponent and scale | **designer** | how strongly to punish a loose line |
-| `tolerance`, `short_last_*` | **designer** | how tolerant the book is |
+| advance, bearings, x-height, cap-height | **font** (measured) | facts about the file |
+| line-end trim | **font** (falls out of §3) | no longer a rule |
+| visual line width | **font** (falls out of §3) | see §1 |
+| CJK/Latin design gap | **rule table** | a Chinese typesetting convention, not a font property |
+| line height | **font**, template may override | measured |
+| `line` penalty, `badness`, `tolerance`, `short_last_*` | **designer** | how the book punishes looseness |
 
-A new font must not silently change the book's *style*, only its *geometry*. If
-a font also moved `line` and `badness`, "switch the body face" would become
-"switch the typographic taste", and no golden could survive it.
+A new font changes geometry only. If it also moved `line` and `badness`,
+"switch the body face" would become "switch the typographic taste".
 
-## 4. Three layers
+## 5. What has to be measured
 
-### F1 — measurement (`soma.metrics/3`)
-
-Extend the blob with what the derivation needs:
+`soma.metrics/3` must carry, **per glyph**, both bearings — not just for marks:
 
 ```text
-per ink: u32 codepoint | i16 ink_left | i16 ink_right   (already, version 2)
-new per face:
-  i16 x_height | i16 cap_height
-  u16 han_sample | u32 han_ink_units      (sum of ink widths over the sample)
-  u16 han_sample | u32 han_advance_units
+per face: u32 ink_count
+per ink:  u32 codepoint | i16 ink_left | i16 ink_right
 ```
 
-or, cheaper and equivalent for our purpose, keep the raw per-codepoint ink for
-all glyphs in a coarser form: one byte per glyph expressing
-`round(255 * ink_width / advance)`. Han density is a scalar; storing 20k of them
-is 20 KB per face, and the derivation only needs the mean.
+The version 2 section already has this shape; it just covers 13 marks. Version 3
+extends the range to every glyph the face has, in the same compact form. A
+20k-glyph face adds ~160 KB uncompressed; the alternative is a coarser encoding
+(one byte of `ink_width / advance` per glyph, ~20 KB) plus a x-height class,
+which is enough for the width model but not for exact trim. Both are integers
+and hashable.
 
-Either way the blob stays integers-only and hashable.
+For CFF faces there is no outline data, so `derived: false`: the breaker keeps
+today's constants and the line is measured by advance. A font without outlines
+simply has no profile — and `docs/mixed-font.md` already excludes CFF faces from
+rescue duty for the same reason.
 
-### F2 — derivation (`soma-font` or a `soma-engine` module)
-
-```rust
-pub struct FontProfile {
-    pub visual_density: u32,   // permille: mean ink / advance over Han
-    pub mark_density: u32,
-    pub x_height: Width,
-    pub line_height: Width,
-    pub derived: bool,         // false when the table had no outlines
-}
-
-pub fn derive(metrics: &MetricsTable, face: usize) -> FontProfile;
-```
-
-Pure, integer, no floats, no allocation beyond the table walk. The result is
-small enough to print and diff:
-
-```json
-{"face":0,"visualDensity":861,"markDensity":233,"xHeight":2100,
- "lineHeight":4096,"derived":true}
-```
-
-`derived: false` (CFF, synthetic metrics) means the line breaker keeps today's
-class constants — a font without outlines simply has no profile.
-
-### F3 — the breaker (`soma.layout/7` and a new engine preset)
-
-The line's natural width becomes **ink-aware**:
-
-```text
-natural_visual(i,j) = sum(ink_width[k]) + sum(designed_gap[k])
-```
-
-where `designed_gap` is the boundary glue the rule table already defines for
-CJK/Latin transitions, plus, for two Han characters, the font's own side
-bearing: `advance - ink_width`, apportioned left and right.
-
-The end-of-line trim stops being a special case: it is what falls out when the
-last atom is charged by ink. `Line.natural_width` gains a companion
-`visual_width` (or replaces it, with a schema change), and `ratio` is computed
-from the visual deficit.
-
-`AtomBox` keeps advance-based coordinates for rendering; only the *decision*
-uses ink. This keeps renderers untouched at F3.
-
-`BreakConfig` gains:
-
-```text
-font_profile: Option<FontProfile>   // folded into paramHash
-```
-
-so two runs are comparable only when they share a profile, exactly like
-`metricsHash` today.
-
-### F4 — validation
-
-1. Same paragraph, ten faces: measure the coefficient of variation of line
-   density. It must **fall**, not rise.
-2. Breakpoints change rate against today's model, per face. A well behaved face
-   should move few breaks; a very light face should move many, in the direction
-   of more characters per line.
-3. `K-P ≤ Greedy-C` must still hold; the brute-force oracle is unchanged
-   because it uses the same cost model.
-4. The example book must stay at 11 pages or explain why it moved.
-
-## 5. Staging and risk
+## 6. Staging
 
 | Stage | Deliverable | Risk | Gate |
 | --- | --- | --- | --- |
-| F1 | metrics v3 (density, x-height) | low | old tables still parse |
-| F2 | `FontProfile::derive` + report | low | derivation is deterministic; no DP change |
-| F3 | ink-aware width in the breaker | **high** | every golden and hash moves; `soma.layout/7` |
-| F4 | calibration and matrix report | medium | density variance down, pages stable |
+| F1 | metrics v3: bearings for all glyphs (or the coarse form) | low | v1/v2 tables still parse; no DP change |
+| F2 | `FontProfile::derive` + printed report | low | deterministic; no DP change |
+| F3 | `visual()` in the breaker; remove the trim special case | **high** | `soma.layout/7`; every golden moves |
+| F4 | fallback chain feeding `face(k)` | high | depends on `docs/mixed-font.md` P1/P2 |
+| F5 | calibration: stretch/shrink now apply to ink gaps | medium | density spread down, pages stable |
 
-F1+F2 can ship without touching a single breakpoint. F3 is the decision point:
-it changes every line, so it needs the F4 evidence in hand.
+F1+F2 ship without moving a breakpoint. F3 is the decision point.
 
-## 6. What the fingerprint is for, then
+## 7. Validation
 
-The fingerprint ([`docs/fonts.md`](fonts.md)) answers "what is this face" —
-useful before you have chosen one. The profile answers "how does this face
-behave in the breaker" — useful after. They share the measurement layer and
-nothing else. Neither replaces `--coverage`, which answers "can it draw this
-document at all".
+1. **Density spread** (the §1 metric) must fall from 8.8 points to under 2.
+2. **Breakpoint drift**: a well-behaved face should move few breaks; a very
+   light face should move towards more characters per line.
+3. `K-P ≤ Greedy-C` still holds; the brute-force oracle uses the same model.
+4. The example book stays at 11 pages, or the change is explained.
+5. Mixed-font check: a line with a fallback glyph must keep the same visual
+   density as its neighbours — measured, not asserted.
 
-## 7. The first experiment I would run
+## 8. The first thing to build
 
-Before F3, take three faces with the widest density spread on this machine
-(MiSans Thin 0.839, MiSans Heavy 0.904, LXGW WenKai 0.892), set the same
-paragraph, and measure:
-
-- the visual ink density of each line;
-- the spread of that density within a paragraph;
-- how many lines end "short" in ink but "full" in advance.
-
-If the within-paragraph spread is already above 5%, ink accounting is worth the
-schema change. If it is below 2%, the current trim plus ADR-0037 has absorbed
-most of the error and F3 can wait.
+F1 and F2 only, plus a report that prints, for a given book, the per-line
+`visual / advance` ratio before and after. That report costs nothing, changes no
+breakpoint, and turns §1 from a static measurement into evidence about the
+actual document. If the drift is small on the real corpus, F3 can wait; on the
+example book it is already 8.8 points.
