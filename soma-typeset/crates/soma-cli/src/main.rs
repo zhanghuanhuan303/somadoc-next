@@ -29,6 +29,7 @@ soma — deterministic Chinese-first typesetting
 usage:
   soma render --input <file> [--template <file>] [--engine <file>]
               [--format html|svg|json|pdf] [--out <file>]
+              [--metrics <file>]
               [--font <file[#index]>] [--font-bold <file[#index]>]
               [--font-math <file[#index]>]
   soma check  --input <file> [--template <file>] [--engine <file>]
@@ -37,6 +38,8 @@ usage:
   --template  pure-YAML template; omitted uses the built-in A4 default
   --engine    soma.engine/1 configuration; omitted uses publish-v1
   --format    html (default), svg, json (canonical page result), or pdf
+  --metrics   soma.metrics/1 table; omitted uses the embedded Noto table.
+              Generate one with tools/metrics-gen to match a PDF font.
   --font      TrueType font for PDF output (required by --format pdf)
   --font-bold optional bold face; falls back to --font
   --font-math optional math face; falls back to --font
@@ -94,6 +97,7 @@ struct Options {
     format: Format,
     out: Option<String>,
     stats: bool,
+    metrics: Option<String>,
     font: Option<String>,
     font_bold: Option<String>,
     font_math: Option<String>,
@@ -131,6 +135,7 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
     let mut format = Format::Html;
     let mut out = None;
     let mut stats = false;
+    let mut metrics = None;
     let mut font = None;
     let mut font_bold = None;
     let mut font_math = None;
@@ -149,6 +154,7 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
             "--template" | "-t" => template = Some(value()?),
             "--engine" => engine = Some(value()?),
             "--out" | "-o" => out = Some(value()?),
+            "--metrics" => metrics = Some(value()?),
             "--font" => font = Some(value()?),
             "--font-bold" => font_bold = Some(value()?),
             "--font-math" => font_math = Some(value()?),
@@ -174,6 +180,7 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
         format,
         out,
         stats,
+        metrics,
         font,
         font_bold,
         font_math,
@@ -183,7 +190,8 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
 fn render(args: &[String]) -> Result<(), String> {
     let options = parse_options(args, true)?;
     let (document, styled, engine, vertical) = pipeline(&options)?;
-    let pages = layout(&document, &styled, &engine, vertical)?;
+    let metrics = load_metrics(&options)?;
+    let pages = layout(&document, &styled, &engine, vertical, &metrics)?;
     match options.format {
         Format::Html => write_output(&options, &render_html(&pages, styled.table(), &pages.text))?,
         Format::Svg => write_output(&options, &render_svg(&pages, styled.table(), &pages.text))?,
@@ -247,7 +255,8 @@ fn render(args: &[String]) -> Result<(), String> {
 fn check(args: &[String]) -> Result<(), String> {
     let options = parse_options(args, false)?;
     let (document, styled, engine, vertical) = pipeline(&options)?;
-    let pages = layout(&document, &styled, &engine, vertical)?;
+    let metrics = load_metrics(&options)?;
+    let pages = layout(&document, &styled, &engine, vertical, &metrics)?;
     let overflow = pages.pages.iter().filter(|page| page.overflow).count();
     let emergency = pages
         .pages
@@ -296,6 +305,16 @@ fn pipeline(
     Ok((document, styled, engine, vertical))
 }
 
+fn load_metrics(options: &Options) -> Result<MetricsTable, String> {
+    match options.metrics.as_deref() {
+        None => Ok(MetricsTable::embedded()),
+        Some(path) => {
+            let bytes = std::fs::read(path).map_err(|error| format!("{path}: {error}"))?;
+            MetricsTable::parse(&bytes).map_err(|error| format!("{path}: {error}"))
+        }
+    }
+}
+
 fn parse_document(path: &str, source: &str) -> Result<Document, String> {
     let extension = std::path::Path::new(path)
         .extension()
@@ -317,9 +336,9 @@ fn layout(
     styled: &StyledDoc,
     engine: &BreakConfig,
     vertical: VerticalParams,
+    table: &MetricsTable,
 ) -> Result<soma_layout::PagedLayout, String> {
-    let table = MetricsTable::embedded();
-    let metrics = StyledMetrics::new(&table, styled);
+    let metrics = StyledMetrics::new(table, styled);
     layout_with(
         document,
         styled,

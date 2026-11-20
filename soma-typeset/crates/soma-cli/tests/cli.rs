@@ -327,3 +327,52 @@ fn pdf_without_a_font_is_an_error() {
     assert!(!ok, "pdf needs a font");
     assert!(stderr.contains("--font"), "stderr: {stderr}");
 }
+
+#[test]
+fn an_explicit_metrics_table_matches_the_embedded_one() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("workspace root");
+    let metrics = root.join("crates/soma-metrics/data/noto-cjk.smt");
+    let input = temp(
+        "metrics",
+        "md",
+        "中文排版测试，含 Latin words 和数字 123。\n",
+    );
+
+    let (ok, embedded, stderr) = run(&[
+        "render",
+        "--input",
+        input.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    assert!(ok, "stderr: {stderr}");
+    let (ok, explicit, stderr) = run(&[
+        "render",
+        "--input",
+        input.to_str().unwrap(),
+        "--format",
+        "json",
+        "--metrics",
+        metrics.to_str().unwrap(),
+    ]);
+    assert!(ok, "stderr: {stderr}");
+    assert_eq!(embedded, explicit, "the file and embedded table agree");
+}
+
+#[test]
+fn a_missing_metrics_file_is_an_error() {
+    let input = temp("metrics-missing", "md", "正文。\n");
+    let (ok, _stdout, stderr) = run(&[
+        "render",
+        "--input",
+        input.to_str().unwrap(),
+        "--metrics",
+        "/nonexistent/metrics.smt",
+    ]);
+
+    assert!(!ok);
+    assert!(stderr.contains("metrics.smt"), "stderr: {stderr}");
+}

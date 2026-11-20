@@ -39,9 +39,28 @@ if [ -z "$pdf_font" ]; then
         fi
     done
 fi
+pdf_bold=${SOMA_PDF_FONT_BOLD:-}
 pdf_math=${SOMA_PDF_MATH:-/usr/share/fonts/noto/NotoSansMath-Regular.ttf}
 if [ -n "$pdf_font" ] && [ -f "$pdf_font" ]; then
-    set -- --format pdf --font "$pdf_font" --out "$out/book.pdf"
+    # Layout must measure with the same face the PDF draws. Generate a table
+    # from the PDF font (and math face) unless the caller provides one.
+    pdf_metrics=${SOMA_PDF_METRICS:-}
+    if [ -z "$pdf_metrics" ]; then
+        pdf_metrics="$out/metrics-pdf.smt"
+        set -- --out "$pdf_metrics" --face "serif:normal:$pdf_font"
+        if [ -n "$pdf_bold" ] && [ -f "$pdf_bold" ]; then
+            set -- "$@" --face "serif:bold:$pdf_bold"
+        fi
+        if [ -f "$pdf_math" ]; then
+            set -- "$@" --face "math:normal:$pdf_math"
+        fi
+        cargo run --quiet --manifest-path tools/metrics-gen/Cargo.toml -- "$@"
+    fi
+
+    set -- --format pdf --font "$pdf_font" --metrics "$pdf_metrics" --out "$out/book.pdf"
+    if [ -n "$pdf_bold" ] && [ -f "$pdf_bold" ]; then
+        set -- "$@" --font-bold "$pdf_bold"
+    fi
     if [ -f "$pdf_math" ]; then
         set -- "$@" --font-math "$pdf_math"
     fi
