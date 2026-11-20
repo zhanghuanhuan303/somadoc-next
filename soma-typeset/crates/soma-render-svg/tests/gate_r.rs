@@ -263,4 +263,7 @@ fn svg_bytes_are_a_visual_regression_lock() {
 /// font size, so a page extracted on its own rendered wrong; the root
 /// viewport is in pixels at one em = 16 px, and the `viewBox` is unchanged.
 /// The layout, and therefore every coordinate's *value*, is identical (D87).
-const GOLDEN_SVG_HASH: u64 = 9092984200964852902;
+/// 2026-11-21: a footer line sits at the bottom of its band and a header at the
+/// top, so the folio no longer touches the text block. Only margin-block
+/// position changes; every body coordinate is untouched.
+const GOLDEN_SVG_HASH: u64 = 16_517_979_550_617_088_203;

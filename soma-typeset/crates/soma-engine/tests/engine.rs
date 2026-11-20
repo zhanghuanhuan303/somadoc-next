@@ -80,6 +80,26 @@ fn documented_defaults_match_the_built_in_preset() {
 }
 
 #[test]
+fn the_latex_preset_can_be_selected_from_a_config() {
+    let source = DEFAULTS.replace("preset: publish-v1", "preset: latex-v1");
+    let config = EngineConfig::parse(&source).expect("parse");
+    assert_eq!(config.preset(), "latex-v1");
+    assert_eq!(
+        config.break_config().param_hash(),
+        BreakConfig::from_params(ParamSet::latex_v1()).param_hash(),
+        "an explicit config must land on the same parameters as the preset"
+    );
+    let breaks = config.break_config();
+    let params = breaks.params();
+    assert_eq!(params.break_params.tolerance, soma_core::Permille(1_260));
+    assert_eq!(params.break_params.costs.short_last_scale.0, 0);
+    assert!(
+        params.features.edge_trim,
+        "the model is unchanged otherwise"
+    );
+}
+
+#[test]
 fn a_minimal_document_is_enough() {
     let config = EngineConfig::parse("schema: soma.engine/1\n").expect("parse");
     assert_eq!(

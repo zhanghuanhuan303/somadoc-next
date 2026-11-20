@@ -83,6 +83,41 @@ fn svg_is_available_and_draws_boxes() {
 }
 
 #[test]
+fn the_default_template_is_latex_article() {
+    let input = temp("md-default", "md", "# 标题\n\n一段正文。\n");
+    let (ok, stdout, stderr) = run(&[
+        "render",
+        "--input",
+        input.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+
+    assert!(ok, "stderr: {stderr}");
+    // The 10pt article text block is 345 x 598 pt = 121.3 x 210.2 mm on A4,
+    // with 44.0/44.7 mm side margins and 44.4/42.4 mm top/bottom margins.
+    assert!(
+        stdout.contains(
+            "\"page\":{\"width\":243824,\"height\":344838,\"marginTop\":51551,\"marginBottom\":49229,\"marginLeft\":51087,\"marginRight\":51899}"
+        ),
+        "head: {stdout}"
+    );
+    // `arabic-dotted` numbering: the first level-1 heading is "1".
+    assert!(
+        stdout.contains(
+            "\"outline\":[{\"level\":1,\"text\":\"1 标题\",\"page\":1,\"printed\":\"1\"}]"
+        ),
+        "outline: {stdout}"
+    );
+    // `folio: "{page}"` puts a centred page number in the footer band.
+    assert!(
+        stdout.contains("\"footer\":[{\"node\":"),
+        "footer: {stdout}"
+    );
+    assert!(stdout.contains("\"printed\":\"1\""));
+}
+
+#[test]
 fn a_custom_template_changes_the_page_geometry() {
     let input = temp("md-template", "md", "一段正文。\n");
     let template = temp(

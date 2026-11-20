@@ -981,6 +981,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
                 content_width,
                 master.header_height,
                 Width(-master.header_height.0),
+                false,
             ) {
                 header.push(block);
                 next_node += 1;
@@ -1001,6 +1002,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
                         content_width,
                         master.footer_height,
                         page_height,
+                        true,
                     ) {
                         footer.push(block);
                         next_node += 1;
@@ -3983,6 +3985,7 @@ fn inline_text(inlines: &[Inline]) -> String {
 ///
 /// The band lives in the page margin, so it never competes with the content
 /// height and cannot change pagination.
+#[allow(clippy::too_many_arguments)]
 fn margin_block(
     builder: &mut Builder,
     node: NodeId,
@@ -3991,16 +3994,24 @@ fn margin_block(
     content_width: Width,
     band_height: Width,
     y: Width,
+    bottom_aligned: bool,
 ) -> Option<PlacedBlock> {
     if text.is_empty() {
         return None;
     }
+    // The band's height is carried by the block, not by the line: a footer
+    // line is placed at the bottom of its band and a header at the top, both
+    // with their natural line box. `line_height` still has to be positive —
+    // DocIR rejects zero — and the natural line box is the honest value: it
+    // also becomes the body height of the K3 height cost, which a folio should
+    // not perturb.
+    let line_height = builder.metrics.line_metrics(style).height();
     let paragraph_style = ParagraphStyle {
         width: Width::from_em(1000),
         first_indent: Width::ZERO,
         hang: Width::ZERO,
         tracking: Width::ZERO,
-        line_height: band_height,
+        line_height,
         align: soma_core::Align::Justify,
     };
     let paragraph = paragraph_from_text(text, paragraph_style, style).ok()?;
@@ -4032,7 +4043,14 @@ fn margin_block(
         width: natural,
         height: band_height,
         lines: vec![PlacedLine {
-            y: Width::ZERO,
+            // A footer's band is the distance from the text block to the
+            // folio, so its line sits at the bottom of the band; a header
+            // hangs from the top of its band, in the top margin.
+            y: if bottom_aligned {
+                Width((band_height.0 - line.height.0).max(0))
+            } else {
+                Width::ZERO
+            },
             hang: 0,
             line,
         }],

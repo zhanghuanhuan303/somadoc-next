@@ -177,6 +177,21 @@ impl ParamSet {
         params
     }
 
+    /// LaTeX article defaults: `\tolerance=200` (badness, which is
+    /// `100 * |r|^3` here, so `|r| <= 2^(1/3) ~= 1.26`), and no
+    /// short-last-line penalty (TeX leaves the last line ragged).
+    ///
+    /// TeX's own `\emergencystretch` is `0pt`; the rescue pass still uses the
+    /// engine's 3em, because TeX would emit an overfull box there while we
+    /// prefer one very loose line. The rescue is not part of the normal path.
+    pub fn latex_v1() -> Self {
+        let mut params = Self::default_v1();
+        params.preset = PresetId("latex-v1");
+        params.break_params.tolerance = Permille(1_260);
+        params.break_params.costs.short_last_scale = Weight(0);
+        params
+    }
+
     /// `publish-v1` plus K7: adjacent justified lines may not jump more than
     /// one looseness class for free. One class costs one line's worth.
     pub fn rhythm_v1() -> Self {
@@ -446,5 +461,31 @@ mod tests {
         assert_eq!(publish.rules_version, 1, "the trim table changed");
         publish.validate().expect("publish-v1 must be valid");
         assert_ne!(publish.param_hash(), base.param_hash());
+    }
+
+    #[test]
+    fn latex_v1_matches_tex_tolerance_and_leaves_the_last_line_ragged() {
+        let base = ParamSet::default_v1();
+        let latex = ParamSet::latex_v1();
+        assert_eq!(latex.preset.0, "latex-v1");
+        // TeX's \tolerance=200 is a badness limit; badness = 100 * |r|^3, so
+        // |r| <= 2^(1/3), which is 1.26 in per-mille.
+        assert_eq!(latex.break_params.tolerance, Permille(1_260));
+        assert_eq!(latex.break_params.costs.short_last_scale, Weight(0));
+        // Only the two TeX-specific knobs move: the cost model is unchanged.
+        assert_eq!(latex.model_version, base.model_version);
+        assert_eq!(latex.break_params.costs.line, base.break_params.costs.line);
+        assert_eq!(
+            latex.break_params.costs.badness_scale,
+            base.break_params.costs.badness_scale
+        );
+        assert_eq!(latex.break_params.fallback, base.break_params.fallback);
+        latex.validate().expect("latex-v1 must be valid");
+        assert_ne!(latex.param_hash(), base.param_hash());
+        assert_ne!(
+            latex.param_hash(),
+            ParamSet::publish_v1().param_hash(),
+            "a distinct preset must not collide with publish-v1"
+        );
     }
 }

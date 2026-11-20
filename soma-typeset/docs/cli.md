@@ -20,8 +20,8 @@ soma --help
 | Flag | Meaning |
 |---|---|
 | `--input`, `-i` | Source document. Extension picks the frontend: `.md`, `.html`, `.tex`, or `.docx` (read as binary and imported; no layout fidelity). |
-| `--template`, `-t` | Pure-YAML template. Omitted: a built-in A4 template (20 mm margins, 10.5 pt / 1.6, justified). |
-| `--engine` | `soma.engine/1` file. Omitted: `publish-v1` defaults. |
+| `--template`, `-t` | Pure-YAML template. Omitted: the built-in `latex-article` template — A4, LaTeX `article` 10 pt on a 12 pt baseline, a 121.3 x 210.2 mm text block, 1.5 em paragraph indent, no paragraph spacing, and a centred folio (ADR-0069). |
+| `--engine` | `soma.engine/1` file. Omitted: `latex-v1` defaults (`tolerance=1260`, ragged last line; ADR-0069). |
 | `--format`, `-f` | `html` (default), `svg`, `json` (canonical page result), or `pdf`. |
 | `--font-fallback` | Optional rescue face for glyphs `--font` lacks. Layout must have measured it: add a `fallback:` face to the metrics table (`tools/metrics-gen --face fallback:normal:<file>`). Without it, missing glyphs render as `.notdef`. |
 | `--hyphenation` | TeX pattern file for Liang hyphenation of Latin words. Omitted: no word is broken. |

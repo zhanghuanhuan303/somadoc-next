@@ -155,6 +155,11 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
 - One command (ADR-0029): `soma render --input doc.tex --template book.yaml
   --format html|svg|json|pdf` runs the whole pipeline; `soma check` prints
   layout facts and the canonical hash. See [`docs/cli.md`](docs/cli.md).
+- LaTeX `article` defaults (ADR-0069): without `--template` the CLI uses
+  `latex-article` — A4, 10 pt on 12 pt, a 121.3 x 210.2 mm text block, a 1.5 em
+  paragraph indent, no paragraph spacing, and a centred folio; without
+  `--engine` it breaks with `latex-v1` (`tolerance=1260`, ragged last line).
+  An explicit template or engine file still wins.
 - PDF output (`soma-render-pdf`, ADR-0034): `--format pdf --font book.ttf`
   embeds a sparse TrueType subset (Identity-H + ToUnicode), writes integer
   glyph positions, table rules, display math, a nested bookmark tree from

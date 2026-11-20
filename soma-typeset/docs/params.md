@@ -348,7 +348,8 @@ pub struct ParamError {
 Preset 是数据，不是算法分支：
 
 - `default-v1`：冻结的 K-P 参考（`tolerance = 3000`）。
-- `publish-v1`：**引擎默认**（ADR-0023）：`default-v1` + `tolerance = 1500`，其余权重与回退完全相同；母语出版优先。
+- `publish-v1`：**`soma.engine/1` 的默认 preset**（ADR-0023）：`default-v1` + `tolerance = 1500`，其余权重与回退完全相同；母语出版优先。
+- `latex-v1`：LaTeX article 的断行口径（ADR-0069，**CLI 内置默认**）：`default-v1` + `tolerance = 1260`（`\tolerance=200` 换算）+ `short_last_scale = 0`（末行不罚）；其余权重与回退不变。
 - ~~更保守的 emergency~~：实测没有必要，回退阶梯保持 `default-v1`。
 - `mobile-v1`：更低 `max_lines`、更少 feature（延迟优先）。
 - `debug`：启用 trace、保留所有候选统计（不用于发布）。

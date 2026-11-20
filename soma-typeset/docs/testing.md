@@ -119,12 +119,12 @@ Cumulative public test files:
 | `e7_tables.rs` | 2 | rowspan coverage without overlap, repeated header on every table page |
 | `e8_table_split.rs` | 4 | row bands continue across pages, spanning rows stay whole, tall cells are moved not clipped |
 | `e9_table_rules.rs` | 8 | outer/header/internal rules, continuation headers, spanning/colspan skips, frame, dashes, color |
-| `e10_masters.rs` | 4 | section masters, forced page start, shared content box, unknown names |
+| `e10_masters.rs` | 5 | section masters, forced page start, shared content box, unknown names, folio at the bottom of its band |
 | `gate_r.rs` (svg) | 4 | Gate V/R: SVG golden, coordinates = layout, HTML/SVG atom parity |
 | `table_rules.rs` (svg) | 1 | rules are painted at layout coordinates |
 | `table_rules.rs` (html) | 1 | rules reach the HTML renderer as positioned boxes |
 | `effect.rs` (eval) | 7 | Gate Q′ structural claims on the scorecard |
-| `engine.rs` | 15 | `soma.engine/1`: parse, reject, canonical hash, layout equivalence |
+| `engine.rs` | 17 | `soma.engine/1`: parse, reject, canonical hash, preset selection, layout equivalence |
 | `corpus.rs` (eval) | 9 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
 | `a5_md.rs` | 22 | Markdown subset (nested lists, GFM tables, setext headings), inlines (including GFM `~~`), spans, index/ruby extensions, front matter, validity |
 | `html.rs` (html) | 12 | HTML subset shapes, table grid, caption and `<colgroup>` widths, degradation, recovery, pipeline |
@@ -146,7 +146,7 @@ Cumulative public test files:
 | `e21_line_end_punctuation.rs` (layout) | 6 | trailing bearing trimmed on justified lines, ink on the text edge, ragged lines untouched |
 | `e22_fallback.rs` (layout) | 2 | a rescue face measures the glyph and its edge is what a line end trims |
 | `e23_space_shrink.rs` (layout) | 2 | a space gives up at most a third of itself; an unbreakable word still lays out |
-| `cli.rs` (soma-cli) | 17 | render md/tex to html/svg/json/pdf, template geometry, TOC template, example book, fonts, `--metrics`, `--out`, check, error paths |
+| `cli.rs` (soma-cli) | 19 | render md/tex to html/svg/json/pdf, template geometry, LaTeX article defaults, TOC template, example book, fonts, `--metrics`, `--out`, check, error paths |
 | `blind_pipeline.rs` (eval) | 3 | dry-run fixture through key + statistics + decision |
 | `k7_object_metrics.rs` | 4 | object hooks vs text paths, default-hook equivalence |
 | `pdf.rs` (render-pdf) | 14 | TrueType cmap/subset, CFF subset and `/CIDFontType0`, name-keyed promotion, `seac` composite, CFF2 refusal, PDF objects, bookmarks, underlines and `/Annots`, image XObject and placeholder fallback, tagged structure tree, byte determinism |
@@ -169,7 +169,7 @@ Cumulative public test files:
 | `soma-rules` unit | 19 | segmentation, punctuation, half-width bearings, pair trim, hyphen breaks, rule inventory, code-line spaces, dashes keep their width |
 | `soma-metrics` unit | 14 | table round-trip, CJK/Latin widths, regular/bold/math faces, hash, truncation, ink sections, v1/v2 compatibility |
 | `soma-core` vertical unit | 1 | vertical cost model hash |
-| core unit | 24 | IR, units, breaker, result, presets |
+| core unit | 25 | IR, units, breaker, result, presets (`latex-v1` included) |
 | layout unit | 20 | trim scaling at body and non-body sizes; math metric adapter; index grammar, ordering and page ranges; column hints |
 | `pagination.rs` unit | 2 | a figure and its caption never split; two figures fill one page |
 | `k7_rhythm.rs` (core) | 3 | preset validity and hash, class jumps removed by the rhythm term, zero weight equals the old solver |
@@ -178,7 +178,7 @@ Cumulative public test files:
 | `soma-docx` (unit + integration) | 32 | zip store/deflate, inflate, XML entities, headings from style names, `basedOn` styles, tables, lists, metadata, embedded media, damaged archives |
 | render-pdf unit | 26 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing |
 
-Total: **752 tests**.
+Total: **756 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

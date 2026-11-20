@@ -54,32 +54,162 @@ exit codes:
 /// A4, 20 mm margins, justified 10.5 pt body. Mirrors `soma_eval`'s template so
 /// `soma render` works before a designer writes one.
 const DEFAULT_TEMPLATE: &str = r#"
-name: soma-default
+# LaTeX article defaults: A4, 10pt on a 12pt baseline, the 345 x 598 pt
+# text block of the 10pt class (121.3 x 210.2 mm on A4), 15pt paragraph
+# indent, no paragraph spacing, no running head, and a centred folio
+# 30pt (\footskip) below the text block.
+name: latex-article
 version: 1
+
 page:
   size: A4
-  margin: 20mm
+  margin-top: 44.4mm
+  margin-bottom: 42.4mm
+  margin-left: 44.0mm
+  margin-right: 44.7mm
+  header: 0mm
+  footer: 10.5mm
+  folio: "{page}"
+
+numbering:
+  headings: arabic-dotted
+  depth: 3
+  figures: "图 {n}"
+  tables: "表 {n}"
+  equations: "({n})"
+
 styles:
   - selector:
       element: document
     declarations:
-      font-size: 10.5pt
-      line-height: 1.6
+      font-size: 10pt
+      line-height: 1.2
       align: justify
   - selector:
       element: paragraph
     declarations:
-      first-indent: 2em
+      first-indent: 1.5em
+      space-before: 0
+      space-after: 0
+  # \section: \Large\bfseries, 3.5ex before / 2.3ex after.
   - selector:
       element: heading
     declarations:
-      space-before: 1.2em
-      space-after: 0.4em
+      font-size: 12pt
+      weight: bold
+      space-before: 1.4em
+      space-after: 0.65em
       keep-with-next: true
+  - selector:
+      element: heading
+      level: 1
+    declarations:
+      font-size: 14.4pt
+      space-before: 1.5em
+      space-after: 1em
+  - selector:
+      element: heading
+      level: 2
+    declarations:
+      font-size: 12pt
+  # \subsubsection: \normalsize\bfseries.
+  - selector:
+      element: heading
+      level: 3
+    declarations:
+      font-size: 10pt
+  - selector:
+      element: strong
+    declarations:
+      weight: bold
+  - selector:
+      element: emphasis
+    declarations:
+      slant: italic
+  - selector:
+      element: underline
+    declarations:
+      underline: true
+  - selector:
+      element: smallCaps
+    declarations:
+      small-caps: true
+  # \footnotesize: 8pt on 9.5pt.
   - selector:
       element: footnote
     declarations:
       font-size: 8pt
+      line-height: 1.1875
+      first-indent: 0
+      space-before: 0.35em
+  # \small captions, centred like article's short captions.
+  - selector:
+      element: figureCaption
+    declarations:
+      font-size: 9pt
+      line-height: 1.2
+      align: center
+      first-indent: 0
+      space-before: 0.7em
+      space-after: 1em
+  - selector:
+      element: tableCaption
+    declarations:
+      font-size: 9pt
+      line-height: 1.2
+      align: center
+      first-indent: 0
+      space-before: 0.7em
+      space-after: 0.35em
+  # itemize/enumerate: \leftmargini = 2.5em, \itemsep ~ 0.4em.
+  - selector:
+      element: list
+    declarations:
+      indent-left: 1.3em
+      first-indent: 0
+      space-before: 0.8em
+      space-after: 0.8em
+  - selector:
+      element: listItem
+    declarations:
+      indent-left: 1.2em
+  - selector:
+      element: paragraph
+      within: listItem
+    declarations:
+      first-indent: -1.2em
+      space-before: 0.2em
+      space-after: 0.2em
+  # quote: 2.5em on both sides, no first-line indent.
+  - selector:
+      element: blockQuote
+    declarations:
+      indent-left: 2.5em
+      indent-right: 2.5em
+      space-before: 0.8em
+      space-after: 0.8em
+  - selector:
+      element: paragraph
+      within: blockQuote
+    declarations:
+      first-indent: 0
+  # Verbatim is \ttfamily; `mono` selects the second (sans) family, since the
+  # renderer has one non-body slot.
+  - selector:
+      element: codeBlock
+    declarations:
+      family: mono
+      font-size: 10pt
+      line-height: 1.2
+      first-indent: 0
+      space-before: 0.6em
+      space-after: 0.6em
+  - selector:
+      element: mathBlock
+    declarations:
+      font-size: 10pt
+      space-before: 0.8em
+      space-after: 0.8em
 "#;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -366,7 +496,13 @@ fn pipeline(options: &Options) -> Result<Pipeline, String> {
             let config = EngineConfig::parse(&source).map_err(|error| error.to_string())?;
             (config.break_config(), config.vertical())
         }
-        None => (BreakConfig::default(), VerticalParams::default_v1()),
+        // The CLI default follows LaTeX article: `\tolerance=200` (badness),
+        // no `\emergencystretch`, and a ragged last line. An explicit
+        // `--engine` file still selects its own preset.
+        None => (
+            BreakConfig::from_params(soma_core::ParamSet::latex_v1()),
+            VerticalParams::default_v1(),
+        ),
     };
     Ok(Pipeline {
         document,
