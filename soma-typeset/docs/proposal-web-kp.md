@@ -1,12 +1,16 @@
 # 提案：浏览器端的 K-P 切片（Web v1）
 
-- 状态：**提案（待拍板）**
+- 状态：**已拍板并实现**（W1–W4）；决策见 ADR-0071（切片与 ABI）与 ADR-0072（D94 修复）；
+  交付物在 `crates/soma-web` 与 `web/`，门禁 `scripts/web.sh`
 - 日期：2026-11-21
 - 范围：新增 `crates/soma-web`（C ABI 切片）与 `web/`（无构建步骤的 ES 模块 + 演示页）；
   `soma-core` 只加 **3 个带默认值的 `Metrics` 方法**（行为不变）；不改 DP、代价、tie-break。
 - 相关：ADR-0007（内核冻结）、ADR-0010（零拷贝与并行）、`docs/architecture-v2.md`；
   本提案通过后新增 **ADR-0071**，并登记 **D94**（emergency 候选窗口）、**D95**（preview 与 PDF 的字节口径）。
 - 分支：`dev`
+- 落地后的实测修正：模块 32.7 KB gzip（提案估 21.4 KB，差的 11 KB 是 span 编译、
+  UTF-8 解码与句柄表）；演示语料（标点密集、1800 atoms、40 em）K-P 7.2 ms、
+  180 atoms 0.18 ms；D94 已修，窄栏不再走 40 ms 的 emergency 全扫。
 
 ---
 

@@ -89,7 +89,8 @@ only).
 | [0068](0068-figure-units-and-image-sizes.md) | Figure/caption units, table headers that never stand alone, intrinsic image sizes | Accepted |
 | [0069](0069-latex-article-defaults.md) | The built-in template is LaTeX `article` 10pt; `latex-v1` preset | Accepted |
 | [0070](0070-math-v2.md) | Math v2: TeX atom classes and spacing, `MATH` constants + glyph ink, style levels, inline math breaking | Accepted |
-| [0070](0070-math-v2.md) | Math v2: TeX atom classes and spacing, `MATH` constants + glyph ink, style levels, inline math breaking | Accepted |
+| [0071](0071-web-kp-slice.md) | Browser slice: `soma-core` + `soma-rules` behind a C ABI; three defaulted `Metrics` methods; no wasm-bindgen | Accepted |
+| [0072](0072-emergency-window.md) | The emergency stage gets a width window: 1.26M → 30k candidates at 20 em, same breaks (D94) | Accepted |
 
 ## Rules
 

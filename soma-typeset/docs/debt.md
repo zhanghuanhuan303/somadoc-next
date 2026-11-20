@@ -92,7 +92,7 @@
 | D91 | 混排 2000 atoms 的性能预算擦边 | `bench --check` 的门槛是 ≤2000 atoms 20 ms、≤4000 atoms 80 ms。本机 release 实测：混排 2000 atoms p95 **20.23 ms**（超）、4000 atoms 79.0 ms（内存 4 MB）；纯中文 2000 atoms 0.24 ms，标点密集 0.62 ms，都远低于门槛。差值是 1.28M 次行评估里的整数除法与缓存 | 2,000 字的混排段落在最慢的一档上刚好越线 | 除法换乘法逆元、或按 D11 加保守剪枝；先测 wasm 再决定门槛是否上调 | 否 |
 | D92 | 垂直页 badness 的 body 参照取「页首项高度」 | `pagination::page_badness` 的 `body` 由 `items[i].height` 传入，而 `i` 是该页第一个垂直项。页首是图（约 70,000 单位）时，半页空白只算 86 点坏度；页首是 4,915 单位的正文行时，同样的空白算数千点。DP 因而宁愿把内容推到下一页，也不愿让页首较矮的页留白 | 默认版式下 `song.tex` 第 3 页留下约 55 mm 空洞，且留白随页首块的种类跳变 | `body` 改为正文行高（或 `VerticalParams` 新增 `body_height`，默认取文档 `line-height`）；会改全部分页 golden 与语料基线，单独一批做 | 否 |
 | D93 | 数学定界符用连续缩放，不取字体变体 | `MathVariants` 的 `v1`/装配件没有读进 `.smt`；3em 的括号是一个被放大的基本字形，笔画随比例变粗，不是设计好的大号字形。MATH 的顶部重音锚点与 `MathKernInfo` 也未读 | 超高定界符的比例与 LaTeX 有差距；宽重音只能居中 | 在 `.smt` v6 加 `MathVariants`（变体列表 + 装配件），M4 的几何不动 | 否 |
-| D94 | emergency 阶段没有候选窗口，退化成 O(n²) | `Shaped::line_length_bounds` 在 `allow_emergency` 时直接返回 `(1, n)`（`breaker.rs:684`），正常阶段的 `(k_min, k_max)` 窗口被放弃。wasm 实测：混排 2000 atoms、18–20 em 栏宽 → `fallback_stage = Emergency`、**1 255 320** 次行评估、40 ms（Chromium）；21 em → `Normal`、3 278 次、0.70 ms | 窄栏（= 移动端）必然踩到；D91 记的 1.28M 次评估其实就是这条路径，不是正常路径 | emergency 下用 `emergency_stretch` 界住 `k_max`（预期 13× 削减）；但 `allow_overfull = true` 时可能改变断点，需 ADR + 语料 diff。浏览器端先由宿主降级到 greedy 绕开 | 否 |
+| D94 | ~~emergency 阶段没有候选窗口~~ | **已关闭（ADR-0072）**：`line_length_bounds` 以前在 `allow_emergency` 时直接返回 `(1, n)`；现在过宽方向也有界——两个旗标同时打开时按 `emergency_stretch` 界住，否则按满 shrink（`tolerance_eff = min(tolerance, 1000)`，顺带修掉 `emergency_tolerance = 10.0` 让窗口算式失效的问题）。混排 2000 atoms @20 em：候选 1 255 320 → 30 316，Chromium 40.5 ms → 2.5 ms，断点序列与语料基线逐字不变 | — | ✅ 已关闭 | 否 |
 | D95 | 浏览器 preview 与 PDF 不同字节 | 网页端度量来自 `canvas.measureText`（唯一能保证「所见即所排」的来源），而 PDF 用的是 `.smt` 表；两者宽度差 1–2%，断点可能不同。`faithful` 模式（wasm 内解析 `.smt`）可对齐 PDF，但需要一次表下载与字符集裁剪 | 「网页上看到的就是印出来的」目前不成立 | 先做 preview（ABI 已允许换度量源）；faithful 按真实需求再做，需要 `.smt` 子集工具 | 否 |
 | D89 | ~~列表没有悬挂缩进~~ | **已关闭（ADR-0058）**：内核 `ParagraphStyle.hang`（默认 0，行为不变）；模板里写负的 `first-indent` 即悬挂缩进，记号落在文字列左侧 1.2em，续行回到文字列 | — | ✅ 已关闭 | 否 |
 | D80 | ~~索引按码位排序~~ | **已关闭（ADR-0061）**：`soma-collate` 内置 27,584 个码位的拼音序表；模板 `index.sort: codepoint\|pinyin`（默认 codepoint，canonical 字节不变） | — | ✅ 已关闭 | 否 |
@@ -158,4 +158,4 @@
 | PDF 输出 | **已完成（ADR-0034/ADR-0039）**：TrueType 稀疏子集与 CID-keyed CFF、Identity-H、书签树、PageLabels；边界见 D82/D85 |
 | 全量补课 | **已完成（ADR-0059–0063）**：关闭 D09、D24、D37、D53、D80、D81 |
 | 遗留清账 | **已完成（ADR-0064–0067）**：关闭 D12、D70；D24/D69/D81 补齐（Word 样式与图片、HTML `colgroup`、索引页码区间） |
-| 未排期 | D01、D03、D04、D05、D10、D11、D13、D60、D62、D69、D71、D74、D91、D92、D93、D94、D95、N1–N6 |
+| 未排期 | D01、D03、D04、D05、D10、D11、D13、D60、D62、D69、D71、D74、D91、D92、D93、D95、N1–N6 |

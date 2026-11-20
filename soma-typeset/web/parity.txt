@@ -1,0 +1,12 @@
+# soma-web parity fixture — regenerate with `cargo run -p soma-web --example fixture`
+text|中文English混排，数字 123，排版Engine v2。「引号」，（括号）；冒号：逗号，句号。
+width|24000
+firstIndent|0
+lineHeight|6144
+space|1024
+hyphen|682
+ascent|3604
+descent|901
+leading|819
+widths|4096,4096,3584,4096,4096,4096,4096,4096,1536,4096,4096,4096,3072,1024,4096,4096,4096,4096,4096,4096,4096,4096,4096,4096,4096,4096,4096,4096,4096,4096,4096,4096,4096,4096
+ends|6,12,17,22,28,34

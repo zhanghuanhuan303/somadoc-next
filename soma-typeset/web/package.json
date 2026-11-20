@@ -1,0 +1,6 @@
+{
+  "name": "soma-kp",
+  "private": true,
+  "type": "module",
+  "description": "Browser side of the soma-typeset K-P slice (no build step)"
+}

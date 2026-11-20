@@ -7,6 +7,8 @@
 
 use crate::units::Width;
 
+use crate::ir::{Atom, AtomKind};
+
 /// Index into the caller's style table.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StyleId(pub u16);
@@ -49,6 +51,35 @@ pub trait Metrics: Sync {
     /// Width of one break atom: a CJK character, a Latin run, or an inline
     /// object. The implementation may sum per-character advances internally.
     fn advance(&self, text: &str, style: StyleId) -> Width;
+
+    /// Width of the atom at `index`, for hosts that measure text themselves.
+    ///
+    /// The default routes to [`Self::advance`] / [`Self::object_advance`], so an
+    /// implementation that cannot answer by position stays byte-identical.
+    /// A host that already holds a width array (the browser slice) answers from
+    /// it and never has to build a text key; this also keeps the answer stable
+    /// when the breaker asks after the break is chosen (`line_vertical`).
+    fn atom_advance(&self, _index: u32, atom: &Atom, style: StyleId) -> Width {
+        match atom.kind {
+            AtomKind::InlineObject => self.object_advance(&atom.text, style),
+            _ => self.advance(&atom.text, style),
+        }
+    }
+
+    /// Per-glyph metrics of the atom at `index`. The default mirrors
+    /// [`Self::atom_advance`].
+    fn atom_glyph_metrics(&self, _index: u32, atom: &Atom, style: StyleId) -> GlyphMetrics {
+        match atom.kind {
+            AtomKind::InlineObject => self.object_metrics(&atom.text, style),
+            _ => self.glyph_metrics(&atom.text, style),
+        }
+    }
+
+    /// Width of the hyphen drawn when a line breaks at a hyphenation point.
+    /// The default measures `"-"`.
+    fn hyphen_width(&self, style: StyleId) -> Width {
+        self.advance("-", style)
+    }
 
     fn line_metrics(&self, style: StyleId) -> LineMetrics;
 

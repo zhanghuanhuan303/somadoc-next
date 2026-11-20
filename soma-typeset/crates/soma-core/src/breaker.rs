@@ -420,11 +420,9 @@ impl<'a> Shaped<'a> {
         let tracking = paragraph.style.tracking.0.max(0) as i64;
         for (index, atom) in paragraph.atoms.iter().enumerate() {
             // Object atoms have host-supplied geometry (inline math); text atoms
-            // go through the font path.
-            let mut width = match atom.kind {
-                AtomKind::InlineObject => metrics.object_advance(&atom.text, atom.style).0 as i64,
-                _ => metrics.advance(&atom.text, atom.style).0 as i64,
-            };
+            // go through the font path. Both go through the index-aware seam so
+            // a host that already measured the atom answers without a text key.
+            let mut width = metrics.atom_advance(index as u32, atom, atom.style).0 as i64;
             // Tracking opens the space *between* atoms; the last one would only
             // pad the line end.
             if tracking > 0 && index + 1 < atom_count && atom.kind != AtomKind::InlineObject {
@@ -470,7 +468,7 @@ impl<'a> Shaped<'a> {
             .enumerate()
             .map(|(index, boundary)| {
                 if boundary.kind == BoundaryKind::Hyphen {
-                    metrics.advance("-", paragraph.atoms[index].style).0.max(0) as i64
+                    metrics.hyphen_width(paragraph.atoms[index].style).0.max(0) as i64
                 } else {
                     0
                 }
@@ -574,10 +572,9 @@ impl<'a> Shaped<'a> {
 
         for index in start..end {
             let atom = &self.paragraph.atoms[index];
-            let glyph = match atom.kind {
-                AtomKind::InlineObject => self.metrics.object_metrics(&atom.text, atom.style),
-                _ => self.metrics.glyph_metrics(&atom.text, atom.style),
-            };
+            let glyph = self
+                .metrics
+                .atom_glyph_metrics(index as u32, atom, atom.style);
             ascent = ascent.max(glyph.ascent.0 as i64 + glyph.baseline_shift.0 as i64);
             descent = descent.max(glyph.descent.0 as i64 - glyph.baseline_shift.0 as i64);
             leading = leading.max(glyph.leading.0 as i64);
@@ -681,12 +678,6 @@ impl<'a> Shaped<'a> {
         if n == 0 {
             return (1, 0);
         }
-        if allow_emergency {
-            // Emergency lines may be arbitrarily short or overfull (subject
-            // to `allow_overfull`), so the normal-stage width window does not
-            // apply. Keep the exhaustive scan for the fallback path.
-            return (1, n);
-        }
 
         let params = config.params().break_params;
         let tolerance = params.tolerance.0 as i128;
@@ -715,8 +706,34 @@ impl<'a> Shaped<'a> {
         }
 
         let max_trim = (self.max_trim_left + self.max_trim_right) as i128;
+
+        // How far past the target a line may legally run, expressed as a
+        // per-mille shrink ratio plus a fixed allowance in width units.
+        //
+        // Normal stage: the ratio bound is the declared tolerance. Emergency
+        // stage: a line may be *underfull* without limit (k_min = 1 below), but
+        // the overfull direction is still bounded — an overfull line needs
+        // `allow_overfull`, and when it has it an unbounded window turns the
+        // fallback into O(n²) (D94: 1.25M candidates at n = 2000, 40 ms in a
+        // browser). Cap that escape hatch at the declared `emergency_stretch`;
+        // without `allow_overfull` the overfull case is rejected outright, so a
+        // full shrink (ratio 1.0) is the true limit.
+        let allow_overfull = config.params().break_params.fallback.allow_overfull;
+        // An overfull line (excess beyond the available shrink) is rejected
+        // unless the emergency *and* overfull flags are both set, so the ratio
+        // bound that actually admits a candidate is at most 1.0 (full shrink)
+        // whenever those flags are not both present. The declared tolerance can
+        // be as high as 10.0 (`emergency_tolerance`), which would make the
+        // arithmetic below vacuous and the scan quadratic again.
+        let tolerance_eff = tolerance.min(1_000);
+        let extra_overfull = if allow_emergency && allow_overfull {
+            emergency * 1_000
+        } else {
+            0
+        };
+
         // H(k) * 1000: overfull infeasibility margin for k atoms.
-        let coefficient = min_atom * 1000 - tolerance * max_shrink;
+        let coefficient = min_atom * 1000 - tolerance_eff * max_shrink;
         let mut k_max = n;
         if coefficient > 0 {
             for k in 1..=n {
@@ -724,12 +741,20 @@ impl<'a> Shaped<'a> {
                 let margin = k * min_atom * 1000
                     - max_trim * 1000
                     - target_max * 1000
-                    - tolerance * (k - 1) * max_shrink;
+                    - tolerance_eff * (k - 1) * max_shrink
+                    - extra_overfull;
                 if margin > 0 {
                     k_max = (k as usize) - 1;
                     break;
                 }
             }
+        }
+
+        if allow_emergency {
+            // Short lines are accepted without limit in the emergency stage.
+            // Keep at least one atom in the window so a single unbreakable atom
+            // can still start a line.
+            return (1, k_max.max(1));
         }
 
         (k_min, k_max)

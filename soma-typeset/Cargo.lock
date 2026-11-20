@@ -202,3 +202,11 @@ dependencies = [
  "soma-rules",
  "soma-template",
 ]
+
+[[package]]
+name = "soma-web"
+version = "0.1.0"
+dependencies = [
+ "soma-core",
+ "soma-rules",
+]

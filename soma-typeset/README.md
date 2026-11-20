@@ -101,6 +101,14 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   `matrix`/`pmatrix`/`bmatrix`/`vmatrix`/`cases`/`aligned` are supported; symbols
   come from a dedicated math face in the metrics table (ADR-0030). See
   [`docs/math.md`](docs/math.md).
+- Browser slice (ADR-0071): `soma-web` compiles `soma-core` + `soma-rules` to a
+  32.7 KB gzip, **zero-import** `wasm32-unknown-unknown` module; `web/` is a
+  dependency-free ES module plus a demo and a self-checking harness. The host
+  measures with canvas `measureText`, hands over one integer per atom, and gets
+  line ranges and box coordinates back — the same numbers the PDF renderer
+  consumes. `scripts/web.sh` verifies zero imports, size, native/wasm parity,
+  timing, memory stability and the fallback policy. See
+  [`web/README.md`](web/README.md).
 - Code blocks (`ADR-0055`): each source line keeps its own spaces and is laid
   out on the block's atom table — indentation survives, nothing reflows, and a
   line that is too long overflows instead of wrapping.
@@ -265,6 +273,7 @@ crates/
   soma-rules/  # text -> ParaIR (Chinese punctuation + CJK/Latin segmentation)
   soma-eval/   # benchmark, sweeps, blind-test statistics, effect scorecard
   soma-demo/   # static HTML renderer consuming LayoutResult
+  soma-web/     # C ABI slice for the browser (rules + K-P, no imports)
   soma-wasm/   # native/WASI fixture for cross-target byte verification
 tools/dry-run-panel/ # simulated blind-test panel generator (not human data)
 tools/
@@ -287,15 +296,22 @@ scripts/
   demo.sh      # target/demo.html
   wasm-hash.sh # native vs wasm32-wasip1 canonical bytes
   kp-verify.sh # K-P closure: gates + bench budget + length policy
+web/
+  soma-kp.js       # ES module: compile / measure / break / render (no dependencies)
+  soma-kp.wasm     # built slice (32.7 KB gzip, zero imports) — rebuilt by scripts/web.sh
+  soma-kp.worker.js
+  demo.html        # interactive demo: width, size, family, indent, canvas mode
+  harness.html     # self-checking page used by the gate
+  parity.txt       # fixture shared by the Rust ABI test and the browser harness
 docs/
   soma-atlas.html     # single-file research atlas: capability map, gates, numbers, pitfalls
   architecture-v2.md  # frozen architecture
   fonts.md            # how a body font is scored and a metrics table is built
   mixed-font.md       # coverage, rescue faces, and the fallback plan
   font-preset.md      # proposal: ink-aware line width, one profile per font
-  adr/                # accepted decisions (ADR-0001 … 0070)
+  adr/                # accepted decisions (ADR-0001 … 0072)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
-  debt.md             # global not-done register (D01–D93, N1–N6)
+  debt.md             # global not-done register (D01–D95, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
   proposal-web-kp.md  # Web v1: the K-P slice in wasm (measurement, ABI, budgets)
   e1-q-report.md      # E1–Q′ delivery report
@@ -341,6 +357,8 @@ For the visual demo and evaluation harness:
 
 ```sh
 scripts/demo.sh            # writes target/demo.html
+scripts/web.sh             # build the browser slice + W1-W6 gates
+(cd . && python3 -m http.server 8000)   # then open /web/demo.html
 scripts/wasm-hash.sh       # native vs wasm32-wasip1 canonical bytes
 scripts/bench.sh           # 100..4,000 atoms, P50/P95, budget check
 scripts/sweep.sh           # tolerance x badness scale

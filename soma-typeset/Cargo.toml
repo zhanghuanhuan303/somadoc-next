@@ -22,6 +22,7 @@ members = [
     "crates/soma-demo",
     "crates/soma-cli",
     "crates/soma-wasm",
+    "crates/soma-web",
 ]
 
 [workspace.package]
@@ -34,3 +35,10 @@ authors = ["zhanghuanhuan303"]
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# Browser slice: smallest module, no unwinding tables.
+[profile.web]
+inherits = "release"
+opt-level = "z"
+lto = true
+panic = "abort"

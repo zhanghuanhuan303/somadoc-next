@@ -178,7 +178,7 @@ Cumulative public test files:
 | `soma-docx` (unit + integration) | 32 | zip store/deflate, inflate, XML entities, headings from style names, `basedOn` styles, tables, lists, metadata, embedded media, damaged archives |
 | render-pdf unit | 26 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing |
 
-Total: **770 tests**.
+Total: **780 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

@@ -1,5 +1,7 @@
 /target
 *.wasm
+# ... except the shipped browser slice, which must work from a fresh clone.
+!web/soma-kp.wasm
 corpus/blind/kit/
 examples/book/out/
 examples/book/*.aux
