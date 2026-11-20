@@ -419,6 +419,8 @@ struct AuditRow {
     ink_range: f64,
     ink_mean: f64,
     ink_std: f64,
+    han_density: f64,
+    punct_density: f64,
     line_ratio: f64,
     score: f64,
     verdict: &'static str,
@@ -465,11 +467,11 @@ fn audit(directories: &[String], top: usize, fingerprints_out: Option<&str>) -> 
     });
 
     println!(
-        "score,verdict,path,face,glyphs,coverage,uniform,punct,ink_range,ink_mean,ink_std,line,outlines"
+        "score,verdict,path,face,glyphs,coverage,uniform,punct,ink_range,ink_mean,ink_std,han_density,punct_density,line,outlines"
     );
     for row in rows.iter().take(top) {
         println!(
-            "{:.1},{},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{}",
+            "{:.1},{},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{}",
             row.score,
             row.verdict,
             row.path,
@@ -481,6 +483,8 @@ fn audit(directories: &[String], top: usize, fingerprints_out: Option<&str>) -> 
             row.ink_range,
             row.ink_mean,
             row.ink_std,
+            row.han_density,
+            row.punct_density,
             row.line_ratio,
             row.outlines
         );
@@ -536,6 +540,12 @@ struct Measure {
     ink_mean: f64,
     ink_std: f64,
     ink_left_mean: f64,
+    /// Mean `ink_width / advance` over sampled Han glyphs: how much of its em
+    /// box a character actually fills. Two faces with the same advance but
+    /// different densities look different at the same word spacing.
+    han_density: f64,
+    /// Same ratio over the full-width marks.
+    punct_density: f64,
     latin_spread: f64,
     digit_uniform: f64,
     line_ratio: f64,
@@ -648,6 +658,39 @@ fn measure(data: &[u8], index: usize) -> Option<Measure> {
     } else {
         ink_lefts.iter().sum::<f64>() / ink_total as f64
     };
+    let punct_density = if ink_total == 0 {
+        0.0
+    } else {
+        let total: f64 = ink_lefts
+            .iter()
+            .zip(ink_rights.iter())
+            .map(|(left, right)| (1.0 - left - right).clamp(0.0, 1.0))
+            .sum();
+        total / ink_total as f64
+    };
+
+    // How much of its em box a Han glyph fills. This is the number that makes
+    // one face look looser than another at the same word spacing.
+    let mut han_density_sum = 0.0f64;
+    let mut han_density_count = 0usize;
+    for codepoint in cjk_sample().take(256) {
+        let Some(gid) = map.get(&codepoint) else {
+            continue;
+        };
+        let Some((x_min, x_max)) = font.ink_bounds(*gid).ok().flatten() else {
+            continue;
+        };
+        let Some(advance) = width(codepoint) else {
+            continue;
+        };
+        if advance <= 0 {
+            continue;
+        }
+        let ink = scale(x_max - x_min, upem);
+        han_density_sum += (ink as f64 / advance as f64).clamp(0.0, 1.0);
+        han_density_count += 1;
+    }
+    let han_density = ratio_f64(han_density_sum, han_density_count);
 
     // A proportional Latin face has a wide `W` and a narrow `i`; a monospaced
     // one has neither. Digits stand in for the same question.
@@ -694,6 +737,8 @@ fn measure(data: &[u8], index: usize) -> Option<Measure> {
         ink_mean,
         ink_std,
         ink_left_mean,
+        han_density,
+        punct_density,
         latin_spread,
         digit_uniform,
         line_ratio,
@@ -738,6 +783,8 @@ fn row(measure: &Measure, path: String, face: usize) -> AuditRow {
         ink_range: measure.ink_range,
         ink_mean: measure.ink_mean,
         ink_std: measure.ink_std,
+        han_density: measure.han_density,
+        punct_density: measure.punct_density,
         line_ratio: measure.line_ratio,
         score,
         verdict,

@@ -18,7 +18,7 @@ cargo run -p tools/metrics-gen -- \
 Output is CSV on stdout, one row per face:
 
 ```text
-score,verdict,path,face,glyphs,coverage,uniform,punct,ink_range,ink_mean,ink_std,line,outlines
+score,verdict,path,face,glyphs,coverage,uniform,punct,ink_range,ink_mean,ink_std,han_density,punct_density,line,outlines
 ```
 
 TTC collections are expanded face by face. `--top` only limits the rows printed;
@@ -49,6 +49,11 @@ Only faces that pass the gates are ranked.
 | 15 | `punct` | share of the 13 marks drawn one em wide |
 | 10 | `line` | `1 - clamp(|(ascent+descent)/1em - 1.15| / 0.35, 0, 1)` |
 
+`han_density` and `punct_density` are the mean `ink / advance` over sampled Han
+glyphs and the 13 marks. They do not score either — they are the input to the
+font-profile proposal in [`docs/font-preset.md`](font-preset.md), and they show
+how much of its em box a face actually fills.
+
 `ink_mean` and `ink_range` are reported but do **not** score: how much of the
 advance a mark's ink fills is a weight and style decision, not a quality
 signal. Consistency is the signal — a face whose comma and full stop have very
@@ -63,15 +68,15 @@ noise; treat them as one band.
 2,982 faces in 2,881 files: **31 usable**, 24 low-coverage, 367 without
 outlines, 2,560 without CJK.
 
-| Score | Face | Glyphs | ink_mean | ink_std |
-| --- | --- | --- | --- | --- |
-| 84.3 | WenQuanYi Micro Hei (`wqy-microhei.ttc`) | 34,600 | 0.472 | **0.197** |
-| 81.7 | SimHei (`Simhei.ttf`) | 28,522 | 0.497 | 0.217 |
-| 81.0 | MiSans Regular | 29,414 | 0.514 | 0.222 |
-| 81.0 | SimSun (`SIMSUN.ttf`) | 22,075 | 0.517 | 0.222 |
-| 78.5 | IBM Plex Sans SC Regular | 29,285 | 0.544 | 0.279 |
-| 75.5 | LXGW WenKai Regular | 46,490 | 0.529 | 0.268 |
-| 75.5 | LXGW WenKai GB Regular | 36,258 | 0.529 | 0.268 |
+| Score | Face | Glyphs | ink_mean | ink_std | han_density |
+| --- | --- | --- | --- | --- | --- |
+| 84.3 | WenQuanYi Micro Hei (`wqy-microhei.ttc`) | 34,600 | 0.472 | **0.197** | 0.892 |
+| 81.7 | SimHei (`Simhei.ttf`) | 28,522 | 0.497 | 0.217 | 0.908 |
+| 81.1 | SimSun (`SIMSUN.ttf`) | 22,075 | 0.517 | 0.222 | 0.898 |
+| 81.0 | MiSans Regular | 29,414 | 0.514 | 0.222 | 0.864 |
+| 75.5 | LXGW WenKai Regular | 46,490 | 0.529 | 0.268 | 0.906 |
+| 75.5 | LXGW WenKai GB Regular | 36,258 | 0.529 | 0.268 | 0.901 |
+| 74.2 | IBM Plex Sans SC Regular | 29,285 | 0.544 | 0.279 | 0.905 |
 
 The spread comes almost entirely from `ink_std`. MiSans and the Song/Hei faces
 keep their marks within a narrow band; Kai-style and Latin-first CJK faces
