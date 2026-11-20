@@ -225,6 +225,18 @@ fn render_block(
             } else {
                 ""
             };
+            // Ruby is an inline annotation: `<ruby>` keeps the base in the
+            // text flow and puts the reading above it, centred, without the
+            // renderer doing any measurement (ADR-0060).
+            let body = match block.ruby.iter().find(|note| note.atom == atom.atom) {
+                Some(note) => format!(
+                    "<ruby>{}\u{200b}<rt style=\"font-size:{}\">{}</rt></ruby>",
+                    escape(&drawn),
+                    em(note.size),
+                    escape(&note.text)
+                ),
+                None => escape(&drawn),
+            };
             // Links stay inert here: the preview must not create external
             // references (docs/capabilities.md). The PDF carries them as
             // annotations, where a reader can act on them.
@@ -236,9 +248,22 @@ fn render_block(
                 em(placed.y),
                 font,
                 decoration,
-                escape(&drawn),
+                body,
                 ""
             ));
+        }
+        // A hyphenated line ends in a real hyphen, already counted in its
+        // width (ADR-0059).
+        if placed.line.hyphenated {
+            if let Some(last) = placed.line.boxes.last() {
+                html.push_str(&format!(
+                    "<span class=\"atom\" data-node=\"{}\" data-atom=\"{}\" data-hyphen=\"1\" style=\"left:{};top:{};\">-</span>\n",
+                    block.node.0,
+                    last.atom,
+                    em(Width(last.x.0 + last.advance.0)),
+                    em(placed.y)
+                ));
+            }
         }
     }
 

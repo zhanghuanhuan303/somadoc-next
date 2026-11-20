@@ -152,11 +152,20 @@ fn check_reports_layout_facts() {
 
 #[test]
 fn an_unknown_extension_is_a_clear_error() {
-    let input = temp("md-unknown", "docx", "whatever");
+    let input = temp("md-unknown", "rtf", "whatever");
     let (ok, _stdout, stderr) = run(&["render", "--input", input.to_str().unwrap()]);
 
     assert!(!ok);
     assert!(stderr.contains("unsupported input"), "{stderr}");
+}
+
+#[test]
+fn a_damaged_docx_is_a_clear_error() {
+    let input = temp("md-bad-docx", "docx", "not a zip");
+    let (ok, _stdout, stderr) = run(&["render", "--input", input.to_str().unwrap()]);
+
+    assert!(!ok);
+    assert!(stderr.contains("not a zip"), "{stderr}");
 }
 
 #[test]

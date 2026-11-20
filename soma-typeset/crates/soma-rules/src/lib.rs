@@ -164,6 +164,11 @@ pub const LATIN_TRIM: Width = Width::from_em_frac(1, 8);
 /// another punctuation mark (`。」`, `），`, `？！」`).
 pub const PAIR_TRIM: Width = Width::from_em_frac(1, 4);
 
+/// Break penalty on a hyphenation point, in the kernel's penalty units. A
+/// space has none, so the breaker only hyphenates when a line would otherwise
+/// be badly loose or overfull.
+const HYPHEN_PENALTY: i32 = 100;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuleError {
     EmptyText,
@@ -235,8 +240,15 @@ pub enum SpanKind {
     Code,
     /// One unbreakable atom (replaced object: image, math fallback).
     Object,
+    /// One unbreakable atom: a ruby base. The annotation travels beside it in
+    /// the layout block, not in the atom text, so line breaking only sees the
+    /// base width.
+    Ruby,
     /// A forced break between the previous and the next atom.
     HardBreak,
+    /// A continuation piece of a hyphenated word: this span starts at a
+    /// hyphenation point, so a line may break before it and draw a hyphen.
+    Hyphen,
 }
 
 /// One styled run of inline content.
@@ -320,6 +332,21 @@ pub fn paragraph_from_spans(
                 let text = String::from(span.text);
                 builder.push_atom(text, AtomKind::InlineObject, PunctClass::None, span.style);
             }
+            SpanKind::Ruby => {
+                let trimmed = span.text.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let text = String::from(trimmed);
+                builder.push_atom(text, AtomKind::Ruby, PunctClass::None, span.style);
+            }
+            SpanKind::Hyphen => {
+                if span.text.is_empty() {
+                    continue;
+                }
+                builder.join = Join::Hyphen;
+                builder.push_text(span.text, span.style);
+            }
             SpanKind::HardBreak => builder.hard_break(),
         }
     }
@@ -338,11 +365,13 @@ struct Builder<'a> {
     link: Option<&'a str>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Join {
     Normal,
     Space,
     Forced,
+    /// Start of a continuation piece of a hyphenated word.
+    Hyphen,
 }
 
 impl<'a> Builder<'a> {
@@ -548,6 +577,15 @@ fn push_atom(
                 role: BoundaryRole::Plain,
                 glue: Glue::default(),
                 penalty: 0,
+            },
+            Join::Hyphen => Boundary {
+                breakable: Breakability::Allowed,
+                kind: BoundaryKind::Hyphen,
+                role: BoundaryRole::Plain,
+                glue: Glue::default(),
+                // Lower than a space but not free: a break inside a word is a
+                // last resort before overfull, not a preferred break.
+                penalty: HYPHEN_PENALTY,
             },
         };
         boundaries.push(boundary);

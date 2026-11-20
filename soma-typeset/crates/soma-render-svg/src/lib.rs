@@ -215,6 +215,48 @@ fn render_block_at(
                 color(effective.color),
                 escape(&drawn)
             ));
+            // Ruby: a second text element, centred on the base and raised by
+            // the shift the layout reserved (ADR-0060).
+            if let Some(note) = block.ruby.iter().find(|note| note.atom == atom.atom) {
+                out.push_str(&format!(
+                    "<text data-page=\"{page}\" data-node=\"{}\" data-atom=\"{}\" data-ruby=\"1\" text-anchor=\"middle\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>\n",
+                    block.node.0,
+                    atom.atom,
+                    units(Width(x + atom.advance.0 / 2)),
+                    units(Width(y - note.shift.0)),
+                    units(note.size),
+                    color(effective.color),
+                    escape(&note.text)
+                ));
+            }
+        }
+        // A hyphenated line ends in a real hyphen, already counted in its
+        // width (ADR-0059).
+        if placed.line.hyphenated {
+            if let Some(last) = placed.line.boxes.last() {
+                let atom_style = text
+                    .atom_style(block.node, last.atom)
+                    .and_then(|id| styles.get(id));
+                let effective = atom_style
+                    .or(style)
+                    .cloned()
+                    .unwrap_or_else(ComputedStyle::base);
+                let left = layout.page.margin_left.0 + block.x.0 + last.x.0 + last.advance.0;
+                let baseline = layout.page.margin_top.0
+                    + block.y.0
+                    + extra_y
+                    + placed.y.0
+                    + placed.line.ascent.0;
+                out.push_str(&format!(
+                    "<text data-page=\"{page}\" data-node=\"{}\" data-atom=\"{}\" data-hyphen=\"1\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\">-</text>\n",
+                    block.node.0,
+                    last.atom,
+                    units(Width(left)),
+                    units(Width(baseline)),
+                    units(effective.font_size),
+                    color(effective.color)
+                ));
+            }
         }
     }
 }

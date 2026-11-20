@@ -191,12 +191,31 @@ pub struct PlacedBlock {
     pub math: Option<MathBox>,
     /// Inline formulas in this block, in atom order.
     pub inline_math: Vec<InlineMathBox>,
+    /// Ruby annotations in this block, in atom order (ADR-0060).
+    pub ruby: Vec<RubySpan>,
     /// Index of the first line in this page slice. Non-zero means the block is
     /// continued from the previous page.
     pub line_offset: u32,
     /// Total number of lines in the unsplit block.
     pub lines_total: u32,
     pub stage: FallbackStage,
+}
+
+/// One ruby annotation over an atom (furigana / 注音).
+///
+/// The annotation is not part of the atom text: line breaking measures the
+/// base only, and the annotation is drawn above it. `shift` and `size` are
+/// resolved here, so every renderer places it the same way without needing
+/// font metrics of its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RubySpan {
+    /// Atom the annotation sits over.
+    pub atom: u32,
+    pub text: String,
+    /// Distance from the base line's baseline up to the annotation baseline.
+    pub shift: Width,
+    /// Annotation em size.
+    pub size: Width,
 }
 
 /// A laid-out display formula, positioned from the block top.
@@ -679,6 +698,8 @@ struct Pass<'a> {
     toc: Option<&'a soma_template::TocSpec>,
     /// Index entries from the previous pass (term + page labels).
     index: &'a [TocEntry],
+    /// Optional hyphenation patterns; `None` keeps every Latin run unbreakable.
+    hyphen: Option<&'a soma_hyphen::Patterns>,
 }
 
 /// Lay out with an explicit strategy and vertical cost model.
@@ -694,6 +715,21 @@ pub fn layout_with(
     strategy: PaginationStrategy,
     vertical: VerticalParams,
 ) -> Result<PagedLayout, LayoutError> {
+    layout_with_hyphenation(doc, styled, metrics, engine, strategy, vertical, None)
+}
+
+/// Lay out with an explicit strategy, vertical cost model, and hyphenation
+/// pattern set. Patterns are host data: an engine without a dictionary behaves
+/// exactly like [`layout_with`].
+pub fn layout_with_hyphenation(
+    doc: &Document,
+    styled: &StyledDoc,
+    metrics: &dyn Metrics,
+    engine: &BreakConfig,
+    strategy: PaginationStrategy,
+    vertical: VerticalParams,
+    hyphen: Option<&soma_hyphen::Patterns>,
+) -> Result<PagedLayout, LayoutError> {
     let toc = styled.toc();
     let index = styled.index();
     if toc.is_none() && index.is_none() {
@@ -707,6 +743,7 @@ pub fn layout_with(
             front: &Generated::default(),
             toc: None,
             index: &[],
+            hyphen,
         })?;
         return Ok(pages);
     }
@@ -725,6 +762,7 @@ pub fn layout_with(
             front: &front,
             toc,
             index: &front.index,
+            hyphen,
         })?;
         let stable = found == front;
         if stable || passes >= TOC_MAX_PASSES {
@@ -765,6 +803,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
         front,
         toc,
         index,
+        hyphen,
     } = *pass;
     let page = styled.page();
     let content_width = page.content_width();
@@ -777,6 +816,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
         styled,
         metrics,
         engine,
+        hyphen,
         content_width,
         text: TextIndex::default(),
         notes: NoteMap::build(doc),
@@ -798,6 +838,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
         pending_index: Vec::new(),
         index_terms: Vec::new(),
         note_index_terms: note_index_terms(doc),
+        pending_ruby: Vec::new(),
         defer_index: false,
         index_entries: index.to_vec(),
         figure_refs: Vec::new(),
@@ -1276,6 +1317,7 @@ fn table_rule(
         lines_total: 0,
         math: None,
         inline_math: Vec::new(),
+        ruby: Vec::new(),
         stage: FallbackStage::Normal,
     }
 }
@@ -1366,6 +1408,8 @@ struct Builder<'a> {
     styled: &'a StyledDoc,
     metrics: &'a dyn Metrics,
     engine: &'a BreakConfig,
+    /// Hyphenation patterns, when the host supplied a set.
+    hyphen: Option<&'a soma_hyphen::Patterns>,
     content_width: Width,
     /// Indent contributed by enclosing quotes and lists: a block inside a
     /// quote is narrowed by the quote's `indent-left`/`indent-right` as well as
@@ -1404,6 +1448,8 @@ struct Builder<'a> {
     index_terms: Vec<(index::IndexTerm, usize)>,
     /// Index terms inside each footnote definition, by definition index.
     note_index_terms: Vec<Vec<index::IndexTerm>>,
+    /// Ruby annotations seen while compiling the current block, in atom order.
+    pending_ruby: Vec<String>,
     /// While compiling a table cell the flow item is not known yet, so the
     /// markers stay in `pending_index` until the table has been placed.
     defer_index: bool,
@@ -2078,6 +2124,7 @@ impl Builder<'_> {
                             lines_total: 0,
                             math: None,
                             inline_math: Vec::new(),
+                            ruby: Vec::new(),
                             stage: FallbackStage::Normal,
                         }],
                         height,
@@ -2181,8 +2228,8 @@ impl Builder<'_> {
                 }
                 // A footnote is printed on the page that refers to it, so its
                 // markers belong to the referring item, not to the note area.
-                for item in before..items.len() {
-                    for note in items[item].footnotes.clone() {
+                for (item, flow) in items.iter().enumerate().skip(before) {
+                    for note in flow.footnotes.clone() {
                         if let Some(terms) = self.note_index_terms.get(note) {
                             for term in terms {
                                 self.index_terms.push((term.clone(), item));
@@ -2241,6 +2288,7 @@ impl Builder<'_> {
         let mut footnotes: Vec<usize> = Vec::new();
         let mut marker_notes: Vec<Option<usize>> = Vec::new();
         let mut objects = math::InlineMaths::new();
+        self.pending_ruby.clear();
         self.collect(
             inlines,
             style_id,
@@ -2276,6 +2324,46 @@ impl Builder<'_> {
         let mut result = break_paragraph(&paragraph, &object_metrics, self.engine)
             .map_err(|_| LayoutError::new(Some(node), "line breaking failed"))?;
         align_lines(&mut result.lines, computed.align);
+
+        // Ruby: one base atom per annotation, in document order. The base was
+        // pushed as a single atom (`SpanKind::Ruby`), so the zip is exact even
+        // when the same text occurs elsewhere in the paragraph.
+        let mut ruby: Vec<RubySpan> = Vec::new();
+        if !self.pending_ruby.is_empty() {
+            let notes = core::mem::take(&mut self.pending_ruby);
+            let mut notes = notes.into_iter();
+            for (index, atom) in paragraph.atoms.iter().enumerate() {
+                if atom.kind != soma_core::AtomKind::Ruby {
+                    continue;
+                }
+                let Some(text) = notes.next() else { break };
+                let vertical = self.metrics.line_metrics(atom.style);
+                let em = self.computed(atom.style).font_size.0;
+                ruby.push(RubySpan {
+                    atom: index as u32,
+                    text,
+                    // The annotation sits above the base's ascent, with a
+                    // sixteenth of the base em as breathing room.
+                    shift: Width(vertical.ascent.0 + em / 16),
+                    size: Width(em / 2),
+                });
+            }
+        }
+        // A line carrying ruby has to grow upward or the annotation lands on
+        // the previous line's descenders.
+        for line in &mut result.lines {
+            let mut needed = 0;
+            for atom in &line.boxes {
+                if let Some(note) = ruby.iter().find(|note| note.atom == atom.atom) {
+                    needed = needed.max(note.shift.0 + note.size.0);
+                }
+            }
+            if needed > line.ascent.0 {
+                let delta = needed - line.ascent.0;
+                line.ascent = Width(needed);
+                line.height = line.height + Width(delta);
+            }
+        }
 
         let inline_math: Vec<InlineMathBox> = objects
             .resolve(&paragraph.atoms)
@@ -2392,6 +2480,7 @@ impl Builder<'_> {
                 stage: result.fallback_stage,
                 math: None,
                 inline_math,
+                ruby,
             }],
         }))
     }
@@ -2414,6 +2503,9 @@ impl Builder<'_> {
             let mut footnotes = Vec::new();
             let mut notes = Vec::new();
             let mut objects = math::InlineMaths::new();
+            // Measuring a column must not eat the ruby of the block that comes
+            // after it.
+            self.pending_ruby.clear();
             self.collect(
                 &node.inlines,
                 style,
@@ -2473,13 +2565,18 @@ impl Builder<'_> {
         for inline in inlines {
             let style = self.style(inline.meta().id, fallback);
             match inline {
-                Inline::Text(node) => out.push(OwnedSpan {
-                    text: node.value.clone(),
-                    style,
-                    kind: SpanKind::Text,
-                    decor,
-                    link: link.map(String::from),
-                }),
+                Inline::Text(node) => match self.hyphen {
+                    Some(patterns) => {
+                        push_hyphenated_text(&node.value, style, decor, link, patterns, out)
+                    }
+                    None => out.push(OwnedSpan {
+                        text: node.value.clone(),
+                        style,
+                        kind: SpanKind::Text,
+                        decor,
+                        link: link.map(String::from),
+                    }),
+                },
                 Inline::Code(node) => out.push(OwnedSpan {
                     text: node.value.clone(),
                     style,
@@ -2583,13 +2680,16 @@ impl Builder<'_> {
                         link: link.map(String::from),
                     });
                 }
-                Inline::Ruby(node) => out.push(OwnedSpan {
-                    text: node.base.clone(),
-                    style,
-                    kind: SpanKind::Text,
-                    decor,
-                    link: link.map(String::from),
-                }),
+                Inline::Ruby(node) => {
+                    self.pending_ruby.push(node.annotation.clone());
+                    out.push(OwnedSpan {
+                        text: node.base.clone(),
+                        style,
+                        kind: SpanKind::Ruby,
+                        decor,
+                        link: link.map(String::from),
+                    });
+                }
                 Inline::Index(node) => self.pending_index.push(index::parse(&node.term)),
                 Inline::LineBreak(_) => out.push(OwnedSpan {
                     text: String::new(),
@@ -2708,6 +2808,7 @@ impl Builder<'_> {
                 stage,
                 math: None,
                 inline_math: Vec::new(),
+                ruby: Vec::new(),
             }],
         }))
     }
@@ -2840,6 +2941,7 @@ impl Builder<'_> {
                 stage: result.fallback_stage,
                 math: None,
                 inline_math: Vec::new(),
+                ruby: Vec::new(),
             }],
         })
     }
@@ -3468,6 +3570,7 @@ impl Builder<'_> {
                 lines_total: 0,
                 stage: FallbackStage::Normal,
                 inline_math: Vec::new(),
+                ruby: Vec::new(),
                 math: Some(MathBox {
                     width: box_width,
                     height,
@@ -3521,6 +3624,7 @@ impl Builder<'_> {
                 lines_total: 0,
                 math: None,
                 inline_math: Vec::new(),
+                ruby: Vec::new(),
                 stage: FallbackStage::Normal,
             }],
         })
@@ -3547,6 +3651,89 @@ impl Builder<'_> {
         self.notes.blocks = compiled;
         Ok(())
     }
+}
+
+/// Shortest word worth hyphenating. `left = 2` and `right = 3` already forbid
+/// breaks in a five-letter word, and hyphenating `table` would look worse than
+/// the loose line it avoids.
+const HYPHEN_MIN_WORD: usize = 6;
+
+/// Split a text run at hyphenation points.
+///
+/// The first piece keeps the ordinary text kind; every later piece starts with
+/// `SpanKind::Hyphen`, which the rules layer turns into a breakable boundary
+/// carrying a hyphen penalty. Words that look like part of a URL, a path, or
+/// an acronym are left alone: a break inside `example.com` or `HTTP` reads as a
+/// typo.
+fn push_hyphenated_text(
+    text: &str,
+    style: StyleId,
+    decor: Decorations,
+    link: Option<&str>,
+    patterns: &soma_hyphen::Patterns,
+    out: &mut Vec<OwnedSpan>,
+) {
+    if text.is_ascii() {
+        let bytes = text.as_bytes();
+        let mut cuts: Vec<usize> = Vec::new();
+        let mut cursor = 0;
+        while cursor < bytes.len() {
+            if !bytes[cursor].is_ascii_alphabetic() {
+                cursor += 1;
+                continue;
+            }
+            let start = cursor;
+            while cursor < bytes.len() && bytes[cursor].is_ascii_alphabetic() {
+                cursor += 1;
+            }
+            let word = &text[start..cursor];
+            if word.len() < HYPHEN_MIN_WORD || word.bytes().any(|byte| byte.is_ascii_uppercase()) {
+                continue;
+            }
+            let before = start.checked_sub(1).map(|index| bytes[index]);
+            let after = bytes.get(cursor).copied();
+            let glued = |byte: u8| matches!(byte, b'/' | b':' | b'.' | b'@' | b'_' | b'-');
+            if before.is_some_and(glued) || after.is_some_and(glued) {
+                continue;
+            }
+            for offset in patterns.breaks(word) {
+                let at = start + offset as usize;
+                if at > start && at < cursor {
+                    cuts.push(at);
+                }
+            }
+        }
+        if !cuts.is_empty() {
+            let mut cursor = 0;
+            let mut kind = SpanKind::Text;
+            for cut in cuts {
+                out.push(OwnedSpan {
+                    text: String::from(&text[cursor..cut]),
+                    style,
+                    kind,
+                    decor,
+                    link: link.map(String::from),
+                });
+                cursor = cut;
+                kind = SpanKind::Hyphen;
+            }
+            out.push(OwnedSpan {
+                text: String::from(&text[cursor..]),
+                style,
+                kind,
+                decor,
+                link: link.map(String::from),
+            });
+            return;
+        }
+    }
+    out.push(OwnedSpan {
+        text: String::from(text),
+        style,
+        kind: SpanKind::Text,
+        decor,
+        link: link.map(String::from),
+    });
 }
 
 /// Index markers inside each footnote definition, in definition order.
@@ -3730,6 +3917,7 @@ fn margin_block(
         stage,
         math: None,
         inline_math: Vec::new(),
+        ruby: Vec::new(),
     })
 }
 
@@ -3958,6 +4146,7 @@ fn empty_line(line_height: Width, y: Width) -> PlacedLine {
             overfull: false,
             emergency: false,
             forced_end: false,
+            hyphenated: false,
             boxes: Vec::new(),
         },
     }

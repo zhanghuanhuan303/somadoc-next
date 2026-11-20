@@ -8,8 +8,10 @@ version = "0.1.0"
 dependencies = [
  "soma-core",
  "soma-doc",
+ "soma-docx",
  "soma-engine",
  "soma-html",
+ "soma-hyphen",
  "soma-latex",
  "soma-layout",
  "soma-md",
@@ -41,6 +43,13 @@ dependencies = [
 [[package]]
 name = "soma-doc"
 version = "0.1.0"
+
+[[package]]
+name = "soma-docx"
+version = "0.1.0"
+dependencies = [
+ "soma-doc",
+]
 
 [[package]]
 name = "soma-engine"
@@ -78,6 +87,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "soma-hyphen"
+version = "0.1.0"
+
+[[package]]
 name = "soma-latex"
 version = "0.1.0"
 dependencies = [
@@ -95,6 +108,7 @@ dependencies = [
  "soma-collate",
  "soma-core",
  "soma-doc",
+ "soma-hyphen",
  "soma-math",
  "soma-metrics",
  "soma-rules",

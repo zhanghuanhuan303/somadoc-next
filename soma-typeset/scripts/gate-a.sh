@@ -58,7 +58,7 @@ check_deps() {
     done
 }
 
-check_deps soma-layout "soma-collate soma-layout soma-core soma-doc soma-math soma-metrics soma-rules soma-template"
+check_deps soma-layout "soma-collate soma-hyphen soma-layout soma-core soma-doc soma-math soma-metrics soma-rules soma-template"
 check_deps soma-md "soma-md soma-doc"
 check_deps soma-html "soma-html soma-doc"
 check_deps soma-latex "soma-latex soma-doc"
@@ -68,9 +68,10 @@ check_deps soma-metrics "soma-metrics"
 check_deps soma-render-html "soma-render-html soma-core soma-layout soma-template"
 check_deps soma-render-svg "soma-render-svg soma-core soma-layout soma-template"
 check_deps soma-render-pdf "soma-render-pdf soma-core soma-layout soma-template"
-check_deps soma-cli "soma-cli soma-core soma-doc soma-engine soma-html soma-latex soma-layout soma-md soma-metrics soma-render-html soma-render-svg soma-render-pdf soma-template"
+check_deps soma-cli "soma-cli soma-core soma-doc soma-docx soma-engine soma-html soma-hyphen soma-latex soma-layout soma-md soma-metrics soma-render-html soma-render-svg soma-render-pdf soma-template"
+check_deps soma-docx "soma-docx soma-doc"
 
-for crate in soma-engine soma-layout soma-md soma-html soma-latex soma-math soma-metrics soma-render-html soma-render-svg soma-render-pdf; do
+for crate in soma-engine soma-layout soma-md soma-html soma-latex soma-math soma-metrics soma-render-html soma-render-svg soma-render-pdf soma-docx soma-hyphen; do
     if grep -q 'extern crate std' "crates/$crate/src/lib.rs"; then
         echo "$crate must stay no_std" >&2
         exit 1

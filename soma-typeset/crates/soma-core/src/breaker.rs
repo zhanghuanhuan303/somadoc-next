@@ -393,6 +393,8 @@ struct Shaped<'a> {
     shrink: Vec<i64>,
     atom_prefix: Vec<i64>,
     glue_prefix: Vec<i64>,
+    /// Prefix sum of the hyphen glyph width at hyphenation boundaries.
+    hyphen_prefix: Vec<i64>,
     stretch_prefix: Vec<i64>,
     shrink_prefix: Vec<i64>,
     cjk_latin_stretch_prefix: Vec<i64>,
@@ -440,7 +442,7 @@ impl<'a> Shaped<'a> {
         for (index, boundary) in paragraph.boundaries.iter().enumerate() {
             let width = match boundary.kind {
                 BoundaryKind::Space => metrics.space_width(paragraph.atoms[index].style).0 as i64,
-                BoundaryKind::Normal => boundary.glue.width.0 as i64,
+                BoundaryKind::Normal | BoundaryKind::Hyphen => boundary.glue.width.0 as i64,
             };
             let boundary_stretch = boundary.glue.stretch.0.max(0) as i64;
             let boundary_shrink = boundary.glue.shrink.0.max(0) as i64;
@@ -460,6 +462,20 @@ impl<'a> Shaped<'a> {
 
         let atom_prefix = prefix_sums(&atom_width);
         let glue_prefix = prefix_sums(&glue);
+        // A broken hyphen is drawn in the style of the atom before the break.
+        let hyphen: Vec<i64> = paragraph
+            .boundaries
+            .iter()
+            .enumerate()
+            .map(|(index, boundary)| {
+                if boundary.kind == BoundaryKind::Hyphen {
+                    metrics.advance("-", paragraph.atoms[index].style).0.max(0) as i64
+                } else {
+                    0
+                }
+            })
+            .collect();
+        let hyphen_prefix = prefix_sums(&hyphen);
         let stretch_prefix = prefix_sums(&stretch);
         let shrink_prefix = prefix_sums(&shrink);
         let cjk_latin_stretch_prefix = prefix_sums(&cjk_latin_stretch);
@@ -496,6 +512,7 @@ impl<'a> Shaped<'a> {
             shrink,
             atom_prefix,
             glue_prefix,
+            hyphen_prefix,
             stretch_prefix,
             shrink_prefix,
             cjk_latin_stretch_prefix,
@@ -532,7 +549,8 @@ impl<'a> Shaped<'a> {
     fn natural(&self, start: usize, end: usize) -> i64 {
         let atoms = self.atom_prefix[end] - self.atom_prefix[start];
         let boundaries = self.glue_prefix[end - 1] - self.glue_prefix[start];
-        atoms + boundaries
+        let hyphens = self.hyphen_prefix[end - 1] - self.hyphen_prefix[start];
+        atoms + boundaries + hyphens
     }
 
     fn total_stretch(&self, start: usize, end: usize) -> i64 {
@@ -1305,6 +1323,8 @@ fn build_result(
             overfull: eval.overfull,
             emergency: eval.emergency,
             forced_end: eval.forced_end,
+            hyphenated: *end < shaped.len()
+                && shaped.paragraph.boundaries[*end - 1].kind == BoundaryKind::Hyphen,
             boxes,
         });
     }

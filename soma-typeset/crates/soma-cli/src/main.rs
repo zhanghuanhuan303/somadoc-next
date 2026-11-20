@@ -16,7 +16,7 @@ use std::process::ExitCode;
 use soma_core::{BreakConfig, VerticalParams};
 use soma_doc::Document;
 use soma_engine::EngineConfig;
-use soma_layout::{layout_with, BoxKind, PaginationStrategy, StyledMetrics, TextSource};
+use soma_layout::{BoxKind, PaginationStrategy, StyledMetrics, TextSource};
 use soma_metrics::MetricsTable;
 use soma_render_pdf::{render as render_pdf, ImageSource, PdfFont, PdfFonts, PdfMetadata};
 use soma_template::{parse_template, resolve, StyledDoc, Template};
@@ -33,7 +33,7 @@ usage:
               [--font-math <file[#index]>] [--font-fallback <file[#index]>]
   soma check  --input <file> [--template <file>] [--engine <file>]
 
-  --input     .md / .markdown, .html / .htm, .tex / .latex
+  --input     .md / .markdown, .html / .htm, .tex / .latex, .docx
   --template  pure-YAML template; omitted uses the built-in A4 default
   --engine    soma.engine/1 configuration; omitted uses publish-v1
   --format    html (default), svg, json (canonical page result), or pdf
@@ -43,6 +43,7 @@ usage:
   --font-bold optional bold face; falls back to --font
   --font-math optional math face; falls back to --font
   --font-fallback optional rescue face for glyphs --font lacks
+  --hyphenation TeX pattern file enabling hyphenation of long Latin words
   --out       output path; '-' or omitted writes to stdout
 
 exit codes:
@@ -104,6 +105,7 @@ struct Options {
     font_sans_bold: Option<String>,
     font_math: Option<String>,
     font_fallback: Option<String>,
+    hyphenation: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -145,6 +147,7 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
     let mut font_sans_bold = None;
     let mut font_math = None;
     let mut font_fallback = None;
+    let mut hyphenation = None;
 
     let mut index = 0;
     while index < args.len() {
@@ -167,6 +170,7 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
             "--font-sans-bold" => font_sans_bold = Some(value()?),
             "--font-math" => font_math = Some(value()?),
             "--font-fallback" => font_fallback = Some(value()?),
+            "--hyphenation" => hyphenation = Some(value()?),
             "--stats" => stats = true,
             "--format" | "-f" if allow_format => {
                 format = match value()?.as_str() {
@@ -196,6 +200,7 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
         font_sans_bold,
         font_math,
         font_fallback,
+        hyphenation,
     })
 }
 
@@ -203,7 +208,7 @@ fn render(args: &[String]) -> Result<(), String> {
     let options = parse_options(args, true)?;
     let (document, styled, engine, vertical) = pipeline(&options)?;
     let metrics = load_metrics(&options)?;
-    let pages = layout(&document, &styled, &engine, vertical, &metrics)?;
+    let pages = layout(&document, &styled, &engine, vertical, &metrics, &options)?;
     let assets = FileImages::load(&options.input, &pages);
     match options.format {
         Format::Html => write_output(
@@ -279,7 +284,7 @@ fn check(args: &[String]) -> Result<(), String> {
     let options = parse_options(args, false)?;
     let (document, styled, engine, vertical) = pipeline(&options)?;
     let metrics = load_metrics(&options)?;
-    let pages = layout(&document, &styled, &engine, vertical, &metrics)?;
+    let pages = layout(&document, &styled, &engine, vertical, &metrics, &options)?;
     let overflow = pages.pages.iter().filter(|page| page.overflow).count();
     let emergency = pages
         .pages
@@ -304,9 +309,21 @@ fn check(args: &[String]) -> Result<(), String> {
 fn pipeline(
     options: &Options,
 ) -> Result<(Document, StyledDoc, BreakConfig, VerticalParams), String> {
-    let source = std::fs::read_to_string(&options.input)
-        .map_err(|error| format!("{}: {error}", options.input))?;
-    let document = parse_document(&options.input, &source)?;
+    let extension = std::path::Path::new(&options.input)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let document = if extension == "docx" {
+        let bytes =
+            std::fs::read(&options.input).map_err(|error| format!("{}: {error}", options.input))?;
+        soma_docx::parse_docx(&bytes)
+            .map_err(|error| format!("{}: {}", options.input, error.reason))?
+    } else {
+        let source = std::fs::read_to_string(&options.input)
+            .map_err(|error| format!("{}: {error}", options.input))?;
+        parse_document(&options.input, &source)?
+    };
 
     let template_source = match &options.template {
         Some(path) => std::fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))?,
@@ -349,7 +366,7 @@ fn parse_document(path: &str, source: &str) -> Result<Document, String> {
         "html" | "htm" => Ok(soma_html::parse_html(source)),
         "tex" | "latex" => Ok(soma_latex::parse_latex(source)),
         other => Err(format!(
-            "{path}: unsupported input `{other}` (expected md, html, or tex)"
+            "{path}: unsupported input `{other}` (expected md, html, tex, or docx)"
         )),
     }
 }
@@ -360,15 +377,23 @@ fn layout(
     engine: &BreakConfig,
     vertical: VerticalParams,
     table: &MetricsTable,
+    options: &Options,
 ) -> Result<soma_layout::PagedLayout, String> {
     let metrics = StyledMetrics::new(table, styled);
-    layout_with(
+    let patterns = match options.hyphenation.as_deref() {
+        Some(path) => Some(soma_hyphen::Patterns::parse(
+            &std::fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))?,
+        )),
+        None => None,
+    };
+    soma_layout::layout_with_hyphenation(
         document,
         styled,
         &metrics,
         engine,
         PaginationStrategy::VerticalKp,
         vertical,
+        patterns.as_ref(),
     )
     .map_err(|error| error.to_string())
 }

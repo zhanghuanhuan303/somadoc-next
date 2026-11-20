@@ -31,7 +31,7 @@ use soma_doc::block::{
 };
 use soma_doc::inline::FootnoteRef;
 use soma_doc::inline::{
-    Container, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link, MathInline,
+    Container, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link, MathInline, Ruby,
 };
 use soma_doc::meta::{Author, CoverData, Date, DocumentMeta, ImageRef};
 use soma_doc::node::NodeMeta;
@@ -1245,6 +1245,20 @@ impl<'a> Parser<'a> {
                     Command::None
                 } else {
                     Command::One(Inline::Index(IndexRef::new(NodeMeta::synthesized(), term)))
+                }
+            }
+            // `\ruby{汉字}{hàn zì}`: the reading is drawn above the base.
+            "ruby" => {
+                let base = self.read_group().unwrap_or("").trim().to_string();
+                let annotation = self.read_group().unwrap_or("").trim().to_string();
+                if base.is_empty() || annotation.is_empty() {
+                    Command::One(Inline::Text(Text::new(NodeMeta::synthesized(), &base)))
+                } else {
+                    Command::One(Inline::Ruby(Ruby::new(
+                        NodeMeta::synthesized(),
+                        base,
+                        annotation,
+                    )))
                 }
             }
             "label" | "cite" | "ref" | "pageref" => {

@@ -1303,6 +1303,31 @@ fn paint_block(
             };
             painter.show(painter.scale.milli(x), painter.scale.milli(y), &glyphs);
 
+            // Ruby: the annotation sits centred over its base, above the base
+            // ascent. The layout reserved room for it, so it cannot collide
+            // with the previous line (ADR-0060).
+            if let Some(note) = block.ruby.iter().find(|note| note.atom == atom.atom) {
+                let note_glyphs: Vec<u16> = note
+                    .text
+                    .chars()
+                    .map(|character| font.glyph(character as u32))
+                    .collect();
+                let note_width: i64 = note_glyphs
+                    .iter()
+                    .map(|glyph| font.width_1000(*glyph) as i64 * note.size.0 as i64 / 1000)
+                    .sum();
+                let note_x = x as i64 + (atom.advance.0 as i64 - note_width) / 2;
+                let note_y = layout.page.height.0 - (baseline - note.shift.0);
+                painter.set_fill(atom_style.color.unwrap_or(0));
+                painter.start_text();
+                painter.set_font(role, painter.scale.milli(note.size.0));
+                painter.show(
+                    painter.scale.milli(note_x as i32),
+                    painter.scale.milli(note_y),
+                    &note_glyphs,
+                );
+            }
+
             // Decorations and links are decided by the source, not the style:
             // the renderer only asks the text index what the author asked for.
             let decorations = text.atom_decorations(block.node, atom.atom);
@@ -1350,6 +1375,34 @@ fn paint_block(
                         painter.scale.milli(layout.page.height.0 - top),
                     ],
                     uri,
+                );
+            }
+        }
+
+        // A line broken at a hyphenation point ends in a real hyphen. The
+        // breaker charged its width to the line, so it sits inside the measure
+        // (ADR-0059).
+        if placed.line.hyphenated {
+            if let Some(last) = placed.line.boxes.last() {
+                let style_id = text
+                    .atom_style(block.node, last.atom)
+                    .unwrap_or(block.style);
+                let last_style = styles
+                    .style(style_id)
+                    .cloned()
+                    .unwrap_or_else(|| style.clone());
+                let role = fonts.role_for(&last_style, text.uses_fallback(block.node, last.atom));
+                let font = fonts.font(role);
+                let glyph = font.glyph('-' as u32);
+                painter.set_fill(last_style.color.unwrap_or(0));
+                painter.start_text();
+                painter.set_font(role, painter.scale.size(&last_style));
+                painter.show(
+                    painter
+                        .scale
+                        .milli(layout.page.margin_left.0 + block.x.0 + last.x.0 + last.advance.0),
+                    painter.scale.milli(layout.page.height.0 - baseline),
+                    &[glyph],
                 );
             }
         }

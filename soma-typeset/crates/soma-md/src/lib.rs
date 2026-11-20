@@ -5,13 +5,14 @@
 //! knows nothing about templates, styles, or pages.
 //!
 //! Supported: YAML front matter (title, subtitle, author, date, language,
-//! keywords), ATX headings, paragraphs (soft line joins), hard breaks (two
-//! trailing spaces or a trailing backslash), emphasis/strong, inline code,
-//! links, images, fenced code blocks, flat lists, block quotes, thematic
-//! breaks, footnote definitions and references, and backslash escapes.
+//! keywords), ATX and setext headings, paragraphs (soft line joins), hard
+//! breaks (two trailing spaces or a trailing backslash), emphasis/strong,
+//! inline code, links, images, fenced code blocks, nested lists, block quotes,
+//! GFM tables, thematic breaks, footnote definitions and references, ruby
+//! (`[[ruby:base|reading]]`), index markers, and backslash escapes.
 //!
-//! Not supported (recorded in `docs/debt.md`): nested lists, setext headings,
-//! tables, HTML blocks, link reference definitions, and multi-line inline code.
+//! Not supported (recorded in `docs/debt.md`): HTML blocks, link reference
+//! definitions, and multi-line inline code.
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
@@ -24,12 +25,16 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use soma_doc::block::{BlockQuote, CodeBlock, Heading, List, ListItem, Paragraph, ThematicBreak};
+use soma_doc::block::{
+    BlockQuote, Cell, CodeBlock, Column, Heading, List, ListItem, Paragraph, Row, Table,
+    ThematicBreak,
+};
 use soma_doc::inline::{
-    Container, FootnoteRef, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link,
+    Container, FootnoteRef, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link, Ruby,
 };
 use soma_doc::meta::{Author, CoverData, Date, DocumentMeta, ImageRef};
 use soma_doc::node::NodeMeta;
+use soma_doc::CellAlign;
 use soma_doc::{
     Block, Code, Document, FootnoteDef, SourceId, SourceInfo, SourceKind, SourceMap, SourceSpan,
     Text,
@@ -183,6 +188,19 @@ pub fn parse_markdown_with_meta(source: &str, meta: DocumentMeta) -> Document {
             continue;
         }
 
+        // GFM table: a header row followed by a delimiter row.
+        if text.contains('|') {
+            if let Some(aligns) = lines
+                .get(index + 1)
+                .and_then(|next| table_delimiter(next.text.trim_start()))
+            {
+                let (table, next_index) = parse_table(&lines, index, &aligns);
+                blocks.push(Block::Table(table));
+                index = next_index;
+                continue;
+            }
+        }
+
         if text.starts_with('>') {
             let mut parts: Vec<String> = Vec::new();
             let start = line.offset;
@@ -209,84 +227,37 @@ pub fn parse_markdown_with_meta(source: &str, meta: DocumentMeta) -> Document {
         }
 
         if let Some(item) = list_marker(text) {
-            let start = line.offset;
-            let mut items: Vec<ListItem> = Vec::new();
-            let mut ordered = item.ordered;
-            let first_number = item.number;
-            let mut end = start;
-
-            while index < lines.len() {
-                let candidate = lines[index].text.trim_start();
-                if candidate.trim().is_empty() {
-                    break;
-                }
-                let Some(marker) = list_marker(candidate) else {
-                    break;
-                };
-                if marker.ordered != ordered {
-                    break;
-                }
-                let item_offset = lines[index].offset
-                    + (lines[index].text.len() - candidate.len()) as u32
-                    + marker.content_offset as u32;
-                let mut body = String::from(marker.content);
-                end = lines[index].offset + lines[index].text.len() as u32;
-                index += 1;
-                while index < lines.len() {
-                    let next = &lines[index];
-                    let next_text = next.text.trim_start();
-                    if next_text.trim().is_empty()
-                        || list_marker(next_text).is_some()
-                        || heading(next_text).is_some()
-                        || is_thematic_break(next_text)
-                        || fence_open(next_text).is_some()
-                    {
-                        break;
-                    }
-                    if !body.is_empty() {
-                        body.push(' ');
-                    }
-                    body.push_str(next_text);
-                    end = next.offset + next.text.len() as u32;
-                    index += 1;
-                }
-                items.push(ListItem::new(
-                    NodeMeta::at(SourceSpan::at(SourceId(1), item_offset, end)),
-                    vec![Block::Paragraph(Paragraph::new(
-                        NodeMeta::at(SourceSpan::at(SourceId(1), item_offset, end)),
-                        parse_inlines(&body, item_offset),
-                    ))],
-                ));
-                ordered = marker.ordered;
-            }
-
-            let mut list = List::new(
-                NodeMeta::at(SourceSpan::at(SourceId(1), start, end)),
-                ordered,
-                if ordered { first_number } else { 1 },
-                items,
-            );
-            list.tight = true;
+            let indent = line.text.len() - text.len();
+            let list = parse_list(&lines, &mut index, indent, item.ordered, item.number);
             blocks.push(Block::List(list));
             continue;
         }
 
-        // Paragraph: join lines until a blank line or another block start.
+        // Paragraph: join lines until a blank line or another block start. A
+        // setext underline turns the joined lines into a heading.
         let start = line.offset;
         let mut end = line.offset + line.text.len() as u32;
         let mut hard_break = ends_with_hard_break(text);
         let mut body = strip_hard_break(text);
         let body_start = line.offset + (line.text.len() - text.len()) as u32;
+        let mut setext: Option<u8> = None;
         index += 1;
         while index < lines.len() {
             let next = &lines[index];
             let next_text = next.text.trim_start();
+            if let Some(level) = setext_underline(next_text) {
+                setext = Some(level);
+                end = next.offset + next.text.len() as u32;
+                index += 1;
+                break;
+            }
             if next_text.trim().is_empty()
                 || heading(next_text).is_some()
                 || fence_open(next_text).is_some()
                 || is_thematic_break(next_text)
                 || list_marker(next_text).is_some()
                 || next_text.starts_with('>')
+                || table_delimiter(next_text).is_some()
             {
                 break;
             }
@@ -303,10 +274,12 @@ pub fn parse_markdown_with_meta(source: &str, meta: DocumentMeta) -> Document {
             hard_break = next_break;
             index += 1;
         }
-        blocks.push(Block::Paragraph(Paragraph::new(
-            NodeMeta::at(SourceSpan::at(SourceId(1), start, end)),
-            parse_inlines(&body, body_start),
-        )));
+        let inlines = parse_inlines(&body, body_start);
+        let meta = NodeMeta::at(SourceSpan::at(SourceId(1), start, end));
+        blocks.push(match setext {
+            Some(level) => Block::Heading(Heading::new(meta, level, inlines)),
+            None => Block::Paragraph(Paragraph::new(meta, inlines)),
+        });
     }
 
     let mut source_map = SourceMap::new();
@@ -447,6 +420,246 @@ fn ends_with_hard_break(text: &str) -> bool {
     text.ends_with("  ") || text.ends_with('\\')
 }
 
+/// `===` or `---` under a paragraph makes it a heading (setext).
+fn setext_underline(text: &str) -> Option<u8> {
+    let trimmed = text.trim_end();
+    let marker = trimmed.chars().next()?;
+    if marker != '=' && marker != '-' {
+        return None;
+    }
+    if trimmed.chars().any(|character| character != marker) {
+        return None;
+    }
+    Some(if marker == '=' { 1 } else { 2 })
+}
+
+/// GFM table delimiter row: `| --- | :-: | ---: |`.
+fn table_delimiter(text: &str) -> Option<Vec<CellAlign>> {
+    if !text.contains('-') {
+        return None;
+    }
+    let cells = table_cells(text);
+    if cells.is_empty() {
+        return None;
+    }
+    let mut aligns = Vec::with_capacity(cells.len());
+    for cell in cells {
+        let cell = cell.trim();
+        let left = cell.starts_with(':');
+        let right = cell.ends_with(':');
+        let body = cell.trim_start_matches(':').trim_end_matches(':');
+        if body.len() < 3 || !body.chars().all(|character| character == '-') {
+            return None;
+        }
+        aligns.push(match (left, right) {
+            (true, true) => CellAlign::Center,
+            (true, false) => CellAlign::Left,
+            (false, true) => CellAlign::Right,
+            (false, false) => CellAlign::Default,
+        });
+    }
+    Some(aligns)
+}
+
+/// Split one table row. A leading and trailing pipe are decoration; an escaped
+/// `\|` is a literal bar.
+fn table_cells(text: &str) -> Vec<String> {
+    let mut trimmed = text.trim();
+    if let Some(rest) = trimmed.strip_prefix('|') {
+        trimmed = rest;
+    }
+    if let Some(rest) = trimmed.strip_suffix('|') {
+        trimmed = rest;
+    }
+    let mut cells = Vec::new();
+    let mut current = String::new();
+    let mut characters = trimmed.chars();
+    while let Some(character) = characters.next() {
+        match character {
+            '\\' => {
+                if let Some(next) = characters.next() {
+                    current.push(next);
+                }
+            }
+            '|' => {
+                cells.push(String::from(current.trim()));
+                current.clear();
+            }
+            other => current.push(other),
+        }
+    }
+    cells.push(String::from(current.trim()));
+    cells
+}
+
+fn parse_table(lines: &[Line<'_>], index: usize, aligns: &[CellAlign]) -> (Table, usize) {
+    let header = &lines[index];
+    let header_cells = table_cells(header.text.trim_start());
+    let columns = aligns
+        .iter()
+        .enumerate()
+        .map(|(column, align)| {
+            Column::new(
+                NodeMeta::at(SourceSpan::at(
+                    SourceId(1),
+                    header.offset + column as u32,
+                    header.offset + column as u32 + 1,
+                )),
+                *align,
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut rows = Vec::new();
+    let start = header.offset;
+    let mut end = header.offset + header.text.len() as u32;
+    rows.push(table_row(header, &header_cells, aligns.len(), true));
+    let mut next = index + 2;
+    while next < lines.len() {
+        let line = &lines[next];
+        let text = line.text.trim_start();
+        if text.trim().is_empty() || !text.contains('|') {
+            break;
+        }
+        let cells = table_cells(text);
+        rows.push(table_row(line, &cells, aligns.len(), false));
+        end = line.offset + line.text.len() as u32;
+        next += 1;
+    }
+    (
+        Table::new(
+            NodeMeta::at(SourceSpan::at(SourceId(1), start, end)),
+            columns,
+            rows,
+        ),
+        next,
+    )
+}
+
+fn table_row(line: &Line<'_>, cells: &[String], columns: usize, header: bool) -> Row {
+    let mut built = Vec::with_capacity(columns);
+    for column in 0..columns {
+        let text = cells.get(column).map(String::as_str).unwrap_or("");
+        let blocks = if text.is_empty() {
+            Vec::new()
+        } else {
+            vec![Block::Paragraph(Paragraph::new(
+                NodeMeta::at(SourceSpan::at(
+                    SourceId(1),
+                    line.offset,
+                    line.offset + line.text.len() as u32,
+                )),
+                parse_inlines(text, line.offset),
+            ))]
+        };
+        built.push(Cell::new(
+            NodeMeta::at(SourceSpan::at(
+                SourceId(1),
+                line.offset,
+                line.offset + line.text.len() as u32,
+            )),
+            blocks,
+        ));
+    }
+    Row::new(
+        NodeMeta::at(SourceSpan::at(
+            SourceId(1),
+            line.offset,
+            line.offset + line.text.len() as u32,
+        )),
+        header,
+        built,
+    )
+}
+
+/// Parse one list, recursing into items indented further than the list's own
+/// marker column.
+fn parse_list(
+    lines: &[Line<'_>],
+    index: &mut usize,
+    indent: usize,
+    ordered: bool,
+    number: u32,
+) -> List {
+    let start = lines.get(*index).map(|line| line.offset).unwrap_or(0);
+    let mut items: Vec<ListItem> = Vec::new();
+    while *index < lines.len() {
+        let line = &lines[*index];
+        let text = line.text.trim_start();
+        if text.trim().is_empty() {
+            break;
+        }
+        let line_indent = line.text.len() - text.len();
+        let Some(marker) = list_marker(text) else {
+            break;
+        };
+        if line_indent > indent {
+            // A deeper marker belongs to the item above it.
+            if let Some(last) = items.last_mut() {
+                let nested = parse_list(lines, index, line_indent, marker.ordered, marker.number);
+                last.blocks.push(Block::List(nested));
+                continue;
+            }
+        }
+        if line_indent != indent || marker.ordered != ordered {
+            break;
+        }
+        let item_offset =
+            line.offset + (line.text.len() - text.len()) as u32 + marker.content_offset as u32;
+        let mut body = String::from(marker.content);
+        *index += 1;
+        let mut nested: Vec<Block> = Vec::new();
+        while *index < lines.len() {
+            let next = &lines[*index];
+            let next_text = next.text.trim_start();
+            if next_text.trim().is_empty() {
+                break;
+            }
+            let next_indent = next.text.len() - next_text.len();
+            if next_indent <= indent {
+                break;
+            }
+            if let Some(nested_marker) = list_marker(next_text) {
+                nested.push(Block::List(parse_list(
+                    lines,
+                    index,
+                    next_indent,
+                    nested_marker.ordered,
+                    nested_marker.number,
+                )));
+                continue;
+            }
+            if !body.is_empty() {
+                body.push(' ');
+            }
+            body.push_str(next_text);
+            *index += 1;
+        }
+        let end = lines
+            .get(index.saturating_sub(1))
+            .map(|line| line.offset + line.text.len() as u32)
+            .unwrap_or(item_offset);
+        let meta = NodeMeta::at(SourceSpan::at(SourceId(1), item_offset, end));
+        let mut blocks = vec![Block::Paragraph(Paragraph::new(
+            meta.clone(),
+            parse_inlines(&body, item_offset),
+        ))];
+        blocks.extend(nested);
+        items.push(ListItem::new(meta, blocks));
+    }
+    let end = lines
+        .get(index.saturating_sub(1))
+        .map(|line| line.offset + line.text.len() as u32)
+        .unwrap_or(start);
+    let mut list = List::new(
+        NodeMeta::at(SourceSpan::at(SourceId(1), start, end)),
+        ordered,
+        if ordered { number } else { 1 },
+        items,
+    );
+    list.tight = true;
+    list
+}
+
 // ---------------------------------------------------------------------------
 // Footnotes
 // ---------------------------------------------------------------------------
@@ -577,6 +790,34 @@ pub fn parse_inlines(text: &str, offset: u32) -> Vec<Inline> {
                     );
                     cursor += length;
                     continue;
+                }
+            }
+        }
+
+        if let Some(after) = rest.strip_prefix("[[ruby:") {
+            if let Some(close) = after.find("]]") {
+                let inner = &after[..close];
+                if let Some(bar) = inner.find('|') {
+                    let base = inner[..bar].trim();
+                    let annotation = inner[bar + 1..].trim();
+                    if !base.is_empty() && !annotation.is_empty() {
+                        let length = "[[ruby:".len() + close + 2;
+                        flush!();
+                        out.push(
+                            Ruby::new(
+                                NodeMeta::at(SourceSpan::at(
+                                    SourceId(1),
+                                    offset + cursor as u32,
+                                    offset + cursor as u32 + length as u32,
+                                )),
+                                base,
+                                annotation,
+                            )
+                            .into(),
+                        );
+                        cursor += length;
+                        continue;
+                    }
                 }
             }
         }
@@ -745,5 +986,22 @@ fn strip_hard_break(text: &str) -> String {
     match trimmed.strip_suffix('\\') {
         Some(stripped) => String::from(stripped.trim_end()),
         None => String::from(trimmed),
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    #[test]
+    fn delimiter_is_recognised() {
+        assert_eq!(
+            table_cells("| :--- | ---: |"),
+            vec![String::from(":---"), String::from("---:")]
+        );
+        assert_eq!(
+            table_delimiter("| :--- | ---: |"),
+            Some(vec![CellAlign::Left, CellAlign::Right])
+        );
     }
 }

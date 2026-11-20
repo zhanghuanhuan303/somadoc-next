@@ -204,7 +204,25 @@ fn write_block(out: &mut impl Write, block: &crate::PlacedBlock) -> fmt::Result 
         write_math_payload(out, &inline.math)?;
         out.write_char('}')?;
     }
-    out.write_char(']')?;
+    out.write_str("]")?;
+    // Only blocks that carry ruby write the key, so a document without
+    // annotations keeps the canonical bytes it had before ruby existed.
+    if !block.ruby.is_empty() {
+        out.write_str(",\"ruby\":[")?;
+        for (index, note) in block.ruby.iter().enumerate() {
+            if index > 0 {
+                out.write_char(',')?;
+            }
+            write!(out, "{{\"atom\":{},\"text\":", note.atom)?;
+            write_string(out, &note.text)?;
+            write!(
+                out,
+                ",\"shift\":{},\"size\":{}}}",
+                note.shift.0, note.size.0
+            )?;
+        }
+        out.write_char(']')?;
+    }
     out.write_char('}')
 }
 

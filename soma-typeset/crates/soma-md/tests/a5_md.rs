@@ -223,6 +223,23 @@ fn an_index_extension_becomes_a_marker() {
 }
 
 #[test]
+fn a_ruby_extension_becomes_an_annotation() {
+    let document = parse_markdown("正文 [[ruby:汉字|hànzì]] 后文\n");
+    let Block::Paragraph(paragraph) = &document.blocks[0] else {
+        panic!("paragraph")
+    };
+    assert!(
+        paragraph.inlines.iter().any(|inline| matches!(
+            inline,
+            Inline::Ruby(node) if node.base == "汉字" && node.annotation == "hànzì"
+        )),
+        "the annotation is in the inline sequence"
+    );
+    assert_eq!(document.plain_text().trim(), "正文 汉字 后文");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
 fn front_matter_becomes_document_metadata() {
     let source = "---\ntitle: 中文排版案例集\nsubtitle: 九篇语料\nauthor: 张三, 李四\ndate: 2026-11-20\nlanguage: zh-Hans\nkeywords: 排版, 中文\n---\n\n正文第一段。\n";
     let document = parse_markdown(source);
@@ -245,4 +262,99 @@ fn an_unterminated_front_matter_block_is_ordinary_text() {
     assert!(document.meta.title.is_none());
     assert!(document.meta.cover.is_none());
     assert!(!document.blocks.is_empty());
+}
+
+#[test]
+fn setext_underlines_make_headings() {
+    let document = parse_markdown("一级标题\n===\n\n二级标题\n---\n\n正文。\n");
+    document.validate().expect("valid DocIR");
+
+    match &document.blocks[0] {
+        Block::Heading(heading) => assert_eq!(heading.level, 1),
+        other => panic!("expected a level-1 heading, got {other:?}"),
+    }
+    match &document.blocks[1] {
+        Block::Heading(heading) => assert_eq!(heading.level, 2),
+        other => panic!("expected a level-2 heading, got {other:?}"),
+    }
+    assert!(matches!(document.blocks[2], Block::Paragraph(_)));
+}
+
+#[test]
+fn a_nested_list_is_a_list_inside_an_item() {
+    let document = parse_markdown("- 甲\n  - 甲一\n  - 甲二\n- 乙\n");
+    document.validate().expect("valid DocIR");
+    let Block::List(list) = &document.blocks[0] else {
+        panic!("expected a list");
+    };
+    assert_eq!(list.items.len(), 2);
+    let Block::List(nested) = &list.items[0].blocks[1] else {
+        panic!(
+            "the first item holds a nested list: {:?}",
+            list.items[0].blocks
+        );
+    };
+    assert_eq!(nested.items.len(), 2);
+    assert!(nested.items[0].meta.id.0 > 0);
+    assert!(list.items[1]
+        .blocks
+        .iter()
+        .all(|block| matches!(block, Block::Paragraph(_))));
+}
+
+#[test]
+fn a_nested_ordered_list_keeps_its_own_numbering() {
+    let document = parse_markdown("- 甲\n  3. 三\n  4. 四\n");
+    let Block::List(list) = &document.blocks[0] else {
+        panic!("expected a list");
+    };
+    let Block::List(nested) = &list.items[0].blocks[1] else {
+        panic!("nested ordered list");
+    };
+    assert!(nested.ordered);
+    assert_eq!(nested.start, 3);
+    assert_eq!(nested.items.len(), 2);
+}
+
+#[test]
+fn a_gfm_table_becomes_a_table_block() {
+    let document = parse_markdown("| 名称 | 数值 |\n| :--- | ---: |\n| 甲 | 1 |\n| 乙 | 22 |\n");
+    document.validate().expect("valid DocIR");
+    let Block::Table(table) = &document.blocks[0] else {
+        panic!("expected a table");
+    };
+    assert_eq!(table.columns.len(), 2);
+    assert_eq!(table.columns[0].align, soma_doc::CellAlign::Left);
+    assert_eq!(table.columns[1].align, soma_doc::CellAlign::Right);
+    assert_eq!(table.rows.len(), 3);
+    assert!(table.rows[0].header);
+    assert_eq!(table.rows[2].cells.len(), 2);
+    assert!(document.plain_text().contains("22"));
+}
+
+#[test]
+fn a_table_cell_can_hold_an_escaped_bar() {
+    let document = parse_markdown("| 表达式 |\n| --- |\n| a \\| b |\n");
+    let Block::Table(table) = &document.blocks[0] else {
+        panic!("expected a table");
+    };
+    let cell = &table.rows[1].cells[0];
+    let text = cell
+        .blocks
+        .first()
+        .and_then(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph.inlines.as_slice()),
+            _ => None,
+        })
+        .expect("cell paragraph");
+    assert!(matches!(
+        &text[0],
+        Inline::Text(node) if node.value.contains("a | b")
+    ));
+}
+
+#[test]
+fn a_table_needs_a_delimiter_row() {
+    let document = parse_markdown("| 甲 | 乙 |\n| 丙 | 丁 |\n");
+    assert!(matches!(document.blocks[0], Block::Paragraph(_)));
 }

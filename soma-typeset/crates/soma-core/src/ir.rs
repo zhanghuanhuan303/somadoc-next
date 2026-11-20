@@ -45,6 +45,9 @@ pub enum AtomKind {
     DigitRun,
     /// A replaced inline object. MVP keeps it unbreakable.
     InlineObject,
+    /// A ruby base: the characters an annotation sits over. One atom, so the
+    /// annotation can never be separated from what it annotates.
+    Ruby,
     /// Any other character not covered above.
     Other,
 }
@@ -84,6 +87,9 @@ pub enum BoundaryKind {
     /// A source whitespace boundary. Its width is resolved through
     /// `Metrics::space_width` at layout time.
     Space,
+    /// A hyphenation point inside a Latin word. The line may break here, and
+    /// the broken line ends with a hyphen glyph (ADR-0059).
+    Hyphen,
 }
 
 /// Glue width plus its allowed stretch and shrink.

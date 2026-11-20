@@ -13,6 +13,8 @@ members = [
     "crates/soma-latex",
     "crates/soma-math",
     "crates/soma-collate",
+    "crates/soma-hyphen",
+    "crates/soma-docx",
     "crates/soma-render-html",
     "crates/soma-render-svg",
     "crates/soma-render-pdf",

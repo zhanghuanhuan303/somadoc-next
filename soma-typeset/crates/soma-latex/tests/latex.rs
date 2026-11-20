@@ -43,6 +43,7 @@ fn collect(inlines: &[Inline], out: &mut String) {
             | Inline::Subscript(children) => collect(&children.children, out),
             Inline::Link(link) => collect(&link.children, out),
             Inline::Math(math) => out.push_str(&math.source),
+            Inline::Ruby(node) => out.push_str(&node.base),
             Inline::LineBreak(_) => out.push(' '),
             _ => {}
         }
@@ -361,5 +362,22 @@ fn index_commands_become_markers() {
 fn an_empty_index_command_is_dropped() {
     let document = parse_latex("正文\\index{}后文");
     assert_eq!(paragraph_text(&document.blocks[0]), "正文后文");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn a_ruby_command_carries_base_and_reading() {
+    let document = parse_latex("正文\\ruby{汉字}{hànzì}后文");
+    let Block::Paragraph(paragraph) = &document.blocks[0] else {
+        panic!("paragraph")
+    };
+    assert!(
+        paragraph.inlines.iter().any(|inline| matches!(
+            inline,
+            Inline::Ruby(node) if node.base == "汉字" && node.annotation == "hànzì"
+        )),
+        "the annotation is in the inline sequence"
+    );
+    assert_eq!(paragraph_text(&document.blocks[0]), "正文汉字后文");
     document.validate().expect("valid DocIR");
 }

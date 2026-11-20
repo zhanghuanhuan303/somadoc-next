@@ -1,0 +1,10 @@
+[package]
+name = "soma-hyphen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Liang hyphenation from an external pattern set"
+
+[dependencies]
