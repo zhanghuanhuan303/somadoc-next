@@ -205,3 +205,28 @@ fn an_index_extension_becomes_a_marker() {
     assert_eq!(document.plain_text().trim(), "正文  后文");
     document.validate().expect("valid DocIR");
 }
+
+#[test]
+fn front_matter_becomes_document_metadata() {
+    let source = "---\ntitle: 中文排版案例集\nsubtitle: 九篇语料\nauthor: 张三, 李四\ndate: 2026-11-20\nlanguage: zh-Hans\nkeywords: 排版, 中文\n---\n\n正文第一段。\n";
+    let document = parse_markdown(source);
+
+    assert_eq!(document.meta.authors.len(), 2);
+    assert_eq!(document.meta.authors[0].name, "张三");
+    assert_eq!(document.meta.language.as_deref(), Some("zh-Hans"));
+    assert_eq!(document.meta.keywords.len(), 2);
+    let cover = document.meta.cover.as_ref().expect("cover data");
+    assert_eq!(cover.subtitle.as_deref(), Some("九篇语料"));
+    assert_eq!(cover.authors.len(), 2);
+    assert!(cover.date.is_some());
+    // The body starts after the closing marker, not at the title.
+    assert!(!document.blocks.is_empty());
+}
+
+#[test]
+fn an_unterminated_front_matter_block_is_ordinary_text() {
+    let document = parse_markdown("---\ntitle: 没有结束标记\n\n正文。\n");
+    assert!(document.meta.title.is_none());
+    assert!(document.meta.cover.is_none());
+    assert!(!document.blocks.is_empty());
+}

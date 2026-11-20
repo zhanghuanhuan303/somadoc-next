@@ -4,7 +4,8 @@
 //! recognise becomes text, never a dropped node. It produces DocIR only; it
 //! knows nothing about templates, styles, or pages.
 //!
-//! Supported: ATX headings, paragraphs (soft line joins), hard breaks (two
+//! Supported: YAML front matter (title, subtitle, author, date, language,
+//! keywords), ATX headings, paragraphs (soft line joins), hard breaks (two
 //! trailing spaces or a trailing backslash), emphasis/strong, inline code,
 //! links, images, fenced code blocks, flat lists, block quotes, thematic
 //! breaks, footnote definitions and references, and backslash escapes.
@@ -27,7 +28,7 @@ use soma_doc::block::{BlockQuote, CodeBlock, Heading, List, ListItem, Paragraph,
 use soma_doc::inline::{
     Container, FootnoteRef, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link,
 };
-use soma_doc::meta::{DocumentMeta, ImageRef};
+use soma_doc::meta::{Author, CoverData, Date, DocumentMeta, ImageRef};
 use soma_doc::node::NodeMeta;
 use soma_doc::{
     Block, Code, Document, FootnoteDef, SourceId, SourceInfo, SourceKind, SourceMap, SourceSpan,
@@ -39,9 +40,87 @@ pub use capabilities::{capability, with_status, Capability, CapabilityStatus, CA
 pub const SYNTAX_ID: &str = "markdown";
 pub const SYNTAX_VERSION: u16 = 1;
 
-/// Parse Markdown into DocIR with an empty metadata block.
+/// Parse Markdown into DocIR. A leading `---` block supplies document
+/// metadata (title, subtitle, author, date, language, keywords); without one
+/// the metadata block stays empty.
 pub fn parse_markdown(source: &str) -> Document {
-    parse_markdown_with_meta(source, DocumentMeta::new())
+    let (meta, body) = split_front_matter(source);
+    parse_markdown_with_meta(body, meta)
+}
+
+/// Split a leading YAML front matter block off the body.
+///
+/// The subset is deliberately tiny: `key: value` lines with optional quotes.
+/// Anything else is ignored rather than guessed at, and a malformed block is
+/// treated as ordinary text.
+fn split_front_matter(source: &str) -> (DocumentMeta, &str) {
+    let mut meta = DocumentMeta::new();
+    let Some(rest) = source.strip_prefix("---\n") else {
+        return (meta, source);
+    };
+    let Some(end) = rest.find("\n---\n") else {
+        return (meta, source);
+    };
+    let yaml = &rest[..end];
+    let body = &rest[end + 5..];
+
+    let mut cover = CoverData::new();
+    for line in yaml.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim().trim_matches(|c| c == '"' || c == '\'');
+        if value.is_empty() {
+            continue;
+        }
+        match key {
+            "title" => {
+                meta.title = Some(vec![Inline::Text(Text::new(
+                    NodeMeta::synthesized(),
+                    value,
+                ))]);
+                cover.title = Some(String::from(value));
+            }
+            "subtitle" => cover.subtitle = Some(String::from(value)),
+            "author" | "authors" => {
+                for name in value.split(',') {
+                    let name = name.trim();
+                    if !name.is_empty() {
+                        meta.authors.push(Author::new(name));
+                        cover.authors.push(String::from(name));
+                    }
+                }
+            }
+            "date" => {
+                if let Some(date) = parse_iso_date(value) {
+                    meta.date = Some(date);
+                    cover.date = Some(String::from(value));
+                }
+            }
+            "language" | "lang" => meta.language = Some(String::from(value)),
+            "keywords" => {
+                meta.keywords = value
+                    .split(',')
+                    .map(|word| String::from(word.trim()))
+                    .filter(|word| !word.is_empty())
+                    .collect();
+            }
+            _ => {}
+        }
+    }
+    if cover.title.is_some() || cover.subtitle.is_some() || !cover.authors.is_empty() {
+        meta.cover = Some(cover);
+    }
+    (meta, body)
+}
+
+fn parse_iso_date(value: &str) -> Option<Date> {
+    let mut parts = value.split('-');
+    let year = parts.next()?.trim().parse().ok()?;
+    let month = parts.next()?.trim().parse().ok()?;
+    let day = parts.next()?.trim().parse().ok()?;
+    Some(Date::new(year, month, day))
 }
 
 /// Parse Markdown into DocIR with caller-supplied metadata.
