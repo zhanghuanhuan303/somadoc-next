@@ -60,6 +60,10 @@ pub enum PunctClass {
     Close,
     /// Middle punctuation (comma, full stop, colon, ...): no line start.
     Middle,
+    /// Wide marks that carry their own space on both sides: the em dash and
+    /// the ellipsis. They may not start a line, and neither side is trimmed —
+    /// half an em off a `——` pair would close the break in the dash (D83).
+    Dash,
 }
 
 /// Whether a boundary may be used as a line break.
@@ -173,6 +177,11 @@ pub struct ParagraphStyle {
     /// Content width, excluding any first-line indent.
     pub width: Width,
     pub first_indent: Width,
+    /// Hanging indent: the first line starts this far to the *left* of the
+    /// content column and is this much wider, which is how a list marker sits
+    /// outside the text it marks. Zero for every paragraph that is not a list
+    /// item; `first_indent` and `hang` are never both non-zero (ADR-0058).
+    pub hang: Width,
     pub line_height: Width,
     pub align: Align,
 }
@@ -182,6 +191,7 @@ impl Default for ParagraphStyle {
         Self {
             width: Width::from_em(40),
             first_indent: Width::from_em(2),
+            hang: Width::ZERO,
             line_height: Width::from_em_frac(3, 2),
             align: Align::Justify,
         }
@@ -207,6 +217,9 @@ impl Paragraph {
             return Err(IrError::InvalidWidth);
         }
         if self.style.first_indent < Width::ZERO || self.style.first_indent >= self.style.width {
+            return Err(IrError::InvalidWidth);
+        }
+        if self.style.hang < Width::ZERO || self.style.hang >= self.style.width {
             return Err(IrError::InvalidWidth);
         }
         if self.style.line_height <= Width::ZERO {

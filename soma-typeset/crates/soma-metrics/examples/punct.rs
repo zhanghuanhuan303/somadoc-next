@@ -73,7 +73,9 @@ fn collect(face: &Face, buckets: &mut Buckets) {
                 buckets.narrow_left.push(left);
                 buckets.narrow_right.push(right);
             }
-            PunctClass::None => {}
+            // A wide mark (dash, ellipsis) keeps its side space; measuring it
+            // would only invite a trim that closes the gap.
+            PunctClass::Dash | PunctClass::None => {}
         }
     }
 }

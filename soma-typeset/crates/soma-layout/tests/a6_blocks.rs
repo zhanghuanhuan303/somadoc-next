@@ -476,15 +476,18 @@ fn colspan_cells_span_their_columns() {
     let blocks = &layout.pages[0].blocks;
 
     assert_eq!(blocks.len(), 2);
-    let column_width = layout.page.content_width().0 / 3;
+    // Columns are sized by content now, so "two columns wide" means "up to
+    // where the third column starts", not twice an equal share (D90).
     assert_eq!(blocks[0].x.0, 0);
     assert_eq!(
-        blocks[0].width.0,
-        column_width * 2,
-        "a colspan=2 cell must be two columns wide"
+        blocks[0].width.0, blocks[1].x.0,
+        "a colspan=2 cell ends where the third column starts"
     );
-    assert_eq!(blocks[1].x.0, column_width * 2);
-    assert_eq!(blocks[1].width.0, column_width);
+    assert_eq!(
+        blocks[1].x.0 + blocks[1].width.0,
+        layout.page.content_width().0,
+        "the table fills the measure"
+    );
 }
 
 #[test]
@@ -548,7 +551,7 @@ styles:
       element: paragraph
       within: listItem
     declarations:
-      first-indent: 0
+      first-indent: -1.2em
   - selector:
       element: blockQuote
     declarations:
@@ -613,6 +616,40 @@ fn an_ordered_item_counts_from_its_start() {
         .collect();
 
     assert_eq!(markers, ["3", "4"], "numbering starts at `start`");
+}
+
+#[test]
+fn a_list_marker_hangs_outside_the_text_column() {
+    // A negative first indent is a hanging indent: line 0 starts where the
+    // marker goes and is that much wider, every later line starts at the text
+    // column (ADR-0058).
+    let long = "这是一条足够长、必定换行的列表项，用来确认续行与首行的起点不同。";
+    let doc = document(vec![Block::List(List::new(
+        NodeMeta::synthesized(),
+        false,
+        1,
+        vec![ListItem::new(
+            NodeMeta::synthesized(),
+            vec![paragraph(long)],
+        )],
+    ))]);
+    let styled = styled(&doc, LISTS);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+    let first = &block.lines[0].line;
+    let second = &block.lines[1].line;
+
+    assert_eq!(first.indent.0, -4915, "the first line starts 1.2em left");
+    assert_eq!(
+        first.target_width.0,
+        block.width.0 + 4915,
+        "and is 1.2em wider"
+    );
+    assert_eq!(
+        second.indent.0, 0,
+        "a wrapped line starts at the text column"
+    );
+    assert_eq!(second.target_width.0, block.width.0);
 }
 
 #[test]

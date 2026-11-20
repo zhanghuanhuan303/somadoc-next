@@ -39,6 +39,7 @@ fn rescue_paragraph() -> Paragraph {
         style: ParagraphStyle {
             width: Width::from_em(2),
             first_indent: Width::ZERO,
+            hang: Width::ZERO,
             line_height: Width::from_em_frac(3, 2),
             align: Align::Justify,
         },
@@ -98,6 +99,7 @@ fn normal_stage_never_violates_forbidden_boundaries() {
         style: ParagraphStyle {
             width: Width::from_em(4),
             first_indent: Width::ZERO,
+            hang: Width::ZERO,
             line_height: Width::from_em_frac(3, 2),
             align: Align::Justify,
         },
@@ -128,6 +130,7 @@ fn emergency_stage_reports_its_lines() {
         style: ParagraphStyle {
             width: Width::from_em(2),
             first_indent: Width::ZERO,
+            hang: Width::ZERO,
             line_height: Width::from_em_frac(3, 2),
             align: Align::Justify,
         },

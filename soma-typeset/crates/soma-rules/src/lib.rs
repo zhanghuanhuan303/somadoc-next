@@ -562,6 +562,7 @@ fn trim_caps(class: PunctClass, full_width: bool) -> (Width, Width) {
             PunctClass::Open => (LATIN_TRIM, Width::ZERO),
             PunctClass::Close => (Width::ZERO, LATIN_TRIM),
             PunctClass::Middle => (LATIN_TRIM, LATIN_TRIM),
+            PunctClass::Dash => (Width::ZERO, Width::ZERO),
             PunctClass::None => (Width::ZERO, Width::ZERO),
         };
     }
@@ -569,6 +570,7 @@ fn trim_caps(class: PunctClass, full_width: bool) -> (Width, Width) {
         PunctClass::Open => (OPEN_TRIM_LEFT, Width::ZERO),
         PunctClass::Close => (Width::ZERO, CLOSE_TRIM_RIGHT),
         PunctClass::Middle => (MIDDLE_TRIM_LEFT, MIDDLE_TRIM_RIGHT),
+        PunctClass::Dash => (Width::ZERO, Width::ZERO),
         PunctClass::None => (Width::ZERO, Width::ZERO),
     }
 }
@@ -585,6 +587,7 @@ fn normal_boundary(previous: &Atom, next: &Atom) -> Boundary {
         && (previous.class == PunctClass::Open
             || next.class == PunctClass::Close
             || next.class == PunctClass::Middle
+            || next.class == PunctClass::Dash
             || next.text == "/"
             || (is_word_like(previous.kind) && is_word_like(next.kind)));
 
@@ -634,7 +637,8 @@ fn normal_boundary(previous: &Atom, next: &Atom) -> Boundary {
 fn space_boundary(previous: &Atom, next: &Atom) -> Boundary {
     let forbidden = previous.class == PunctClass::Open
         || next.class == PunctClass::Close
-        || next.class == PunctClass::Middle;
+        || next.class == PunctClass::Middle
+        || next.class == PunctClass::Dash;
 
     Boundary {
         breakable: if forbidden {
@@ -714,8 +718,12 @@ pub fn punct_class(c: char) -> PunctClass {
         '）' | '】' | '》' | '〉' | '」' | '』' | '”' | '’' | ')' | ']' | '}' => {
             PunctClass::Close
         }
-        '，' | '。' | '、' | '；' | '：' | '！' | '？' | '…' | ',' | '.' | ';' | ':' | '!'
-        | '?' => PunctClass::Middle,
+        '，' | '。' | '、' | '；' | '：' | '！' | '？' | ',' | '.' | ';' | ':' | '!' | '?' => {
+            PunctClass::Middle
+        }
+        // The ellipsis, the dashes and the middle dot carry their own space:
+        // they belong at neither edge of a line and must not be squeezed.
+        '…' | '—' | '–' | '·' => PunctClass::Dash,
         _ => PunctClass::None,
     }
 }
@@ -740,6 +748,7 @@ pub fn justified_style(width: Width) -> ParagraphStyle {
     ParagraphStyle {
         width,
         first_indent: Width::ZERO,
+        hang: Width::ZERO,
         line_height: Width::from_em_frac(3, 2),
         align: Align::Justify,
     }
@@ -803,6 +812,30 @@ mod tests {
         assert_eq!(paragraph.atoms.len(), 2);
         assert_eq!(paragraph.boundaries[0].kind, BoundaryKind::Space);
         assert_eq!(paragraph.boundaries[0].breakable, Breakability::Forbidden);
+    }
+
+    #[test]
+    fn a_dash_keeps_its_width_and_never_starts_a_line() {
+        // `——` and `……` are two full-width marks; trimming half an em off each
+        // side would close the run up (D83).
+        for mark in ['—', '–', '…', '·'] {
+            assert_eq!(punct_class(mark), PunctClass::Dash, "{mark}");
+        }
+        let paragraph = compile("甲——乙");
+        let dash = &paragraph.atoms[1];
+        assert_eq!(dash.class, PunctClass::Dash);
+        assert_eq!(dash.compress_left, Width::ZERO);
+        assert_eq!(dash.compress_right, Width::ZERO);
+        assert_eq!(
+            paragraph.boundaries[0].breakable,
+            Breakability::Forbidden,
+            "a line may not start with a dash"
+        );
+        assert_eq!(
+            paragraph.boundaries[2].breakable,
+            Breakability::Allowed,
+            "but a line may break after the run"
+        );
     }
 
     #[test]

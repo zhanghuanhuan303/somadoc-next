@@ -651,7 +651,7 @@ impl<'a> Parser<'a> {
         let env = self.peek_env()?.to_string();
         self.consume_env_marker();
         let blocks = match env.as_str() {
-            "itemize" | "enumerate" => {
+            "itemize" | "enumerate" | "description" => {
                 let items = self.parse_items(&env);
                 if items.is_empty() {
                     Vec::new()
@@ -789,6 +789,18 @@ impl<'a> Parser<'a> {
         String::from(body)
     }
 
+    /// Compile one table cell. Cells used to be one literal text run, which
+    /// printed `\\textbf{...}` as `{...}`; they are inline content like any
+    /// other, so emphasis, code and maths work inside a table.
+    fn cell_inlines(&mut self, source: &str) -> Vec<Inline> {
+        let text = render_cell_text(source);
+        let mut parser = Parser::new(&text);
+        let inlines = parser.parse_inlines(true);
+        self.footnotes
+            .extend(core::mem::take(&mut parser.footnotes));
+        inlines
+    }
+
     /// Parse a caption body as inline content, lifting any footnotes into the
     /// document.
     fn caption_inlines(&mut self, source: &str) -> Vec<Inline> {
@@ -811,11 +823,30 @@ impl<'a> Parser<'a> {
                 self.consume_end(env);
                 break;
             }
+            let mut label = None;
             if self.peek_command() == Some("item") {
                 self.read_command();
-                self.read_optional();
+                // `\item[Term]` and `description` labels become a bold run-in
+                // label: the item model has no separate term box.
+                label = self.read_optional().map(|text| text.trim().to_string());
             }
-            let blocks = self.parse_blocks(Some(env), true);
+            let mut blocks = self.parse_blocks(Some(env), true);
+            if let Some(label) = label.filter(|label| !label.is_empty()) {
+                let mut label_inlines = vec![Inline::Strong(Container::new(
+                    NodeMeta::synthesized(),
+                    vec![Inline::Text(Text::new(NodeMeta::synthesized(), label))],
+                ))];
+                match blocks.first_mut() {
+                    Some(Block::Paragraph(paragraph)) => {
+                        label_inlines.append(&mut paragraph.inlines);
+                        paragraph.inlines = label_inlines;
+                    }
+                    _ => blocks.insert(
+                        0,
+                        Block::Paragraph(Paragraph::new(NodeMeta::synthesized(), label_inlines)),
+                    ),
+                }
+            }
             if !blocks.is_empty() || !items.is_empty() {
                 items.push(ListItem::new(NodeMeta::synthesized(), blocks));
             }
@@ -947,10 +978,7 @@ impl<'a> Parser<'a> {
                     NodeMeta::synthesized(),
                     vec![Block::Paragraph(Paragraph::new(
                         NodeMeta::synthesized(),
-                        vec![Inline::Text(Text::new(
-                            NodeMeta::synthesized(),
-                            render_cell_text(text),
-                        ))],
+                        self.cell_inlines(text),
                     ))],
                 );
                 cell.colspan = span as u16;

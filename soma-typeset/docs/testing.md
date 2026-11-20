@@ -110,8 +110,8 @@ Cumulative public test files:
 | `a2_cell_context.rs` | 1 | `within: cell` overrides body rules and sets cell padding |
 | `a3_layout.rs` | 7 | paragraph boxes match the kernel, text index, stacking |
 | `a4_pagination.rs` | 13 | vertical K-P optimality, page breaks, keep-with-next, splitting, overflow |
-| `a6_blocks.rs` | 23 | code (one atom table, spaces kept), display math box, figures, tables (+colspan), rules, raw, footnotes, marker width, numbered equations, tags and notags, a tag carrying maths, list markers and container indent |
-| `metrics.rs` (layout) | 10 | table-backed metrics, per-style scaling, bold face, determinism, outline ink, rescue face, Han inside a formula measured with the text face |
+| `a6_blocks.rs` | 24 | code (one atom table, spaces kept), display math box, figures, tables (+colspan), rules, raw, footnotes, marker width, numbered equations, tags and notags, a tag carrying maths, list markers, hanging indent and container indent |
+| `metrics.rs` (layout) | 11 | table-backed metrics, per-style scaling, bold face, determinism, outline ink, rescue face, Han inside a formula measured with the text face, inline code measured with its style |
 | `e2_split.rs` | 7 | line conservation, widows/orphans, footnote lines, glue, vertical hash |
 | `e3_typography.rs` | 2 | hanging punctuation is post-processing and respects the cap |
 | `e4_master.rs` | 6 | header/footer bands, folio, running title, margin limits |
@@ -163,14 +163,14 @@ Cumulative public test files:
 | `soma-demo` unit | 6 | HTML geometry, escaping, anonymized blind sheet, deterministic sides |
 | `soma-wasm` unit | 1 | fixture determinism + forced end + DocIR |
 | `vertical_slice.rs` (rules) | 6 | end-to-end rules + trim + hard break |
-| `soma-rules` unit | 18 | segmentation, punctuation, half-width bearings, pair trim, hyphen breaks, rule inventory, code-line spaces |
+| `soma-rules` unit | 19 | segmentation, punctuation, half-width bearings, pair trim, hyphen breaks, rule inventory, code-line spaces, dashes keep their width |
 | `soma-metrics` unit | 14 | table round-trip, CJK/Latin widths, regular/bold/math faces, hash, truncation, ink sections, v1/v2 compatibility |
 | `soma-core` vertical unit | 1 | vertical cost model hash |
 | core unit | 24 | IR, units, breaker, result, presets |
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 | render-pdf unit | 26 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing |
 
-Total: **629 tests**.
+Total: **633 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

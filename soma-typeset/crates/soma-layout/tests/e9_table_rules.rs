@@ -176,7 +176,6 @@ fn an_internal_rule_skips_a_spanning_cell() {
 
     assert_eq!(layout.page_count(), 1, "the fixture fits one page");
     let content_width = layout.page.content_width().0;
-    let half = content_width / 2;
     let rules = of_kind(&layout, 0, BoxKind::TableRule);
 
     // outer top, three internal boundaries, outer bottom.
@@ -190,8 +189,14 @@ fn an_internal_rule_skips_a_spanning_cell() {
         1,
         "only the boundary inside the span is split"
     );
-    assert_eq!(partial[0].x.0, half);
-    assert_eq!(partial[0].width.0, content_width - half);
+    // The boundary sits where the right-hand column starts; columns are sized
+    // by content (D90), so it is no longer necessarily the middle.
+    let right = of_kind(&layout, 0, BoxKind::TableCell)
+        .into_iter()
+        .find(|block| block_text(&layout, block) == "右下")
+        .expect("bottom-right cell");
+    assert_eq!(partial[0].x.0, right.x.0);
+    assert_eq!(partial[0].width.0, content_width - right.x.0);
     assert_eq!(partial[0].height.0, RULE);
     for rule in rules.iter().filter(|rule| rule.width.0 == content_width) {
         assert_eq!(rule.x.0, 0);
@@ -298,7 +303,12 @@ fn a_grid_draws_vertical_rules_and_a_frame() {
     let rules = of_kind(&layout, 0, BoxKind::TableRule);
     assert_eq!(rules.len(), 3, "left frame, middle rule, right frame");
     let table_width = layout.page.content_width().0;
-    let column = table_width / 2;
+    let column = of_kind(&layout, 0, BoxKind::TableCell)
+        .into_iter()
+        .find(|block| block_text(&layout, block) == "右下")
+        .expect("bottom-right cell")
+        .x
+        .0;
     let middle = rules
         .iter()
         .find(|rule| rule.x.0 > 0 && rule.x.0 + rule.width.0 < table_width)
@@ -335,7 +345,12 @@ fn a_vertical_rule_skips_a_colspan_cell() {
     let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
 
     let table_width = layout.page.content_width().0;
-    let column = table_width / 2;
+    let column = of_kind(&layout, 0, BoxKind::TableCell)
+        .into_iter()
+        .find(|block| block_text(&layout, block) == "右下")
+        .expect("bottom-right cell")
+        .x
+        .0;
     let middle: Vec<_> = of_kind(&layout, 0, BoxKind::TableRule)
         .into_iter()
         .filter(|rule| rule.x.0 > 0 && rule.x.0 + rule.width.0 < table_width)

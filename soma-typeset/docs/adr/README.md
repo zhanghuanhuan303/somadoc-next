@@ -76,6 +76,7 @@ only).
 | [0055](0055-code-block-atoms.md) | One atom table per code block; a code line keeps its spaces | Accepted |
 | [0056](0056-tags-text-math-and-braces.md) | `\tag`/`\notag`, maths inside `\text`, braces assembled from rules when wide | Accepted |
 | [0057](0057-containers-indent-their-children.md) | A container indents its children; a list item carries its marker | Accepted |
+| [0058](0058-hanging-columns-and-dashes.md) | Hanging indents, content-sized table columns, wide dashes, cells as inlines | Accepted |
 
 ## Rules
 

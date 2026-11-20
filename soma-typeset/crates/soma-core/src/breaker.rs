@@ -511,12 +511,14 @@ impl<'a> Shaped<'a> {
     }
 
     fn target(&self, start: usize) -> i64 {
-        let indent = if start == 0 {
-            self.paragraph.style.first_indent.0 as i64
+        let width = self.paragraph.style.width.0 as i64;
+        if start == 0 {
+            // The first line is indented inward by `first_indent` and outward
+            // by `hang`: a list marker hangs in the margin (ADR-0058).
+            width + self.paragraph.style.hang.0 as i64 - self.paragraph.style.first_indent.0 as i64
         } else {
-            0
-        };
-        self.paragraph.style.width.0 as i64 - indent
+            width
+        }
     }
 
     /// Natural width of line `[start, end)`. Glue on the boundary immediately
@@ -661,8 +663,9 @@ impl<'a> Shaped<'a> {
         let emergency = params.emergency_stretch.0.max(0) as i128;
         let width = self.paragraph.style.width.0 as i128;
         let first_indent = self.paragraph.style.first_indent.0.max(0) as i128;
+        let hang = self.paragraph.style.hang.0.max(0) as i128;
         let target_min = width - first_indent;
-        let target_max = width;
+        let target_max = width + hang;
         let max_atom = self.max_atom as i128;
         let max_glue = self.max_glue as i128;
         let min_atom = self.min_atom as i128;
@@ -1254,7 +1257,7 @@ fn build_result(
 
     for (start, end, eval) in chosen {
         let indent = if *start == 0 {
-            shaped.paragraph.style.first_indent
+            shaped.paragraph.style.first_indent - shaped.paragraph.style.hang
         } else {
             Width::ZERO
         };
@@ -1565,6 +1568,7 @@ mod tests {
             style: ParagraphStyle {
                 width: Width::from_em(width_em),
                 first_indent: Width::ZERO,
+                hang: Width::ZERO,
                 line_height: Width::from_em_frac(3, 2),
                 align: Align::Justify,
             },
@@ -1589,6 +1593,7 @@ mod tests {
             style: ParagraphStyle {
                 width: Width::from_em(width_em),
                 first_indent: Width::ZERO,
+                hang: Width::ZERO,
                 line_height: Width::from_em_frac(3, 2),
                 align: Align::Justify,
             },
@@ -1605,6 +1610,7 @@ mod tests {
             style: ParagraphStyle {
                 width: Width::from_em(2),
                 first_indent: Width::ZERO,
+                hang: Width::ZERO,
                 line_height: Width::from_em_frac(3, 2),
                 align: Align::Justify,
             },
@@ -1632,6 +1638,7 @@ mod tests {
             style: ParagraphStyle {
                 width: Width::from_em(width_em),
                 first_indent: Width::ZERO,
+                hang: Width::ZERO,
                 line_height: Width::from_em_frac(3, 2),
                 align: Align::Justify,
             },

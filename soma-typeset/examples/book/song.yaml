@@ -132,15 +132,14 @@ styles:
     declarations:
       indent-left: 1.2em
 
-  # The item is indented as a whole (list + listItem), so its first line needs
-  # no paragraph indent of its own. A true hanging indent — bullet out in the
-  # margin, text aligned after it — needs a negative `first-indent`, which the
-  # kernel refuses by design (D89).
+  # A negative `first-indent` is a hanging indent: the marker sits 1.2em left
+  # of the item's text column, and every line after the first starts at the
+  # text column (ADR-0058).
   - selector:
       element: paragraph
       within: listItem
     declarations:
-      first-indent: 0
+      first-indent: -1.2em
 
   # A quotation is indented on both sides; that indent is the "this is another
   # voice" signal, so its paragraphs do not add a first-line indent on top.

@@ -1209,6 +1209,48 @@ fn push_vertical_rule(
 }
 
 /// A horizontal table rule at an exact position.
+/// Column widths proportional to what each column holds.
+///
+/// Every column keeps a floor (`measure / 6n`) and the rest of the measure is
+/// shared by natural width, so a table with one long column gets one wide
+/// column instead of equal slices. Largest-remainder rounding keeps the widths
+/// summing to exactly `measure`, which the rules and the span offsets rely on.
+fn column_widths(natural: &[i32], measure: i32) -> Vec<i32> {
+    let count = natural.len();
+    if count == 0 {
+        return Vec::new();
+    }
+    let measure = measure.max(count as i32);
+    let floor = (measure / (count as i32 * 6)).max(1);
+    let weights: Vec<i64> = natural
+        .iter()
+        .map(|width| i64::from((*width).max(1)))
+        .collect();
+    let total: i64 = weights.iter().sum();
+    let rest = (i64::from(measure) - i64::from(floor) * count as i64).max(0);
+
+    let mut widths = vec![floor; count];
+    let mut remainders: Vec<(i64, usize)> = Vec::with_capacity(count);
+    let mut assigned = 0i64;
+    for (index, weight) in weights.iter().enumerate() {
+        let exact = rest * weight;
+        let share = exact / total;
+        widths[index] += share as i32;
+        assigned += share;
+        remainders.push((exact % total, index));
+    }
+    let mut left = rest - assigned;
+    remainders.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    for (_, index) in remainders {
+        if left <= 0 {
+            break;
+        }
+        widths[index] += 1;
+        left -= 1;
+    }
+    widths
+}
+
 fn table_rule(
     node: NodeId,
     style: StyleId,
@@ -1542,10 +1584,47 @@ impl Builder<'_> {
                 Block::Table(node) => {
                     let style = self.style(node.meta.id, fallback);
                     let columns = node.columns.len().max(1);
-                    let column_width = Width(self.content_width.0 / columns as i32);
                     let row_count = node.rows.len();
                     if row_count == 0 {
                         continue;
+                    }
+                    // Size the columns to what they hold, not to the column
+                    // count: a table of "序号 / 说明" must not give both halves
+                    // of the page (D90).
+                    let mut natural = vec![0i32; columns];
+                    for row in &node.rows {
+                        let row_style = self.style(row.meta.id, style);
+                        let mut column = 0usize;
+                        for cell in &row.cells {
+                            if column >= columns {
+                                break;
+                            }
+                            let colspan = (cell.colspan as usize)
+                                .max(1)
+                                .min(columns.saturating_sub(column).max(1));
+                            let cell_style = self.style(cell.meta.id, row_style);
+                            let widest = self.natural_width(&cell.blocks, cell_style);
+                            if colspan == 1 {
+                                natural[column] = natural[column].max(widest);
+                            } else {
+                                let current: i32 = natural[column..column + colspan].iter().sum();
+                                if widest > current {
+                                    let deficit = widest - current;
+                                    let per = deficit / colspan as i32;
+                                    for slot in &mut natural[column..column + colspan] {
+                                        *slot += per;
+                                    }
+                                    natural[column + colspan - 1] +=
+                                        deficit - per * (colspan as i32 - 1);
+                                }
+                            }
+                            column += colspan;
+                        }
+                    }
+                    let widths = column_widths(&natural, self.content_width.0);
+                    let mut column_x = alloc::vec![0i32; columns + 1];
+                    for index in 0..columns {
+                        column_x[index + 1] = column_x[index] + widths[index];
                     }
                     let mut occupied = vec![vec![false; columns]; row_count];
                     let mut cells: Vec<TableCellLayout> = Vec::new();
@@ -1563,7 +1642,7 @@ impl Builder<'_> {
                             let rowspan = (cell.rowspan as usize)
                                 .max(1)
                                 .min(row_count.saturating_sub(row_index).max(1));
-                            let width = Width(column_width.0 * colspan as i32);
+                            let width = Width(column_x[column + colspan] - column_x[column]);
                             let cell_style = self.style(cell.meta.id, row_style);
                             let mut cell_items = Vec::new();
                             let saved = self.content_width;
@@ -1576,7 +1655,7 @@ impl Builder<'_> {
                             for item in cell_items {
                                 for mut placed in item.blocks {
                                     placed.kind = BoxKind::TableCell;
-                                    placed.x = placed.x + Width(column_width.0 * column as i32);
+                                    placed.x = placed.x + Width(column_x[column]);
                                     placed.y = height;
                                     height = height + placed.height;
                                     // The structure tree needs the grid
@@ -1678,7 +1757,7 @@ impl Builder<'_> {
                     }
                     row_top.push(cursor);
                     let table_height = cursor;
-                    let table_width = Width(column_width.0 * columns as i32);
+                    let table_width = Width(column_x[columns]);
                     let header_height = row_top[header_rows];
 
                     let mut blocks = Vec::new();
@@ -1741,9 +1820,9 @@ impl Builder<'_> {
                             push_horizontal_rule(
                                 &mut blocks,
                                 pen,
-                                Width(column_width.0 * start as i32),
+                                Width(column_x[start]),
                                 y,
-                                Width(column_width.0 * (column - start) as i32),
+                                Width(column_x[column] - column_x[start]),
                                 thickness,
                             );
                         }
@@ -1753,7 +1832,7 @@ impl Builder<'_> {
                     // frame. A cell that spans the boundary hides the segment
                     // for its own rows, and the header band is split out so the
                     // repeated header can carry its own side lines.
-                    for boundary in 0..=columns {
+                    for (boundary, edge) in column_x.iter().enumerate() {
                         let thickness = if boundary == 0 || boundary == columns {
                             rules.outer_column_rule
                         } else {
@@ -1767,7 +1846,7 @@ impl Builder<'_> {
                         } else if boundary == columns {
                             Width(table_width.0 - thickness.0)
                         } else {
-                            Width(column_width.0 * boundary as i32 - thickness.0 / 2)
+                            Width(*edge - thickness.0 / 2)
                         };
                         let mut covered: Vec<(i32, i32)> = Vec::new();
                         if boundary > 0 && boundary < columns {
@@ -2101,9 +2180,14 @@ impl Builder<'_> {
         let right = computed.indent_right.saturating_add(self.extra_right);
         let consumed = left.saturating_add(right);
         let inner = Width(self.content_width.0 - consumed.0);
+        // A negative `first-indent` is a hanging indent: the template says
+        // where the marker goes, the kernel gets `hang` (ADR-0058).
+        let hang = Width((-computed.first_indent.0).max(0));
+        let first_indent = Width(computed.first_indent.0.max(0));
         let paragraph_style = ParagraphStyle {
             width: inner,
-            first_indent: computed.first_indent,
+            first_indent,
+            hang,
             line_height: computed.line_height,
             // The kernel only justifies or flushes left; centering and
             // right-alignment are applied to the finished lines below.
@@ -2267,6 +2351,67 @@ impl Builder<'_> {
                 inline_math,
             }],
         }))
+    }
+
+    /// The width a block would take if it never wrapped.
+    ///
+    /// Table columns are sized from this: a column holding two characters
+    /// should not get a fifth of the page just because the table has five
+    /// columns (D90). Only paragraphs are measured; a cell holding a nested
+    /// list or a table contributes nothing and falls back to the floor width.
+    fn natural_width(&mut self, blocks: &[Block], fallback: StyleId) -> i32 {
+        let mut widest = 0i32;
+        for block in blocks {
+            let Block::Paragraph(node) = block else {
+                continue;
+            };
+            let style = self.style(node.meta.id, fallback);
+            let computed = self.computed(style);
+            let mut spans: Vec<OwnedSpan> = Vec::new();
+            let mut footnotes = Vec::new();
+            let mut notes = Vec::new();
+            let mut objects = math::InlineMaths::new();
+            self.collect(
+                &node.inlines,
+                style,
+                Decorations::NONE,
+                None,
+                &mut spans,
+                &mut footnotes,
+                &mut notes,
+                &mut objects,
+            );
+            let borrowed: Vec<InlineSpan<'_>> = spans
+                .iter()
+                .map(|span| InlineSpan {
+                    text: &span.text,
+                    style: span.style,
+                    kind: span.kind,
+                    decor: span.decor,
+                    link: span.link.as_deref(),
+                })
+                .collect();
+            let paragraph_style = ParagraphStyle {
+                width: Width(self.content_width.0.max(1)),
+                first_indent: Width::ZERO,
+                hang: Width::ZERO,
+                line_height: computed.line_height,
+                align: Align::Left,
+            };
+            let Ok(paragraph) = paragraph_from_spans(&borrowed, paragraph_style) else {
+                continue;
+            };
+            let objects_metrics = math::ObjectMetrics::new(self.metrics, &objects);
+            let mut width = 0i32;
+            for atom in &paragraph.atoms {
+                width += objects_metrics.object_advance(&atom.text, atom.style).0;
+            }
+            for boundary in &paragraph.boundaries {
+                width += boundary.glue.width.0;
+            }
+            widest = widest.max(width);
+        }
+        widest
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2441,6 +2586,7 @@ impl Builder<'_> {
         let wide = ParagraphStyle {
             width: Width::from_em(1000),
             first_indent: Width::ZERO,
+            hang: Width::ZERO,
             line_height: computed.line_height,
             align: computed.align,
         };
@@ -2582,6 +2728,7 @@ impl Builder<'_> {
         let paragraph_style = ParagraphStyle {
             width: slot.width,
             first_indent: Width::ZERO,
+            hang: Width::ZERO,
             line_height: computed.line_height,
             align: kernel_align(slot.align),
         };
@@ -3404,6 +3551,7 @@ fn margin_block(
     let paragraph_style = ParagraphStyle {
         width: Width::from_em(1000),
         first_indent: Width::ZERO,
+        hang: Width::ZERO,
         line_height: band_height,
         align: soma_core::Align::Justify,
     };
@@ -3646,7 +3794,7 @@ fn hanging_amount(atom: &soma_core::Atom, cap: Width) -> i32 {
     let limit = cap.0.min(atom.compress_right.0).max(0);
     match atom.class {
         PunctClass::Close | PunctClass::Middle => limit,
-        PunctClass::Open | PunctClass::None => 0,
+        PunctClass::Dash | PunctClass::Open | PunctClass::None => 0,
     }
 }
 
@@ -3772,6 +3920,28 @@ mod unit {
     use super::*;
     use soma_core::SyntheticMetrics;
     use soma_rules::justified_style;
+
+    #[test]
+    fn columns_share_the_measure_by_what_they_hold() {
+        // Equal columns stay equal, and the widths still sum to the measure.
+        let equal = column_widths(&[100, 100, 100], 9000);
+        assert_eq!(equal, [3000, 3000, 3000]);
+
+        // One long column takes the room it needs.
+        let uneven = column_widths(&[100, 900], 10000);
+        assert_eq!(uneven.iter().sum::<i32>(), 10000);
+        assert!(uneven[1] > uneven[0] * 4, "the long column gets the room");
+
+        // Rounding never loses or invents a unit.
+        for measure in [9999, 10000, 10001] {
+            let widths = column_widths(&[37, 41, 43, 47], measure);
+            assert_eq!(widths.iter().sum::<i32>(), measure, "measure {measure}");
+        }
+
+        // A column with nothing in it still gets a floor.
+        let empty = column_widths(&[0, 5000], 9000);
+        assert!(empty[0] > 0, "{empty:?}");
+    }
 
     #[test]
     fn trim_caps_scale_with_the_atom_font_size() {

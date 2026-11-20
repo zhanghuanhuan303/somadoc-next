@@ -3,7 +3,7 @@
 mod common;
 
 use common::{document, engine, metrics, paragraph, paragraph_with, styled, text, BOOK};
-use soma_core::{break_paragraph, ParagraphStyle, StyleId};
+use soma_core::{break_paragraph, ParagraphStyle, StyleId, Width};
 use soma_doc::block::Heading;
 use soma_doc::node::NodeMeta;
 use soma_doc::{Block, Inline};
@@ -30,6 +30,7 @@ fn paragraph_box_matches_the_inline_kernel() {
     let paragraph_style = ParagraphStyle {
         width: inner,
         first_indent: computed.first_indent,
+        hang: Width::ZERO,
         line_height: computed.line_height,
         align: computed.align,
     };

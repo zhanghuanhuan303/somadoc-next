@@ -38,6 +38,7 @@ fn paragraph() -> Paragraph {
         style: ParagraphStyle {
             width: Width::from_em_frac(5, 2),
             first_indent: Width::ZERO,
+            hang: Width::ZERO,
             line_height: Width::from_em_frac(3, 2),
             align: Align::Justify,
         },
@@ -141,6 +142,7 @@ fn trace_marks_fallback_lines() {
         style: ParagraphStyle {
             width: Width::from_em(2),
             first_indent: Width::ZERO,
+            hang: Width::ZERO,
             line_height: Width::from_em_frac(3, 2),
             align: Align::Justify,
         },

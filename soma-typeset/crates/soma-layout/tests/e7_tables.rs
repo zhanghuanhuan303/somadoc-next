@@ -71,8 +71,15 @@ fn a_rowspan_cell_covers_its_rows_without_overlap() {
 
     assert_eq!(block_text(&layout, tall), tall_text);
     assert_eq!(tall.x.0, 0);
-    assert_eq!(top.x.0, layout.page.content_width().0 / 2);
-    assert_eq!(bottom.x.0, layout.page.content_width().0 / 2);
+    // A long first column takes most of the measure (D90), so the second
+    // column starts where the first ends.
+    assert_eq!(top.x.0, tall.width.0);
+    assert_eq!(bottom.x.0, top.x.0);
+    assert_eq!(
+        top.x.0 + top.width.0,
+        layout.page.content_width().0,
+        "the table fills the measure"
+    );
     assert!(
         bottom.y.0 >= top.y.0 + top.height.0,
         "row 1 must start below row 0"
