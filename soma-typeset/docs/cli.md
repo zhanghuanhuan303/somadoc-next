@@ -10,7 +10,7 @@ Design record: ADR-0029.
 
 ```sh
 soma render --input <file> [--template <file>] [--engine <file>] \
-            [--format html|svg|json|pdf] [--out <file>] \
+            [--format html|svg|json|pdf] [--out <file>] [--metrics <file>] \
             [--font <file[#index]>] [--font-bold <file[#index]>] \
             [--font-math <file[#index]>]
 soma check  --input <file> [--template <file>] [--engine <file>]
@@ -23,6 +23,7 @@ soma --help
 | `--template`, `-t` | Pure-YAML template. Omitted: a built-in A4 template (20 mm margins, 10.5 pt / 1.6, justified). |
 | `--engine` | `soma.engine/1` file. Omitted: `publish-v1` defaults. |
 | `--format`, `-f` | `html` (default), `svg`, `json` (canonical page result), or `pdf`. |
+| `--metrics` | `soma.metrics/1` table; omitted uses the embedded Noto table. Point it at a table generated from the PDF font so layout measures the face the PDF draws. |
 | `--font` | TrueType font for `--format pdf`; `path#index` selects a TTC face. Required for PDF. |
 | `--font-bold`, `--font-math` | Optional bold/math faces; fall back to `--font`. |
 | `--out`, `-o` | Output path; `-` or omitted writes to stdout. |
@@ -51,9 +52,11 @@ soma render --input note.md > note.html
 # LaTeX article with a book template, SVG output.
 soma render --input paper.tex --template book.yaml --format svg --out paper.svg
 
-# PDF with an embedded TrueType subset and bookmarks.
+# PDF with an embedded TrueType subset and bookmarks, measured with the same face.
+cargo run --manifest-path tools/metrics-gen/Cargo.toml -- \
+  --out misans.smt --face serif:normal:/usr/share/fonts/misan/MiSans-Normal.ttf
 soma render --input book.tex --template book.yaml --format pdf \
-  --font /usr/share/fonts/misan/MiSans-Normal.ttf --out book.pdf
+  --font /usr/share/fonts/misan/MiSans-Normal.ttf --metrics misans.smt --out book.pdf
 
 # Canonical JSON for a diff or a golden test.
 soma render --input note.md --format json

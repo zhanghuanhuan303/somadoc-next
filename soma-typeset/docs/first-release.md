@@ -79,7 +79,9 @@ scripts/book.sh
 
 `--format pdf` 把同一份 `PagedLayout` 写成 PDF：TrueType 稀疏子集
 （Identity-H、ToUnicode）、逐字坐标、表格线与公式、书签树、PageLabels。
-示例书用 MiSans（约 512 KB，只含用到的字形），11 页、10 个书签。
+示例书用 MiSans（约 510 KB，只含用到的字形），11 页、10 个书签；
+`scripts/book.sh` 先用 `tools/metrics-gen` 从 MiSans 生成度量表，再以
+`--metrics` 交给 PDF 渲染，断行与 PDF 画出的字宽来自同一张脸。
 CFF/OTF 字体、图片嵌入与流压缩不在这一版（D82）。
 
 ## 仍然明显的缺口

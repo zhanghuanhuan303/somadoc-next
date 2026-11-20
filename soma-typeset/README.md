@@ -122,8 +122,10 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   embeds a sparse TrueType subset (Identity-H + ToUnicode), writes integer
   glyph positions, table rules, display math, a nested bookmark tree from
   `outline`, and `/PageLabels` from the printed labels. The same layout and
-  fonts produce identical bytes. CFF/OTF fonts are rejected; figures are
-  placeholder frames (D82).
+  fonts produce identical bytes. `--metrics` lets layout measure with a table
+  generated from that same font (`tools/metrics-gen`); `scripts/book.sh` does
+  this for the example. CFF/OTF fonts are rejected; figures are placeholder
+  frames (D82).
 - First-release artifact (`examples/book`, ADR-0031/ADR-0032/ADR-0033): `scripts/book.sh`
   renders an eleven-page book from `examples/book/book.tex` + `book.yaml` — generated
   cover, roman-numbered front matter, contents with leaders plus figure/table
@@ -214,7 +216,7 @@ scripts/
   kp-verify.sh # K-P closure: gates + bench budget + length policy
 docs/
   architecture-v2.md  # frozen architecture
-  adr/                # accepted decisions (ADR-0001 … 0034)
+  adr/                # accepted decisions (ADR-0001 … 0035)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
   debt.md             # global not-done register (D01–D77, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
@@ -274,7 +276,7 @@ cargo run -p soma-eval --release -- blind preferences.csv
 scripts/gates.sh
 ```
 
-The gate runs format, clippy, 534 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 536 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-template`,
 `soma-layout`, `soma-md`, `soma-render-html`, `soma-render-svg`, and
 `soma-render-pdf`, a
