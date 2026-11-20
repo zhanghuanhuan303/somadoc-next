@@ -22,17 +22,23 @@ use std::process::ExitCode;
 
 const UNIT: i32 = 4096;
 const MAGIC: u32 = 0x534d_5431; // "SMT1"
-const VERSION: u16 = 2;
+const VERSION: u16 = 3;
 
 /// Codepoint blocks whose advance is expected to be uniform (CJK).
 const UNIFORM_BLOCKS: &[(u32, u32)] = &[
-    (0x3000, 0x303f), // CJK symbols and punctuation
-    (0x3040, 0x30ff), // kana
-    (0x3400, 0x4dbf), // CJK extension A
-    (0x4e00, 0x9fff), // CJK unified ideographs
-    (0xf900, 0xfaff), // compatibility ideographs
-    (0xfe30, 0xfe4f), // CJK compatibility forms
-    (0xff00, 0xffef), // halfwidth and fullwidth forms
+    (0x3000, 0x303f),   // CJK symbols and punctuation
+    (0x3040, 0x30ff),   // kana
+    (0x3400, 0x4dbf),   // CJK extension A
+    (0x4e00, 0x9fff),   // CJK unified ideographs
+    (0xf900, 0xfaff),   // compatibility ideographs
+    (0xfe30, 0xfe4f),   // CJK compatibility forms
+    (0xff00, 0xffef),   // halfwidth and fullwidth forms
+    (0x20000, 0x2a6df), // CJK extension B
+    (0x2a700, 0x2b73f), // extension C
+    (0x2b740, 0x2b81f), // extension D
+    (0x2b820, 0x2ceaf), // extension E
+    (0x2ceb0, 0x2ebef), // extension F
+    (0x2f800, 0x2fa1f), // compatibility ideographs supplement
 ];
 
 /// Explicitly enumerated ranges (proportional scripts and punctuation).
@@ -45,14 +51,20 @@ const ENUMERATED_RANGES: &[(u32, u32)] = &[
 /// Codepoints whose outline matters for line-edge alignment. Punctuation only:
 /// recording ink for every Han glyph would triple the table for no gain.
 const INK_RANGES: &[(u32, u32)] = &[
-    (0x0021, 0x002f), // ! " # $ % & ' ( ) * + , - . /
-    (0x003a, 0x0040), // : ; < = > ? @
-    (0x005b, 0x0060), // [ \ ] ^ _ `
-    (0x007b, 0x007e), // { | } ~
-    (0x2000, 0x206f), // general punctuation: quotes, dashes, ellipsis
-    (0x3000, 0x303f), // CJK symbols and punctuation
-    (0xfe30, 0xfe4f), // CJK compatibility forms
-    (0xff00, 0xffef), // halfwidth and fullwidth forms
+    (0x0021, 0x002f),   // ! " # $ % & ' ( ) * + , - . /
+    (0x003a, 0x0040),   // : ; < = > ? @
+    (0x005b, 0x0060),   // [ \ ] ^ _ `
+    (0x007b, 0x007e),   // { | } ~
+    (0x2000, 0x206f),   // general punctuation: quotes, dashes, ellipsis
+    (0x3000, 0x303f),   // CJK symbols and punctuation
+    (0xfe30, 0xfe4f),   // CJK compatibility forms
+    (0xff00, 0xffef),   // halfwidth and fullwidth forms
+    (0x20000, 0x2a6df), // CJK extension B
+    (0x2a700, 0x2b73f), // extension C
+    (0x2b740, 0x2b81f), // extension D
+    (0x2b820, 0x2ceaf), // extension E
+    (0x2ceb0, 0x2ebef), // extension F
+    (0x2f800, 0x2fa1f), // compatibility ideographs supplement
 ];
 
 /// Full-width marks a Chinese body face is expected to draw one em wide.
@@ -128,6 +140,20 @@ impl<'a> Font<'a> {
     fn required(&self, tag: &[u8; 4]) -> Result<(usize, usize), String> {
         self.table(tag)
             .ok_or_else(|| format!("missing table {}", String::from_utf8_lossy(tag)))
+    }
+
+    /// `OS/2.sxHeight`, in font units, when the face declares one.
+    fn x_height(&self) -> Option<i32> {
+        let (os2, length) = self.table(b"OS/2")?;
+        if length < 88 {
+            return None;
+        }
+        let value = read_i16(self.data, os2 + 86).ok()? as i32;
+        if value > 0 {
+            Some(value)
+        } else {
+            None
+        }
     }
 
     fn units_per_em(&self) -> Result<i32, String> {
@@ -332,6 +358,9 @@ impl FaceSpec {
             "sans" => 1,
             // A dedicated math face: used for formula symbols, not for text.
             "math" => 2,
+            // A rescue face: measured with the body but drawn only for glyphs
+            // the body lacks (ADR-0038, docs/mixed-font.md).
+            "fallback" => 3,
             other => return Err(format!("unknown family {other}")),
         };
         let weight = match weight {
@@ -395,6 +424,7 @@ struct OutFace {
     blocks: Vec<(u32, u32, i32)>,
     entries: Vec<(u32, i32)>,
     ink: Vec<(u32, i32, i32)>,
+    glyph_ink: Vec<(u32, u8, u8)>,
 }
 
 fn main() -> ExitCode {
@@ -791,6 +821,12 @@ fn row(measure: &Measure, path: String, face: usize) -> AuditRow {
     }
 }
 
+/// One byte holds a bearing with 16 units of 1/4096 em of resolution.
+fn quantise(units: i32) -> u8 {
+    let clamped = units.clamp(0, UNIT) as i64;
+    ((clamped * 255 + 2048) / UNIT as i64) as u8
+}
+
 fn ratio(hit: usize, total: usize) -> f64 {
     if total == 0 {
         0.0
@@ -906,6 +942,31 @@ fn read_char_set(path: &str) -> Result<Vec<char>, String> {
         }
     }
     Ok(set.into_iter().filter_map(char::from_u32).collect())
+}
+
+/// The printable profile a font would hand to the breaker. Every number is
+/// measured; none is a design choice.
+fn profile_report(spec: &FaceSpec) -> Result<(), String> {
+    let data = fs::read(&spec.path).map_err(|error| format!("{}: {error}", spec.path))?;
+    let measure = measure(&data, spec.index)
+        .ok_or_else(|| format!("{}#{}: cannot measure", spec.path, spec.index))?;
+    let font = Font::open(&data, spec.index)
+        .map_err(|error| format!("{}#{}: {error}", spec.path, spec.index))?;
+    let upem = font.units_per_em()?;
+    let x_height = font.x_height().map(|value| scale(value, upem)).unwrap_or(0);
+
+    println!(
+        "{{\"path\":\"{}\",\"face\":{},\"visual_density\":{},\"mark_density\":{},\"x_height\":{},\"line_height\":{},\"weight\":{},\"derived\":{}}}",
+        spec.path,
+        spec.index,
+        (measure.han_density * 1000.0).round() as i32,
+        (measure.punct_density * 1000.0).round() as i32,
+        x_height,
+        (measure.line_ratio * 4096.0).round() as i32,
+        measure.weight_class,
+        measure.outlines
+    );
+    Ok(())
 }
 
 fn coverage(spec: &FaceSpec, text_path: &str) -> Result<(), String> {
@@ -1162,6 +1223,7 @@ fn run() -> Result<(), String> {
     let mut top = 40usize;
     let mut fingerprints_out: Option<String> = None;
     let mut identify_spec: Option<FaceSpec> = None;
+    let mut profile_spec: Option<FaceSpec> = None;
     let mut coverage_spec: Option<FaceSpec> = None;
     let mut fallback_spec: Option<FaceSpec> = None;
     let mut text_path: Option<String> = None;
@@ -1189,6 +1251,11 @@ fn run() -> Result<(), String> {
                     &args.next().ok_or("--identify needs a font")?,
                 )?)
             }
+            "--profile" => {
+                profile_spec = Some(FaceSpec::parse(
+                    &args.next().ok_or("--profile needs a font")?,
+                )?)
+            }
             "--coverage" => {
                 coverage_spec = Some(FaceSpec::parse(
                     &args.next().ok_or("--coverage needs a font")?,
@@ -1203,6 +1270,9 @@ fn run() -> Result<(), String> {
             "--library" => library = Some(args.next().ok_or("--library needs a file")?),
             other => return Err(format!("unknown argument {other}")),
         }
+    }
+    if let Some(spec) = profile_spec {
+        return profile_report(&spec);
     }
     if let Some(spec) = fallback_spec {
         let text = text_path.ok_or("--fallback needs --text <file>")?;
@@ -1309,6 +1379,24 @@ fn run() -> Result<(), String> {
         ink.sort_unstable_by_key(|(cp, _, _)| *cp);
         ink.dedup_by_key(|(cp, _, _)| *cp);
 
+        // Every glyph's edges, quantised to a byte each. A line end can land on
+        // any character, and with fallback it can land on a face other than the
+        // body's (ADR-0038).
+        let mut glyph_ink: Vec<(u32, u8, u8)> = Vec::new();
+        if font.table(b"glyf").is_some() {
+            for (&codepoint, &gid) in &map {
+                let Some(&advance) = advances.get(gid as usize) else {
+                    continue;
+                };
+                let Some((x_min, x_max)) = font.ink_bounds(gid)? else {
+                    continue;
+                };
+                let left = quantise(scale(x_min, upem));
+                let right = quantise(scale(advance as i32 - x_max, upem));
+                glyph_ink.push((codepoint, left, right));
+            }
+        }
+
         let default_advance = blocks
             .iter()
             .find(|(start, _, _)| *start == 0x4e00)
@@ -1316,14 +1404,15 @@ fn run() -> Result<(), String> {
             .unwrap_or(UNIT);
 
         println!(
-            "face {}/{}: upem={} ascii-entries={} blocks={} entries={} ink={}",
+            "face {}/{}: upem={} ascii-entries={} blocks={} entries={} ink={} glyphs-ink={}",
             spec.family,
             spec.weight,
             upem,
             entries.len(),
             blocks.len(),
             entries.len(),
-            ink.len()
+            ink.len(),
+            glyph_ink.len()
         );
 
         faces.push(OutFace {
@@ -1337,6 +1426,7 @@ fn run() -> Result<(), String> {
             blocks,
             entries,
             ink,
+            glyph_ink,
         });
     }
 
@@ -1377,6 +1467,12 @@ fn run() -> Result<(), String> {
             bytes.extend_from_slice(&cp.to_le_bytes());
             bytes.extend_from_slice(&(*left as i16).to_le_bytes());
             bytes.extend_from_slice(&(*right as i16).to_le_bytes());
+        }
+        bytes.extend_from_slice(&(face.glyph_ink.len() as u32).to_le_bytes());
+        for (cp, left, right) in &face.glyph_ink {
+            bytes.extend_from_slice(&cp.to_le_bytes());
+            bytes.push(*left);
+            bytes.push(*right);
         }
     }
 

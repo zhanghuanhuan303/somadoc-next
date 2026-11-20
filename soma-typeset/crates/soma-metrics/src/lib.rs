@@ -17,12 +17,15 @@
 //!   per entry: u32 codepoint | i32 advance
 //!   u32 ink_count
 //!   per ink: u32 codepoint | i16 ink_left | i16 ink_right
+//!   u32 glyph_ink_count                         (version 3)
+//!   per glyph: u32 codepoint | u8 left | u8 right
 //! ```
 //!
 //! `ink_left`/`ink_right` are the gaps between the glyph outline and its
-//! advance box (ADR-0037). They are recorded for punctuation only: that is
-//! where the line-end alignment needs the real outline instead of a class
-//! average. A version 1 blob parses too and reports no ink at all.
+//! advance box. Version 2 recorded them for punctuation only (ADR-0037);
+//! version 3 records them for every glyph the face has, quantised to one byte
+//! (16 units of 1/4096 em), because a line edge can land on any character
+//! (ADR-0038). A version 1 blob parses too and reports no ink at all.
 //!
 //! All lengths are in `unit`ths of an em (4096). The blob's hash is part of the
 //! canonical page result, so a table change is visible in `metricsHash`.
@@ -36,7 +39,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 pub const MAGIC: u32 = 0x534d_5431;
-pub const VERSION: u16 = 2;
+pub const VERSION: u16 = 3;
 /// Oldest blob layout this parser still reads.
 pub const VERSION_MIN: u16 = 1;
 pub const UNIT: i32 = 4096;
@@ -45,6 +48,8 @@ pub const UNIT: i32 = 4096;
 pub const FAMILY_SERIF: u8 = 0;
 pub const FAMILY_SANS: u8 = 1;
 pub const FAMILY_MATH: u8 = 2;
+/// A rescue face: used when the style's face has no glyph for a character.
+pub const FAMILY_FALLBACK: u8 = 3;
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -70,12 +75,45 @@ pub struct Face {
     pub default_advance: i32,
     blocks: Vec<FaceBlock>,
     entries: Vec<(u32, i32)>,
-    /// `(codepoint, ink_left, ink_right)` sorted by codepoint. Empty in a
-    /// version 1 blob.
+    /// Punctuation-only `(codepoint, ink_left, ink_right)` sorted by codepoint.
+    /// Empty in a version 1 blob.
     ink: Vec<(u32, i32, i32)>,
+    /// Every glyph's `(codepoint, ink_left, ink_right)` sorted by codepoint,
+    /// dequantised from one byte each. Empty before version 3.
+    glyph_ink: Vec<(u32, i32, i32)>,
 }
 
 impl Face {
+    /// Whether the face has a glyph for the codepoint.
+    ///
+    /// The version 3 glyph list is authoritative: a uniform block describes a
+    /// range whose advances agree, not a promise that every codepoint in the
+    /// range exists (extension B is sparsely covered even in a large face).
+    /// Version 1 and 2 blobs fall back to blocks and can over-report.
+    pub fn has(&self, codepoint: u32) -> bool {
+        if !self.glyph_ink.is_empty() {
+            return self
+                .glyph_ink
+                .binary_search_by_key(&codepoint, |(cp, _, _)| *cp)
+                .is_ok();
+        }
+        if self
+            .entries
+            .binary_search_by_key(&codepoint, |(cp, _)| *cp)
+            .is_ok()
+        {
+            return true;
+        }
+        self.blocks
+            .iter()
+            .any(|block| codepoint >= block.start && codepoint <= block.end)
+    }
+
+    /// Whether every character of `text` has a glyph.
+    pub fn covers(&self, text: &str) -> bool {
+        text.chars().all(|character| self.has(character as u32))
+    }
+
     /// Advance of one codepoint, in 1/4096 em.
     pub fn advance_at(&self, codepoint: u32) -> i32 {
         if let Ok(index) = self.entries.binary_search_by_key(&codepoint, |(cp, _)| *cp) {
@@ -107,6 +145,12 @@ impl Face {
     /// `(left, right)`. `None` when the table has no outline data for the
     /// codepoint (including every face in a version 1 blob).
     pub fn ink(&self, codepoint: u32) -> Option<(i32, i32)> {
+        if let Ok(index) = self
+            .glyph_ink
+            .binary_search_by_key(&codepoint, |(cp, _, _)| *cp)
+        {
+            return Some((self.glyph_ink[index].1, self.glyph_ink[index].2));
+        }
         self.ink
             .binary_search_by_key(&codepoint, |(cp, _, _)| *cp)
             .ok()
@@ -118,9 +162,14 @@ impl Face {
         self.ink(codepoint).map(|(_, right)| right)
     }
 
-    /// Number of glyphs with recorded ink (diagnostics).
+    /// Number of marks with a version 2 ink entry (diagnostics).
     pub fn ink_count(&self) -> usize {
         self.ink.len()
+    }
+
+    /// Number of glyphs with a version 3 entry (diagnostics).
+    pub fn glyph_ink_count(&self) -> usize {
+        self.glyph_ink.len()
     }
 
     /// Number of uniform blocks (diagnostics).
@@ -216,6 +265,22 @@ impl MetricsTable {
                     ink.push((codepoint, left, right));
                 }
             }
+            let mut glyph_ink = Vec::new();
+            if version >= 3 {
+                let count = cursor.u32()? as usize;
+                glyph_ink.reserve(count.min(1 << 18));
+                let mut previous = 0u32;
+                for index in 0..count {
+                    let codepoint = cursor.u32()?;
+                    let left = dequantise(cursor.u8()?);
+                    let right = dequantise(cursor.u8()?);
+                    if index > 0 && codepoint <= previous {
+                        return Err(MetricsError::new("glyph ink entries are not sorted"));
+                    }
+                    previous = codepoint;
+                    glyph_ink.push((codepoint, left, right));
+                }
+            }
             faces.push(Face {
                 family,
                 weight,
@@ -228,6 +293,7 @@ impl MetricsTable {
                 blocks,
                 entries,
                 ink,
+                glyph_ink,
             });
         }
         if cursor.remaining() != 0 {
@@ -296,6 +362,11 @@ impl fmt::Display for MetricsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.reason)
     }
+}
+
+/// One byte holds a bearing with 16 units of 1/4096 em of resolution.
+fn dequantise(value: u8) -> i32 {
+    (value as i32 * 4096 + 127) / 255
 }
 
 struct Cursor<'a> {
