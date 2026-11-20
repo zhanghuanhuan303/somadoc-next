@@ -67,9 +67,11 @@ integers in its `glyf` header, reachable from `loca`. The tool already walks
 - On MiSans, the comma line from the preview now ends at 1558/1749 px at
   300 dpi against a text edge of 1559; a Han line ends at 1554 (Han ink has a
   small natural bearing). Before this ADR the comma line ended at 1540.
-- The example book still has 11 pages. Its PDF bytes change because the table
-  and the trims change; `book.json` (rendered without `--metrics`) still uses
-  the embedded version 1 table and is unchanged.
+- The example book still has 11 pages. `scripts/book.sh` now generates the
+  table once and passes `--metrics` to every format, so HTML, SVG, JSON and PDF
+  share one set of coordinates and one `metricsHash` (`canonicalHash`
+  `cfb1f36fca3ef62f`). Without a font the embedded version 1 table is used and
+  the formats keep the rule constants.
 - `metricsHash` changes for any face rebuilt with ink, which is exactly the
   signal the canonical page result is supposed to carry.
 - Blob size: MiSans grows from 31,188 to 33,460 bytes for 231 punctuation

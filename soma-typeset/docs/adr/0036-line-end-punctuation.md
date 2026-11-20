@@ -83,7 +83,9 @@ only gap was that it fired **only** when a line was overfull.
   lines to within one pixel.
 - The example book keeps 11 pages but its breaks move: a line that ends in
   punctuation now has half an em more room, so it can carry one more character.
-  `canonicalHash` moves from `7953d75495e108c2` to `e195431d9622aa4e`.
+  `canonicalHash` moves from `7953d75495e108c2` to `e195431d9622aa4e` (and to
+  `cfb1f36fca3ef62f` once every format measures with the PDF face's table,
+  ADR-0037).
 - `over_compress_lines` on the corpus rises from 0 to 3 of 1213 lines. A line
   that is slightly overfull and ends in punctuation now has a lower badness,
   because it genuinely overruns by less; the model accepts a few of them. The
