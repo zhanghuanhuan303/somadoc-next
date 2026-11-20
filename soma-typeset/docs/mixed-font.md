@@ -14,8 +14,8 @@ engine can do today, what it cannot, and the plan for the gap.
 | Inline and display math | yes | a dedicated `math` face, `AtomBox` is replaced by a math box |
 | Chinese and Latin in one line | yes | one face, advances summed per character |
 | A named family beyond serif/sans | no | four face slots plus math, chosen by substring match |
-| A glyph the face lacks | **no** | falls back to `default_advance`; the renderer draws `.notdef` |
-| Two faces in one line | no | every atom of a block draws with the block's style face |
+| A glyph the face lacks | **yes** | a `fallback:` face in the metrics table measures it; `TextSource::uses_fallback` tells the renderer which face drew it |
+| Two faces in one line | **yes** | PDF embeds a second subset (`--font-fallback`); HTML/SVG let the browser pick |
 
 ## What a missing glyph costs
 
@@ -69,7 +69,7 @@ to be embeddable, not merely measurable.
 A face can be a perfect stylistic match and still be unusable for a given
 document, which is why both exist and why neither is inferred from the other.
 
-## The architecture gap
+## The architecture gap (closed for the drawable case)
 
 Every atom currently carries `(x, advance)` and draws with its block's face
 (`AtomBox` in `soma.layout/6`). Adding fallback needs three layers:

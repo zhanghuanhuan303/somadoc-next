@@ -1,8 +1,12 @@
 # Proposal: one ink model for marks, fonts and fallback
 
-**Status**: proposal, not implemented. Touches no frozen interface yet.
+**Status**: F1 (metrics v3), F2 (profile), F4 (rescue faces) and F5
+(validation) are implemented. F3 as originally written — charging the line by
+ink — was **rejected** by ADR-0038: a Han advance is a cell, and breaking on ink
+overfills the measure. What shipped instead is the universal edge treatment in
+ADR-0038 plus per-face bearings for fallback.
 **Related**: ADR-0006 (determinism), ADR-0036/0037 (line-end bearing, ink),
-`docs/fonts.md` (audit and fingerprint), `docs/mixed-font.md` (fallback).
+ADR-0038 (glyph edges), `docs/fonts.md`, `docs/mixed-font.md`.
 
 ## 1. The problem in one number
 

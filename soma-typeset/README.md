@@ -219,7 +219,7 @@ docs/
   fonts.md            # how a body font is scored and a metrics table is built
   mixed-font.md       # coverage, rescue faces, and the fallback plan
   font-preset.md      # proposal: ink-aware line width, one profile per font
-  adr/                # accepted decisions (ADR-0001 … 0037)
+  adr/                # accepted decisions (ADR-0001 … 0038)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
   debt.md             # global not-done register (D01–D77, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
@@ -279,7 +279,7 @@ cargo run -p soma-eval --release -- blind preferences.csv
 scripts/gates.sh
 ```
 
-The gate runs format, clippy, 549 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 550 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-template`,
 `soma-layout`, `soma-md`, `soma-render-html`, `soma-render-svg`, and
 `soma-render-pdf`, a
