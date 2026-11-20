@@ -92,6 +92,10 @@ struct FaceSpec {
     weight: u8,
     path: String,
     index: usize,
+    /// Record only non-CJK codepoints. A Latin face built this way leaves Han
+    /// to a rescue face, which is how one line gets two typefaces without a
+    /// new mechanism.
+    latin_only: bool,
 }
 
 struct Font<'a> {
@@ -342,10 +346,11 @@ impl<'a> Font<'a> {
 
 impl FaceSpec {
     fn parse(text: &str) -> Result<Self, String> {
-        let mut parts = text.splitn(3, ':');
+        let mut parts = text.splitn(4, ':');
         let family = parts.next().ok_or("missing family")?;
         let weight = parts.next().ok_or("missing weight")?;
         let rest = parts.next().ok_or("missing path")?;
+        let latin_only = parts.next() == Some("latin");
         let (path, index) = match rest.rsplit_once('#') {
             Some((path, index)) => (
                 path.to_string(),
@@ -373,6 +378,7 @@ impl FaceSpec {
             weight,
             path,
             index,
+            latin_only,
         })
     }
 }
@@ -1324,6 +1330,9 @@ fn run() -> Result<(), String> {
         let mut blocks: Vec<(u32, u32, i32)> = Vec::new();
 
         for &(start, end) in UNIFORM_BLOCKS {
+            if spec.latin_only {
+                continue;
+            }
             let mut values = Vec::new();
             let mut covered = Vec::new();
             for cp in start..=end {
@@ -1355,6 +1364,9 @@ fn run() -> Result<(), String> {
 
         for &(start, end) in ENUMERATED_RANGES {
             for cp in start..=end {
+                if spec.latin_only && cp >= 0x3000 {
+                    continue;
+                }
                 if let Some(advance) = width(cp) {
                     entries.push((cp, advance));
                 }
@@ -1371,6 +1383,9 @@ fn run() -> Result<(), String> {
         let mut ink: Vec<(u32, i32, i32)> = Vec::new();
         for &(start, end) in INK_RANGES {
             for cp in start..=end {
+                if spec.latin_only && cp >= 0x3000 {
+                    continue;
+                }
                 let Some(&gid) = map.get(&cp) else { continue };
                 let Some(&advance) = advances.get(gid as usize) else {
                     continue;
@@ -1399,6 +1414,9 @@ fn run() -> Result<(), String> {
         let mut glyph_ink: Vec<(u32, u8, u8)> = Vec::new();
         if font.table(b"glyf").is_some() {
             for (&codepoint, &gid) in &map {
+                if spec.latin_only && codepoint >= 0x3000 {
+                    continue;
+                }
                 let Some(&advance) = advances.get(gid as usize) else {
                     continue;
                 };

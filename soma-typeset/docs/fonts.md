@@ -171,6 +171,34 @@ and lists what is missing. `--fallback` ranks installed faces by how many of
 those characters they rescue, preferring a matching weight before a matching
 style, and skips CFF faces because a rescue face must be embeddable.
 
+## Two typefaces in one line
+
+A Latin face can be told to record **only non-CJK codepoints**:
+
+```sh
+cargo run -p tools/metrics-gen -- \
+  --out split.smt \
+  --face serif:normal:/path/IBMPlexSansSC-Regular.ttf:latin \
+  --face fallback:normal:/path/MiSans-Normal.ttf \
+  --face math:normal:/path/NotoSansMath-Regular.ttf
+```
+
+The fourth segment of `--face` is `latin`. Such a face measures Latin and
+digits; a Han glyph is absent, so the rescue machinery from
+[`docs/mixed-font.md`](mixed-font.md) draws it with the fallback face. One
+line, two typefaces, and the breaker still measures every atom with the face
+that draws it.
+
+Render it with the same two files:
+
+```sh
+soma render --input book.md --template book.yaml --metrics split.smt \
+  --format pdf --font IBMPlexSansSC-Regular.ttf \
+  --font-fallback MiSans-Normal.ttf --font-math NotoSansMath-Regular.ttf
+```
+
+`examples/book/out/two-font.pdf` is an eight-page sample built this way.
+
 ## Producing a table for the chosen face
 
 ```sh
