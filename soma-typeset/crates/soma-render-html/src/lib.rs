@@ -15,13 +15,27 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use soma_core::Width;
-use soma_layout::{BoxKind, MathBox, PagedLayout, PlacedBlock, TextSource};
+use soma_layout::{BoxKind, ImageSource, MathBox, NoImages, PagedLayout, PlacedBlock, TextSource};
 use soma_template::{ComputedStyle, FontSlant, FontWeight, StyleTable};
 
 const UNITS_PER_EM: i32 = 4096;
 
-/// Render every page to one self-contained HTML document.
+/// Render every page to one self-contained HTML document, with no image
+/// assets: figures keep their placeholder box.
 pub fn render(layout: &PagedLayout, styles: &StyleTable, text: &dyn TextSource) -> String {
+    render_with(layout, styles, text, &NoImages)
+}
+
+/// Render with an image source. A figure whose asset resolves is inlined as a
+/// `data:` URI, so the document stays self-contained and never names an
+/// external resource (ADR-0048).
+pub fn render_with(
+    layout: &PagedLayout,
+    styles: &StyleTable,
+    text: &dyn TextSource,
+    assets: &dyn ImageSource,
+) -> String {
+    let sources = Sources { text, assets };
     let mut html = String::new();
     html.push_str("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">\n");
     html.push_str("<style>");
@@ -49,13 +63,13 @@ pub fn render(layout: &PagedLayout, styles: &StyleTable, text: &dyn TextSource) 
         ));
 
         for block in &page.blocks {
-            render_block(&mut html, layout, styles, text, block, 0, 0);
+            render_block(&mut html, layout, styles, &sources, block, 0, 0);
         }
         for block in &page.header {
-            render_block(&mut html, layout, styles, text, block, 0, 0);
+            render_block(&mut html, layout, styles, &sources, block, 0, 0);
         }
         for block in &page.footer {
-            render_block(&mut html, layout, styles, text, block, 0, 0);
+            render_block(&mut html, layout, styles, &sources, block, 0, 0);
         }
 
         let footnote_top = layout.page.content_height().0 - page.footnote_height.0;
@@ -64,7 +78,7 @@ pub fn render(layout: &PagedLayout, styles: &StyleTable, text: &dyn TextSource) 
                 &mut html,
                 layout,
                 styles,
-                text,
+                &sources,
                 block,
                 0,
                 footnote_top.max(0),
@@ -78,15 +92,23 @@ pub fn render(layout: &PagedLayout, styles: &StyleTable, text: &dyn TextSource) 
     html
 }
 
+/// The two renderer inputs that are not part of the layout: the text index and
+/// the image bytes.
+struct Sources<'a> {
+    text: &'a dyn TextSource,
+    assets: &'a dyn ImageSource,
+}
+
 fn render_block(
     html: &mut String,
     layout: &PagedLayout,
     styles: &StyleTable,
-    text: &dyn TextSource,
+    sources: &Sources<'_>,
     block: &PlacedBlock,
     extra_x: i32,
     extra_y: i32,
 ) {
+    let text = sources.text;
     let style = styles.get(block.style);
     let left = layout.page.margin_left.0 + block.x.0 + extra_x;
     let top = layout.page.margin_top.0 + block.y.0 + extra_y;
@@ -117,13 +139,29 @@ fn render_block(
             return;
         }
         BoxKind::Figure => {
-            html.push_str(&format!(
-                "<div class=\"figure\" style=\"left:{};top:{};width:{};height:{};\"></div>\n",
+            let uri = text
+                .block_image(block.node)
+                .and_then(|src| sources.assets.image(src))
+                .and_then(soma_layout::data_uri);
+            let style = format!(
+                "left:{};top:{};width:{};height:{};",
                 em(Width(left)),
                 em(Width(top)),
                 em(block.width),
                 em(block.height)
-            ));
+            );
+            match uri {
+                Some(uri) => html.push_str(&format!(
+                    "<img class=\"figure\" alt=\"{}\" style=\"{}\" src=\"{}\">\n",
+                    escape(text.block_alt(block.node).unwrap_or("")),
+                    style,
+                    escape(&uri)
+                )),
+                None => html.push_str(&format!(
+                    "<div class=\"figure\" style=\"{}\"></div>\n",
+                    style
+                )),
+            }
             return;
         }
         BoxKind::Math if block.math.is_some() => {
@@ -353,6 +391,16 @@ pub fn render_page(
     text: &dyn TextSource,
     page: usize,
 ) -> String {
+    render_page_with(layout, styles, text, page, &NoImages)
+}
+
+pub fn render_page_with(
+    layout: &PagedLayout,
+    styles: &StyleTable,
+    text: &dyn TextSource,
+    page: usize,
+    assets: &dyn ImageSource,
+) -> String {
     let mut subset = layout.clone();
     subset.pages = subset
         .pages
@@ -360,5 +408,5 @@ pub fn render_page(
         .skip(page)
         .take(1)
         .collect::<Vec<_>>();
-    render(&subset, styles, text)
+    render_with(&subset, styles, text, assets)
 }

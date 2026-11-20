@@ -22,6 +22,10 @@ mod standard_encoding;
 pub use cff::CidSystem;
 pub use font::{PdfError, PdfFont, PdfFontDescriptor, ProgramKind, Subset};
 
+/// The image seam is shared with the other renderers; re-exported so a caller
+/// only needs this crate's name.
+pub use soma_layout::{ImageSource, NoImages};
+
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -50,25 +54,6 @@ pub struct PdfMetadata<'a> {
     pub title: Option<&'a str>,
     pub author: Option<&'a str>,
     pub language: Option<&'a str>,
-}
-
-/// Image bytes for a figure, supplied by the caller.
-///
-/// The renderer never opens files: a document says `fig/pipeline.png`, and the
-/// caller decides where that lives. `src` is exactly what the source wrote, so
-/// the same layout can be rendered from a different asset root.
-pub trait ImageSource {
-    fn image(&self, src: &str) -> Option<&[u8]>;
-}
-
-/// An [`ImageSource`] with no assets: every figure renders as the placeholder
-/// box. This is what a renderer without a file system passes.
-pub struct NoImages;
-
-impl ImageSource for NoImages {
-    fn image(&self, _src: &str) -> Option<&[u8]> {
-        None
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

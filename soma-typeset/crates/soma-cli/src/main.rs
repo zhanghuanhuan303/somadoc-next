@@ -18,9 +18,7 @@ use soma_doc::Document;
 use soma_engine::EngineConfig;
 use soma_layout::{layout_with, BoxKind, PaginationStrategy, StyledMetrics, TextSource};
 use soma_metrics::MetricsTable;
-use soma_render_html::render as render_html;
 use soma_render_pdf::{render as render_pdf, ImageSource, PdfFont, PdfFonts, PdfMetadata};
-use soma_render_svg::render as render_svg;
 use soma_template::{parse_template, resolve, StyledDoc, Template};
 
 const USAGE: &str = "\
@@ -197,9 +195,16 @@ fn render(args: &[String]) -> Result<(), String> {
     let (document, styled, engine, vertical) = pipeline(&options)?;
     let metrics = load_metrics(&options)?;
     let pages = layout(&document, &styled, &engine, vertical, &metrics)?;
+    let assets = FileImages::load(&options.input, &pages);
     match options.format {
-        Format::Html => write_output(&options, &render_html(&pages, styled.table(), &pages.text))?,
-        Format::Svg => write_output(&options, &render_svg(&pages, styled.table(), &pages.text))?,
+        Format::Html => write_output(
+            &options,
+            &soma_render_html::render_with(&pages, styled.table(), &pages.text, &assets),
+        )?,
+        Format::Svg => write_output(
+            &options,
+            &soma_render_svg::render_with(&pages, styled.table(), &pages.text, &assets),
+        )?,
         Format::Json => {
             let mut json = pages.canonical_json();
             json.push('\n');
@@ -232,7 +237,6 @@ fn render(args: &[String]) -> Result<(), String> {
                 math: faces.math.as_ref(),
                 fallback: faces.fallback.as_ref(),
             };
-            let assets = FileImages::load(&options.input, &pages);
             let bytes = render_pdf(&pages, &styled, &pages.text, &fonts, &metadata, &assets)
                 .map_err(|error| format!("pdf: {error}"))?;
             write_bytes(&options, &bytes)?;

@@ -95,6 +95,7 @@
 | D85 | ~~name-keyed CFF 不能嵌入~~ | **已关闭（ADR-0040）**：name-keyed 脸被提升为 CID-keyed（合成 ROS/FDArray/FDSelect），`seac` 复合由 Type 2 解释器展开成显式轮廓（子程序内联、hint 丢弃、笔位置跟踪）；解释器不认识的算子直接报错 | — | — | ✅ 已关闭 |
 | D84 | ~~行末侧空是常量而不是墨迹边界~~ | **已关闭（ADR-0037）**：`soma.metrics/2` 记录标点的 `ink_left`/`ink_right`，`scale_trim` 优先用真实轮廓；v1 表或无 `glyf` 的字体回退到类别常量 | — | — | ✅ 已关闭 |
 | D86 | ~~拉丁文独排时段落词间空会被压到很窄~~ | **已关闭（ADR-0041）**：词间空的可压缩量改为 `min(1/8 em, space_advance/3)`；`overfull` 的齐行行不再当作正常断点，只经 fallback 到达（`modelVersion` 2）。语料 `over_compress_lines` 3 → 0 | — | — | ✅ 已关闭 |
+| D87 | SVG 根元素用 `em` 尺寸 | `width="39.954em"` 这种写法浏览器能解，但把单个 `<svg>` 抽出来用 `rsvg-convert` 渲染时尺寸/字号会算错（整页发白）；`em` 值依赖外层 `font-size`，而 SVG 输出是每页一个独立元素 | 命令行栅格化不可用 | 若需要命令行渲 SVG 预览，把根元素的宽高改成 pt/px 并重算 Gate R 的 golden | 否 |
 | D69 | HTML 子集有边界 | `soma-html` 只做语义白名单：无 CSS/脚本/表单/框架，无 `<caption>`/`<colgroup>`/脚注标记，实体集有限，`SourceSpan` 为空 | 复杂 HTML 会降级或丢表现 | 有真实需求时扩 | 否 |
 | D68 | 表格线只能整表配置 | **已关闭（ADR-0020）**：五条线宽、竖线/左右框、实线/虚线、颜色都进模板；剩余限制是 `table:` 只能全局一套，不能按表/按行覆盖 | 多套表格外观要多个模板 | ✅ 已关闭 | 否 |
 | D50 | ~~无页面母版 / 页眉页脚 / 页码~~ | **已关闭（E4）**：页眉（running-title 或字面量）、页脚、`{page}`/`{pages}` 页码；两遍无重排 | 首页/封面变体未做（D62） | ✅ 已关闭 | 否 |

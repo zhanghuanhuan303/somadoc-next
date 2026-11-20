@@ -396,6 +396,68 @@ pub trait TextSource {
     }
 }
 
+/// Image bytes for a figure, supplied by the caller.
+///
+/// A document says `fig/pipeline.png`; where that lives is the caller's
+/// business. Keeping this seam here, next to [`TextSource`], is what lets every
+/// renderer share it without any of them touching the file system.
+pub trait ImageSource {
+    fn image(&self, src: &str) -> Option<&[u8]>;
+}
+
+/// An [`ImageSource`] with no assets: figures keep their placeholder.
+pub struct NoImages;
+
+impl ImageSource for NoImages {
+    fn image(&self, _src: &str) -> Option<&[u8]> {
+        None
+    }
+}
+
+/// A `data:` URI for an image, or `None` when the bytes are not a format the
+/// renderers can declare.
+///
+/// This is how the HTML and SVG renderers show a figure without ever naming an
+/// external resource: the image travels inside the document. PNG and JPEG are
+/// the formats `soma-render-pdf` also embeds.
+pub fn data_uri(bytes: &[u8]) -> Option<String> {
+    let mime = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png"
+    } else if bytes.starts_with(&[0xff, 0xd8]) {
+        "image/jpeg"
+    } else {
+        return None;
+    };
+    let mut out = String::with_capacity(bytes.len() * 4 / 3 + 24);
+    out.push_str("data:");
+    out.push_str(mime);
+    out.push_str(";base64,");
+    base64(bytes, &mut out);
+    Some(out)
+}
+
+const BASE64: [u8; 64] = *b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn base64(data: &[u8], out: &mut String) {
+    for chunk in data.chunks(3) {
+        let first = chunk[0];
+        let second = chunk.get(1).copied();
+        let third = chunk.get(2).copied();
+        out.push(BASE64[(first >> 2) as usize] as char);
+        out.push(BASE64[(((first & 0x03) << 4) | (second.unwrap_or(0) >> 4)) as usize] as char);
+        match second {
+            Some(second) => out.push(
+                BASE64[(((second & 0x0f) << 2) | (third.unwrap_or(0) >> 6)) as usize] as char,
+            ),
+            None => out.push('='),
+        }
+        match third {
+            Some(third) => out.push(BASE64[(third & 0x3f) as usize] as char),
+            None => out.push('='),
+        }
+    }
+}
+
 /// Owned atom text per DocIR block. Built while laying out, so the renderer
 /// does not recompile anything.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

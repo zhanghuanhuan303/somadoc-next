@@ -18,13 +18,27 @@ use alloc::format;
 use alloc::string::String;
 
 use soma_core::Width;
-use soma_layout::{BoxKind, MathBox, PagedLayout, PlacedBlock, TextSource};
+use soma_layout::{BoxKind, ImageSource, MathBox, NoImages, PagedLayout, PlacedBlock, TextSource};
 use soma_template::{ComputedStyle, StyleTable};
 
 const UNITS_PER_EM: i32 = 4096;
 
-/// Render every page as its own `<svg>` element.
+/// Render every page as its own `<svg>` element, with no image assets: figures
+/// keep their placeholder box.
 pub fn render(layout: &PagedLayout, styles: &StyleTable, text: &dyn TextSource) -> String {
+    render_with(layout, styles, text, &NoImages)
+}
+
+/// Render with an image source. A figure whose asset resolves is inlined as a
+/// `data:` URI, so the SVG stays a single file and never names an external
+/// resource (ADR-0048).
+pub fn render_with(
+    layout: &PagedLayout,
+    styles: &StyleTable,
+    text: &dyn TextSource,
+    assets: &dyn ImageSource,
+) -> String {
+    let sources = Sources { text, assets };
     let mut out = String::new();
     for page in &layout.pages {
         out.push_str(&format!(
@@ -37,17 +51,17 @@ pub fn render(layout: &PagedLayout, styles: &StyleTable, text: &dyn TextSource) 
         ));
 
         for block in &page.blocks {
-            render_block(&mut out, layout, styles, text, page.number, block);
+            render_block(&mut out, layout, styles, &sources, page.number, block);
         }
         for block in &page.header {
-            render_block(&mut out, layout, styles, text, page.number, block);
+            render_block(&mut out, layout, styles, &sources, page.number, block);
         }
         for block in &page.footer {
-            render_block(&mut out, layout, styles, text, page.number, block);
+            render_block(&mut out, layout, styles, &sources, page.number, block);
         }
         for block in &page.footnotes {
             let top = layout.page.content_height().0 - page.footnote_height.0;
-            render_block_at(&mut out, layout, styles, text, page.number, block, top);
+            render_block_at(&mut out, layout, styles, &sources, page.number, block, top);
         }
 
         out.push_str("</svg>\n");
@@ -55,26 +69,34 @@ pub fn render(layout: &PagedLayout, styles: &StyleTable, text: &dyn TextSource) 
     out
 }
 
+/// The two renderer inputs that are not part of the layout: the text index and
+/// the image bytes. Bundled so `render_block_at` stays a sane signature.
+struct Sources<'a> {
+    text: &'a dyn TextSource,
+    assets: &'a dyn ImageSource,
+}
+
 fn render_block(
     out: &mut String,
     layout: &PagedLayout,
     styles: &StyleTable,
-    text: &dyn TextSource,
+    sources: &Sources<'_>,
     page: u32,
     block: &PlacedBlock,
 ) {
-    render_block_at(out, layout, styles, text, page, block, 0);
+    render_block_at(out, layout, styles, sources, page, block, 0);
 }
 
 fn render_block_at(
     out: &mut String,
     layout: &PagedLayout,
     styles: &StyleTable,
-    text: &dyn TextSource,
+    sources: &Sources<'_>,
     page: u32,
     block: &PlacedBlock,
     extra_y: i32,
 ) {
+    let text = sources.text;
     let style = styles.get(block.style);
     match block.kind {
         BoxKind::Rule | BoxKind::TableRule => {
@@ -94,14 +116,31 @@ fn render_block_at(
             return;
         }
         BoxKind::Figure => {
-            out.push_str(&format!(
-                "<rect data-page=\"{page}\" data-node=\"{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#eee\" stroke=\"#ccc\"/>\n",
-                block.node.0,
-                em(Width(layout.page.margin_left.0 + block.x.0)),
-                em(Width(layout.page.margin_top.0 + block.y.0 + extra_y)),
-                em(block.width),
-                em(block.height)
-            ));
+            let x = Width(layout.page.margin_left.0 + block.x.0);
+            let y = Width(layout.page.margin_top.0 + block.y.0 + extra_y);
+            let uri = text
+                .block_image(block.node)
+                .and_then(|src| sources.assets.image(src))
+                .and_then(soma_layout::data_uri);
+            match uri {
+                Some(uri) => out.push_str(&format!(
+                    "<image data-page=\"{page}\" data-node=\"{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\" href=\"{}\"/>\n",
+                    block.node.0,
+                    em(x),
+                    em(y),
+                    em(block.width),
+                    em(block.height),
+                    escape(&uri)
+                )),
+                None => out.push_str(&format!(
+                    "<rect data-page=\"{page}\" data-node=\"{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#eee\" stroke=\"#ccc\"/>\n",
+                    block.node.0,
+                    em(x),
+                    em(y),
+                    em(block.width),
+                    em(block.height)
+                )),
+            }
             return;
         }
         BoxKind::Math if block.math.is_some() => {

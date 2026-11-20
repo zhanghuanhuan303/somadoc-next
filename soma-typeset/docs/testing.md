@@ -149,6 +149,7 @@ Cumulative public test files:
 | `pdf.rs` (render-pdf) | 13 | TrueType cmap/subset, CFF subset and `/CIDFontType0`, name-keyed promotion, `seac` composite, CFF2 refusal, PDF objects, bookmarks, underlines and `/Annots`, image XObject and placeholder fallback, tagged structure tree, byte determinism |
 | `math.rs` (svg) | 4 | exact formula coordinates |
 | `inline_math.rs` (svg) | 2 | inline items on the line baseline, marker never drawn |
+| `images.rs` (svg) | 3 | a resolved figure is a `data:` URI in both renderers, no source path leaks, no assets keeps the placeholder |
 | `math.rs` (html) | 4 | formula preview spans, placeholder fallback |
 | `inline_math.rs` (html) | 2 | inline preview positions, marker never drawn |
 | `a5_render.rs` | 6 | absolute positions, escaping, no re-breaking |
@@ -169,7 +170,7 @@ Cumulative public test files:
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 | render-pdf unit | 26 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing |
 
-Total: **594 tests**.
+Total: **597 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.
