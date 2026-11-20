@@ -140,6 +140,7 @@ Cumulative public test files:
 | `e18_captions.rs` (layout) | 4 | figure/table caption elements, indent reset, emphasis keeps the caption base |
 | `e19_outline.rs` (layout) | 3 | one bookmark per heading, printed labels, empty document |
 | `e20_index.rs` (layout) | 5 | sorted unique terms, page lists, own page, entry styles, empty index |
+| `e21_line_end_punctuation.rs` (layout) | 6 | trailing bearing trimmed on justified lines, ink on the text edge, ragged lines untouched |
 | `cli.rs` (soma-cli) | 17 | render md/tex to html/svg/json/pdf, template geometry, TOC template, example book, fonts, `--metrics`, `--out`, check, error paths |
 | `blind_pipeline.rs` (eval) | 3 | dry-run fixture through key + statistics + decision |
 | `k7_object_metrics.rs` | 4 | object hooks vs text paths, default-hook equivalence |
@@ -159,13 +160,13 @@ Cumulative public test files:
 | `soma-demo` unit | 6 | HTML geometry, escaping, anonymized blind sheet, deterministic sides |
 | `soma-wasm` unit | 1 | fixture determinism + forced end + DocIR |
 | `vertical_slice.rs` (rules) | 6 | end-to-end rules + trim + hard break |
-| `soma-rules` unit | 15 | segmentation, punctuation, pair trim, hyphen breaks, rule inventory |
+| `soma-rules` unit | 17 | segmentation, punctuation, half-width bearings, pair trim, hyphen breaks, rule inventory |
 | `soma-metrics` unit | 10 | table round-trip, CJK/Latin widths, regular/bold/math faces, fallback, hash, truncation |
 | `soma-core` vertical unit | 1 | vertical cost model hash |
 | core unit | 24 | IR, units, breaker, result, presets |
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 
-Total: **536 tests**.
+Total: **544 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

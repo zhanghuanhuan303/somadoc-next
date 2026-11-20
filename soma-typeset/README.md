@@ -216,7 +216,7 @@ scripts/
   kp-verify.sh # K-P closure: gates + bench budget + length policy
 docs/
   architecture-v2.md  # frozen architecture
-  adr/                # accepted decisions (ADR-0001 … 0035)
+  adr/                # accepted decisions (ADR-0001 … 0036)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
   debt.md             # global not-done register (D01–D77, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
@@ -276,7 +276,7 @@ cargo run -p soma-eval --release -- blind preferences.csv
 scripts/gates.sh
 ```
 
-The gate runs format, clippy, 536 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 544 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-template`,
 `soma-layout`, `soma-md`, `soma-render-html`, `soma-render-svg`, and
 `soma-render-pdf`, a

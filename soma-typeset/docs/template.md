@@ -213,7 +213,7 @@ DocIR 的 `Section.page_template: <name>` 选择母版；换母版会强制新�
 | `space-before-plus` / `space-before-minus` | length | 可拉伸/可收缩的垂直胶水 |
 | `space-after-plus` / `space-after-minus` | length | 同上，块后 |
 | `widow-lines` / `orphan-lines` | `0`–`9` | 段末/段首至少保留的行数 |
-| `hanging-punctuation` | `true` / `false` | 行尾标点悬挂进右边距 |
+| `hanging-punctuation` | `true` / `false` | 行尾标点悬挂进右边距（默认 `false`；行末标点的光学对齐默认由断行期压缩完成，ADR-0036） |
 | `hanging-cap` | length | 悬挂上限（默认 `0.5em`） |
 | `baseline-grid` | length | 行高与间距量化到网格；`0` 关闭 |
 | `align` | `justify` / `left` / `center` / `right` | `justify` 两端对齐；`left` 只按自然宽度摆放；`center`/`right` 在断行后整行平移（ADR-0031） |
