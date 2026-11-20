@@ -141,10 +141,15 @@ pub const RULES: &[RuleInfo] = &[
 
 /// Side-bearing trims applied when a punctuation atom sits at a line edge.
 ///
-/// These are Tier B rule parameters in base em. A caller that knows the real
-/// font size may scale them before building the IR; the breaker only reads the
-/// resulting widths. Values follow [`params.md`](../../../docs/params.md)
-/// section 10.3 and are still `Tbd` against a cited `clreq` table.
+/// These are Tier B rule parameters in base em, and they are a *budget*, not a
+/// measurement: the amount an atom may be pulled in when a line has nowhere
+/// else to go. `docs/trim-calibration.md` measures the empty space each mark
+/// actually leaves (0.627 em outside an opening mark, 0.184 em inside a middle
+/// one), and setting the budget to those numbers made the corpus worse — two
+/// avoidable fitness jumps appeared and ratio jitter rose — so the shipped
+/// values stay (ADR-0051). A face whose metrics table carries outline ink gets
+/// the exact gap per glyph anyway (ADR-0037), which is what keeps a glyph from
+/// moving.
 pub const OPEN_TRIM_LEFT: Width = Width::from_em_frac(1, 2);
 pub const CLOSE_TRIM_RIGHT: Width = Width::from_em_frac(1, 2);
 pub const MIDDLE_TRIM_LEFT: Width = Width::from_em_frac(1, 2);

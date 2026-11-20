@@ -28,11 +28,14 @@ pub use soma_layout::{ImageSource, NoImages};
 
 use alloc::format;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt::Write;
 
 use soma_core::Decorations;
-use soma_layout::{BoxKind, MathBox, OutlineEntry, PagedLayout, PlacedBlock, TextSource};
+use soma_layout::{
+    BoxKind, MathBox, OutlineEntry, PagedLayout, PlacedBlock, TableCell, TextSource,
+};
 use soma_template::{ComputedStyle, FontWeight, StyledDoc};
 
 const UNITS_PER_EM: i64 = 4096;
@@ -140,7 +143,9 @@ pub fn render(
     let mut page_ids = Vec::with_capacity(layout.pages.len());
     // Structure elements per page, in MCID order, built after the page looks
     // exist because each element points back at its page.
-    let mut structure: Vec<Vec<u32>> = Vec::with_capacity(layout.pages.len());
+    // Every structure element that hangs off the Document, in reading order.
+    let mut roots: Vec<u32> = Vec::new();
+    let mut structure: Vec<Vec<(u32, u32)>> = Vec::with_capacity(layout.pages.len());
     for (index, page) in layout.pages.iter().enumerate() {
         let mut tags = PageTags::default();
         let mut page_images = Vec::new();
@@ -163,10 +168,11 @@ pub fn render(
             format!("/XObject << {xobject_resources}>> ")
         };
         let annotations = link_annotations(&links);
-        let parents = if tags.elements.is_empty() {
-            String::new()
-        } else {
+        let tagged = !tags.roots.is_empty();
+        let parents = if tagged {
             format!(" /StructParents {index}")
+        } else {
+            String::new()
         };
         let page_id = pdf.reserve();
         let body = format!(
@@ -177,21 +183,23 @@ pub fn render(
         pdf.set(page_id, body.into_bytes());
         page_ids.push(page_id);
 
-        let mut elements = Vec::with_capacity(tags.elements.len());
-        for element in &tags.elements {
-            let id = pdf.reserve();
-            let mut body = format!(
-                "<< /Type /StructElem /S /{} /P {document_elem} 0 R /Pg {page_id} 0 R /K {}",
-                element.tag, element.mcid
-            );
-            if let Some(alt) = element.alt.as_deref() {
-                let _ = write!(body, " /Alt {}", pdf_string(alt));
-            }
-            body.push_str(" >>");
-            pdf.set(id, body.into_bytes());
-            elements.push(id);
+        // One ParentTree entry per MCID, keyed by MCID. `owners` comes back in
+        // tree order, which is reading order; sort so a cell that owns several
+        // sequences still lines up.
+        let mut owners: Vec<(u32, u32)> = Vec::new();
+        let mut elements = Vec::with_capacity(tags.roots.len());
+        for root in &tags.roots {
+            elements.push(write_struct(
+                &mut pdf,
+                root,
+                document_elem,
+                page_id,
+                &mut owners,
+            ));
         }
-        structure.push(elements);
+        owners.sort_by_key(|(mcid, _)| *mcid);
+        structure.push(owners);
+        roots.extend(elements);
     }
 
     let outline = pdf_outline(&mut pdf, &layout.outline, &page_ids, layout, scale);
@@ -200,16 +208,18 @@ pub fn render(
     let info = pdf.reserve();
     pdf.set(info, info_object(metadata));
 
-    // The structure tree: a Document element holding every page's elements in
-    // reading order, and a parent tree keyed by `StructParents`.
+    // The structure tree: a Document element holding every page's roots in
+    // reading order, and a parent tree keyed by `StructParents`. The parent
+    // tree is indexed by MCID, so it lists the owner of each sequence — not
+    // only the roots.
     let mut numbers = String::new();
-    for (index, elements) in structure.iter().enumerate() {
-        if elements.is_empty() {
+    for (index, owners) in structure.iter().enumerate() {
+        if owners.is_empty() {
             continue;
         }
         let _ = write!(numbers, "{index} [");
-        for id in elements {
-            let _ = write!(numbers, "{id} 0 R ");
+        for (_, owner) in owners {
+            let _ = write!(numbers, "{owner} 0 R ");
         }
         numbers.push_str("] ");
     }
@@ -217,10 +227,8 @@ pub fn render(
     pdf.set(parent_tree, format!("<< /Nums [{numbers}] >>").into_bytes());
 
     let mut kids = String::new();
-    for elements in &structure {
-        for id in elements {
-            let _ = write!(kids, "{id} 0 R ");
-        }
+    for root in &roots {
+        let _ = write!(kids, "{root} 0 R ");
     }
     pdf.set(
         document_elem,
@@ -268,6 +276,64 @@ pub fn render(
     );
 
     Ok(pdf.finish(catalog, info))
+}
+
+/// Write one structure element and its subtree, returning its object number.
+///
+/// Every MCID it owns is appended to `owners`, so the caller can build the
+/// parent tree from the same walk that wrote the tree.
+fn write_struct(
+    pdf: &mut Pdf,
+    node: &TagNode,
+    parent: u32,
+    page: u32,
+    owners: &mut Vec<(u32, u32)>,
+) -> u32 {
+    let id = pdf.reserve();
+    let mut kids: Vec<u32> = Vec::with_capacity(node.children.len());
+    for child in &node.children {
+        kids.push(write_struct(pdf, child, id, page, owners));
+    }
+    let mut body = format!("<< /Type /StructElem /S /{} /P {parent} 0 R", node.tag);
+    if kids.is_empty() {
+        let _ = write!(body, " /Pg {page} 0 R /K ");
+        match node.mcids.as_slice() {
+            [] => body.push_str("-1"),
+            [only] => {
+                let _ = write!(body, "{only}");
+            }
+            many => {
+                body.push('[');
+                for mcid in many {
+                    let _ = write!(body, "{mcid} ");
+                }
+                body.push(']');
+            }
+        }
+    } else {
+        let _ = write!(body, " /Pg {page} 0 R /K [");
+        for kid in &kids {
+            let _ = write!(body, "{kid} 0 R ");
+        }
+        body.push(']');
+    }
+    if let Some((row_span, column_span)) = node.span {
+        if row_span > 1 || column_span > 1 {
+            let _ = write!(
+                body,
+                " /A << /O /Table /RowSpan {row_span} /ColSpan {column_span} >>"
+            );
+        }
+    }
+    if let Some(alt) = node.alt.as_deref() {
+        let _ = write!(body, " /Alt {}", pdf_string(alt));
+    }
+    body.push_str(" >>");
+    pdf.set(id, body.into_bytes());
+    for mcid in &node.mcids {
+        owners.push((*mcid, id));
+    }
+    id
 }
 
 /// Build one image XObject per distinct figure source, in reading order.
@@ -692,28 +758,98 @@ struct ImageObject {
     object: u32,
 }
 
-/// One marked-content sequence, and the structure element it belongs to.
-struct TagElement {
+/// One structure element.
+///
+/// A container (`Table`, `TR`) owns children and has no marked content of its
+/// own; a leaf owns one or more marked-content sequences. `/K` is written from
+/// whichever of the two the element has.
+struct TagNode {
     tag: &'static str,
     alt: Option<String>,
-    mcid: u32,
+    /// MCIDs this element owns, in order.
+    mcids: Vec<u32>,
+    /// `/RowSpan` and `/ColSpan`, for a table cell that spans more than one.
+    span: Option<(u16, u16)>,
+    children: Vec<TagNode>,
 }
 
-/// The structure elements of one page, in reading order. The MCID of an
-/// element is its index, which is what the content stream marks.
+/// The structure elements of one page, in reading order. The MCID of a
+/// sequence is the order it was opened in, which is what the content stream
+/// marks.
 #[derive(Default)]
 struct PageTags {
-    elements: Vec<TagElement>,
+    roots: Vec<TagNode>,
+    next_mcid: u32,
+    /// Index into `roots` of the table being built, if the last block was a
+    /// cell.
+    table: Option<usize>,
+    /// `(row, column)` of the cell currently accumulating blocks, so a second
+    /// paragraph in the same cell lands under the same `/TD`.
+    cell: Option<(u16, u16)>,
 }
 
 impl PageTags {
-    fn open(&mut self, tag: &'static str, alt: Option<&str>) -> u32 {
-        let mcid = self.elements.len() as u32;
-        self.elements.push(TagElement {
-            tag,
-            alt: alt.map(String::from),
-            mcid,
-        });
+    /// Start a marked-content sequence. `cell` places it in a table grid; a
+    /// block that is not in a table closes the one that was open.
+    fn open(&mut self, tag: &'static str, alt: Option<&str>, cell: Option<TableCell>) -> u32 {
+        let mcid = self.next_mcid;
+        self.next_mcid += 1;
+        let Some(cell) = cell else {
+            self.table = None;
+            self.cell = None;
+            self.roots.push(TagNode {
+                tag,
+                alt: alt.map(String::from),
+                mcids: vec![mcid],
+                span: None,
+                children: Vec::new(),
+            });
+            return mcid;
+        };
+        if self.table.is_none() {
+            self.roots.push(TagNode {
+                tag: "Table",
+                alt: None,
+                mcids: Vec::new(),
+                span: None,
+                children: Vec::new(),
+            });
+            self.table = Some(self.roots.len() - 1);
+            self.cell = None;
+        }
+        let table = self.table.unwrap();
+        // Cells arrive row by row and left to right, so the current row is the
+        // table's last child.
+        let rows = &mut self.roots[table].children;
+        if rows.last().map(|row| row.tag) != Some("TR")
+            || self.cell.map(|(row, _)| row) != Some(cell.row)
+        {
+            rows.push(TagNode {
+                tag: "TR",
+                alt: None,
+                mcids: Vec::new(),
+                span: None,
+                children: Vec::new(),
+            });
+            self.cell = None;
+        }
+        let row = rows.last_mut().expect("a row was just added");
+        if self.cell != Some((cell.row, cell.column)) {
+            row.children.push(TagNode {
+                tag,
+                alt: alt.map(String::from),
+                mcids: vec![mcid],
+                span: Some((cell.row_span, cell.column_span)),
+                children: Vec::new(),
+            });
+            self.cell = Some((cell.row, cell.column));
+        } else {
+            row.children
+                .last_mut()
+                .expect("the cell exists")
+                .mcids
+                .push(mcid);
+        }
         mcid
     }
 }
@@ -941,7 +1077,7 @@ fn paint_block(
             let y = layout.page.height.0 - top - block.height.0;
             let mcid = tags
                 .as_deref_mut()
-                .map(|tags| tags.open("Figure", text.block_alt(block.node)));
+                .map(|tags| tags.open("Figure", text.block_alt(block.node), None));
             if let Some(mcid) = mcid {
                 painter.begin_marked("Figure", mcid);
             }
@@ -981,7 +1117,7 @@ fn paint_block(
             let math = block.math.as_ref().unwrap();
             let left = layout.page.margin_left.0 + block.x.0;
             let top = layout.page.margin_top.0 + block.y.0 + extra_y;
-            let mcid = tags.as_mut().map(|tags| tags.open("Formula", None));
+            let mcid = tags.as_mut().map(|tags| tags.open("Formula", None, None));
             if let Some(mcid) = mcid {
                 painter.begin_marked("Formula", mcid);
             }
@@ -1011,7 +1147,7 @@ fn paint_block(
             } else {
                 None
             };
-            Some(tags.open(tag, alt))
+            Some(tags.open(tag, alt, text.block_cell(block.node)))
         }
         _ => None,
     };
@@ -1155,7 +1291,7 @@ fn block_tag(scene: &Scene<'_>, block: &PlacedBlock) -> Option<&'static str> {
         // A table cell would need a `/Table` structure above it; tagging it as
         // a paragraph keeps the tree valid without inventing a hierarchy the
         // box tree does not have (a cell is a placed block, not a row of one).
-        BoxKind::TableCell => Some("P"),
+        BoxKind::TableCell => Some("TD"),
         BoxKind::Footnote => Some("Note"),
         BoxKind::Figure | BoxKind::Math => None,
         BoxKind::Rule | BoxKind::TableRule => None,

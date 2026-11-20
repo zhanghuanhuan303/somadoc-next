@@ -19,7 +19,7 @@
 | D01 | Gate Q 质量宣称 | **Inconclusive**：工具链已闭环（kit 生成 → `--key` 反解 → Wilson/Fleiss → `--out` 报告，见 `docs/blind-dry-run.md`），但没有人工评审数据；`corpus/blind/dry-run/` 是**模拟**面板，只证明机制通，不计质量 | 不能对外宣称「比贪心好」 | 需 30 段 × 5 评审按 `docs/blind-test.md` 的 runbook 采集 | 否 |
 | D02 | Gate D 交付指标 | **Partial**：无浏览器 wasm 包体积、无首段延迟实测 | 移动端预算无法承诺 | A5 | 否 |
 | D03 | `FallbackStage::Overfull` | 字段保留但从未发射；长英文词走 `Emergency` | 语义上等价，报告口径少一档 | 未排期 | 否 |
-| D04 | trim/gap 比例 | 6 条 `ParamOnly`，比例值未标定 | Gate Q 不能引用这些数值 | A6 后标定窗口 | 否 |
+| D04 | ~~trim/gap 比例~~ | **已关闭（ADR-0051）**：实测了各标点类的侧空（开/闭 0.627 em，中 0.184/0.702，半角 0.039/0.067，`cargo run -p soma-metrics --example punct`），但换上实测值会让 `notice` 出现 2 处可避免的 fitness 跳变、抖动 p95 368→428（ADR-0042 的门槛是 3）。trim 上限是断行的应急预算而不是空档，因此**维持原值**并记录证据，见 `docs/trim-calibration.md` | — | ✅ 已关闭 | 否 |
 | D05 | Tier A 权重 | **Proxy 已扫**：`corpus/zh` 上 `tolerance=1500` 优于 `3000`（过压 0 vs 2 行，抖动 337 vs 500，页数不变）；无人工偏好，不修改 `default-v1` | 质量上限仍未知 | 待 Gate Q 后决定是否新增 `zh-book-v1` preset | 否 |
 | D06 | ~~真实字体度量~~ | **已关闭（E1）**：`soma-metrics`（零依赖、no_std）+ `tools/metrics-gen` + Noto CJK SC 整数表；`TableMetrics`/`StyledMetrics` 按字号缩放；`metricsHash` 进入 `soma.pages/2`。覆盖范围与 bold 近似见 D61/D63 | — | ✅ 已关闭 | 否 |
 | D07 | wasm 执行时延 | 只证明了编译 + 字节一致，没测运行时间 | wasm 预算只有推算 | A5 | 否 |
@@ -99,7 +99,7 @@
 | D69 | HTML 子集有边界 | `soma-html` 只做语义白名单：无 CSS/脚本/表单/框架，无 `<caption>`/`<colgroup>`/脚注标记，实体集有限，`SourceSpan` 为空 | 复杂 HTML 会降级或丢表现 | 有真实需求时扩 | 否 |
 | D68 | 表格线只能整表配置 | **已关闭（ADR-0020）**：五条线宽、竖线/左右框、实线/虚线、颜色都进模板；剩余限制是 `table:` 只能全局一套，不能按表/按行覆盖 | 多套表格外观要多个模板 | ✅ 已关闭 | 否 |
 | D50 | ~~无页面母版 / 页眉页脚 / 页码~~ | **已关闭（E4）**：页眉（running-title 或字面量）、页脚、`{page}`/`{pages}` 页码；两遍无重排 | 首页/封面变体未做（D62） | ✅ 已关闭 | 否 |
-| D51 | 盒子树是扁平的 | **colspan、rowspan、表头重复、单元格跨页续排、行线已支持**（ADR-0017/0018/0019）：页面只在未被跨行单元穿过的行边界断开，续页重画表头并整体平移单元块；表格线占真实垂直空间且跳过跨行单元；仍无嵌套 VBox/HBox、竖线/单元格边框、逐表覆盖线宽 | 嵌套布局与单元格边框受限 | 后续 | 否 |
+| D51 | 盒子树是扁平的 | **colspan、rowspan、表头重复、单元格跨页续排、行线、tagged 表格层次已支持**（ADR-0017/0018/0019/0050）：结构树现在是 `/Table` → `/TR` → `/TD`，跨行列带 `/RowSpan`/`/ColSpan`，一个单元里的多段共用一个 `/TD`。仍无嵌套 VBox/HBox、逐表覆盖线宽、单元格四边框 | 嵌套布局与逐表线宽受限 | 后续 | 否 |
 | D52 | ~~公式是文本占位~~ | **已关闭（ADR-0026）**：`soma-math` 解析 TeX 子集 → 整数 `MathLayout`（符号 + 分数线/根号横线）；`soma-layout` 居中放一个 `MathBox`（带基线），页面 schema 升到 `soma.pages/5`；解析失败仍回退到文本占位。剩余边界见 D71 | — | ✅ 已关闭 | 否 |
 | D53 | Markdown 子集有限 | 无嵌套列表、setext 标题、表格、HTML 块、链接引用定义 | 复杂 Markdown 会退化为文本 | 未排期 | 否 |
 | D54 | 行内代码无独立度量 | 行内代码仍是单个 `AtomKind::Other` atom，用正文字体；**行内公式已由 ADR-0027 解决**：对象 atom 走 `object_advance`/`object_metrics`，宽高来自数学盒 | 行内代码宽度不准 | 未排期 | 否 |

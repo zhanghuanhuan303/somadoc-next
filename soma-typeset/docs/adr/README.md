@@ -65,6 +65,8 @@ only).
 | [0047](0047-images-and-tagged-pdf.md) | Figures carry image XObjects; every page is tagged | Accepted |
 | [0048](0048-inline-images-in-html-and-svg.md) | HTML and SVG inline a figure as a `data:` URI | Accepted |
 | [0049](0049-svg-coordinate-units.md) | SVG coordinates are layout units; the root viewport is pixels | Accepted |
+| [0050](0050-table-structure.md) | A table is a real structure tree: Table, TR, TD with spans | Accepted |
+| [0051](0051-trim-caps-are-a-budget.md) | A trim cap is a budget, not a measurement | Accepted |
 
 ## Rules
 

@@ -394,6 +394,22 @@ pub trait TextSource {
     fn block_heading_level(&self, _block: NodeId) -> Option<u8> {
         None
     }
+
+    /// Where a table cell sits in its grid. `None` for every block that is not
+    /// part of a table. The tagged PDF needs it to build `/Table`, `/TR` and
+    /// `/TD` instead of a flat list of paragraphs (ADR-0050).
+    fn block_cell(&self, _block: NodeId) -> Option<TableCell> {
+        None
+    }
+}
+
+/// A cell's place in the table grid, for the structure tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TableCell {
+    pub row: u16,
+    pub column: u16,
+    pub row_span: u16,
+    pub column_span: u16,
 }
 
 /// Image bytes for a figure, supplied by the caller.
@@ -469,6 +485,8 @@ pub struct TextIndex {
     figures: Vec<(NodeId, String, Option<String>)>,
     /// Heading levels, `(node, level)`, sorted at `finish`.
     headings: Vec<(NodeId, u8)>,
+    /// Table cell placement, `(node, cell)`, sorted at `finish`.
+    cells: Vec<(NodeId, TableCell)>,
     /// Highest node id inserted so far. Tracked explicitly: `entries` is only
     /// sorted at `finish`, so the last element is not the maximum while blocks
     /// are still being added (the TOC adds ids above the document's).
@@ -498,12 +516,17 @@ impl TextIndex {
         self.headings.push((node, level));
     }
 
+    fn mark_cell(&mut self, node: NodeId, cell: TableCell) {
+        self.cells.push((node, cell));
+    }
+
     fn finish(&mut self) {
         self.entries.sort_by_key(|(node, _)| *node);
         self.fallbacks.sort_unstable();
         self.fallbacks.dedup();
         self.figures.sort_by_key(|(node, _, _)| *node);
         self.headings.sort_by_key(|(node, _)| *node);
+        self.cells.sort_by_key(|(node, _)| *node);
     }
 
     fn max_node(&self) -> u32 {
@@ -566,6 +589,13 @@ impl TextSource for TextIndex {
             .binary_search_by_key(&block, |(node, _)| *node)
             .ok()
             .map(|index| self.headings[index].1)
+    }
+
+    fn block_cell(&self, block: NodeId) -> Option<TableCell> {
+        self.cells
+            .binary_search_by_key(&block, |(node, _)| *node)
+            .ok()
+            .map(|index| self.cells[index].1)
     }
 }
 
@@ -1490,6 +1520,17 @@ impl Builder<'_> {
                                     placed.x = placed.x + Width(column_width.0 * column as i32);
                                     placed.y = height;
                                     height = height + placed.height;
+                                    // The structure tree needs the grid
+                                    // position; the box tree only has pixels.
+                                    self.text.mark_cell(
+                                        placed.node,
+                                        TableCell {
+                                            row: row_index as u16,
+                                            column: column as u16,
+                                            row_span: rowspan as u16,
+                                            column_span: colspan as u16,
+                                        },
+                                    );
                                     blocks.push(placed);
                                 }
                             }

@@ -1,7 +1,7 @@
 //! PDF structure, font subsetting, bookmarks and determinism.
 
 use soma_core::{BreakConfig, SyntheticMetrics};
-use soma_doc::block::{Figure, Heading};
+use soma_doc::block::{Cell, Column, Figure, Heading, Row, Table};
 use soma_doc::inline::Image;
 use soma_doc::meta::{ImageIntrinsic, ImageRef};
 use soma_doc::node::NodeMeta;
@@ -238,6 +238,48 @@ fn the_page_is_tagged_for_accessibility() {
     assert!(text.contains("/S /P"));
     assert!(text.contains("/ParentTree"));
     assert!(text.contains("/StructParents 0"));
+}
+
+#[test]
+fn a_table_is_tagged_with_rows_and_cells() {
+    let cell = |value: &str| {
+        Cell::new(
+            NodeMeta::synthesized(),
+            vec![Block::Paragraph(soma_doc::block::Paragraph::new(
+                NodeMeta::synthesized(),
+                vec![text(value)],
+            ))],
+        )
+    };
+    let columns = vec![
+        Column::new(NodeMeta::synthesized(), Default::default()),
+        Column::new(NodeMeta::synthesized(), Default::default()),
+    ];
+    let mut header = cell("头一");
+    header.colspan = 2;
+    let blocks = vec![Block::Table(Table::new(
+        NodeMeta::synthesized(),
+        columns,
+        vec![
+            Row::new(NodeMeta::synthesized(), true, vec![header]),
+            Row::new(NodeMeta::synthesized(), false, vec![cell("甲"), cell("乙")]),
+        ],
+    ))];
+    let (layout, styled) = build(blocks);
+    let pdf = render_pdf(&layout, &styled);
+    let text = String::from_utf8_lossy(&pdf);
+
+    assert!(
+        text.contains("/S /Table"),
+        "the table is a structure element"
+    );
+    assert_eq!(text.matches("/S /TR").count(), 2, "one row each");
+    assert_eq!(text.matches("/S /TD").count(), 3, "one cell each");
+    assert!(
+        text.contains("/O /Table /RowSpan 1 /ColSpan 2"),
+        "the spanning header cell says so"
+    );
+    assert!(!text.contains("/S /P"), "a cell is a /TD, not a paragraph");
 }
 
 #[test]

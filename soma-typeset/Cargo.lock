@@ -117,6 +117,10 @@ dependencies = [
 [[package]]
 name = "soma-metrics"
 version = "0.1.0"
+dependencies = [
+ "soma-core",
+ "soma-rules",
+]
 
 [[package]]
 name = "soma-render-html"
