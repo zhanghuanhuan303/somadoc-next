@@ -31,14 +31,55 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use soma_core::{
-    break_paragraph, Align, BreakConfig, Cost, FallbackStage, Line, Metrics, Paragraph,
-    ParagraphStyle, PunctClass, StyleId, Width,
+    break_paragraph as break_paragraph_core, Align, BoundaryKind, BreakConfig, Cost, FallbackStage,
+    Line, Metrics, Paragraph, ParagraphStyle, PunctClass, StyleId, Width,
 };
 use soma_doc::{Block, Document, Inline, NodeId};
 use soma_rules::{paragraph_from_spans, paragraph_from_text, InlineSpan, RuleError, SpanKind};
 use soma_template::{ComputedStyle, ResolvedPage, StyledDoc};
 
 pub const SCHEMA: &str = "soma.pages/9";
+
+/// Break one paragraph with the layout's space rule applied.
+///
+/// A space may give up at most a third of its advance. The rule table is
+/// font-blind, so a fixed 1/8 em shrink is a different fraction of the space
+/// in every face — 43% of a 0.29 em space, 26% of a 0.38 em one. TeX's space
+/// glue shrinks by a third of its own width; applying that here keeps a
+/// compressed line readable whatever the face is (D86).
+pub fn break_paragraph(
+    paragraph: &Paragraph,
+    metrics: &dyn Metrics,
+    config: &BreakConfig,
+) -> Result<soma_core::LayoutResult, soma_core::BreakError> {
+    let clamped = clamp_space_glue(paragraph, metrics);
+    let paragraph = clamped.as_ref().unwrap_or(paragraph);
+    break_paragraph_core(paragraph, metrics, config)
+}
+
+/// Shrink spaces by at most a third of their advance; `None` when nothing
+/// changes, so a paragraph without spaces is not copied.
+fn clamp_space_glue(paragraph: &Paragraph, metrics: &dyn Metrics) -> Option<Paragraph> {
+    let mut boundaries = paragraph.boundaries.clone();
+    let mut changed = false;
+    for (index, boundary) in boundaries.iter_mut().enumerate() {
+        if boundary.kind != BoundaryKind::Space {
+            continue;
+        }
+        let style = paragraph.atoms[index].style;
+        let third = metrics.space_width(style).0 / 3;
+        if boundary.glue.shrink.0 > third {
+            boundary.glue.shrink = Width(third);
+            changed = true;
+        }
+    }
+    if !changed {
+        return None;
+    }
+    let mut clamped = paragraph.clone();
+    clamped.boundaries = boundaries;
+    Some(clamped)
+}
 
 /// Placeholder atom for a footnote marker. Renderers replace the marked atom
 /// with [`Mark::number`].

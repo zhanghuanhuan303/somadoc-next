@@ -123,7 +123,7 @@ impl ParamSet {
     pub fn default_v1() -> Self {
         Self {
             preset: PresetId("default-v1"),
-            model_version: 1,
+            model_version: 2,
             rules_version: 1,
             metrics_version: 0,
             break_params: BreakParams {

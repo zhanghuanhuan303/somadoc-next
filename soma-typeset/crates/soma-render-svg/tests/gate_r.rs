@@ -263,4 +263,7 @@ fn svg_bytes_are_a_visual_regression_lock() {
 /// Updated deliberately when the visual output changes.
 /// 2026-11-20: a footnote marker is a small superscript object, not a one-em
 /// glyph, and it is drawn as its number.
-const GOLDEN_SVG_HASH: u64 = 1464083689466555371;
+/// 2026-11-20: a space shrinks by at most a third of its advance (D86), which
+/// moves the justified atoms inside their lines by at most 0.006 em. Line
+/// breaks are unchanged.
+const GOLDEN_SVG_HASH: u64 = 2215190967058887527;

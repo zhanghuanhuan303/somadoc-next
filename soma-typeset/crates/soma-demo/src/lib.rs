@@ -379,7 +379,10 @@ mod tests {
             "标点密集：「引号」，（括号）；冒号：逗号，句号。问号？感叹号！省略号……",
             "Mixed English 与数字 123，well-known path/to/file 也要能排，不能靠溢出。",
         ];
-        let pairs = blind_pairs(&samples, Width::from_em(14), 3).unwrap();
+        // A tight measure is where the two algorithms can disagree: when the
+        // measure is wide the optimal breaks are also the furthest ones, and
+        // an overfull line is refused by both (D86).
+        let pairs = blind_pairs(&samples, Width::from_em(10), 3).unwrap();
         assert_eq!(pairs.len(), 3);
         assert!(
             pairs.iter().any(|pair| pair.optimal != pair.greedy),

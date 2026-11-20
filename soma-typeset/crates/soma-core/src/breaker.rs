@@ -867,13 +867,21 @@ impl<'a> Shaped<'a> {
         } else if effective > target {
             let excess = effective - target;
             let shrink = shrink_total;
-            overfull = excess > shrink;
-            if shrink <= 0 {
+            // TeX calls this an overfull box: the glue cannot absorb the
+            // excess, so its badness is infinite. A justified line that
+            // crushed its glue past its own shrink would look broken — a
+            // Latin line's spaces collapse and the words touch (D86) — so the
+            // break is only reachable through the fallback ladder.
+            overfull = shrink <= 0 || excess > shrink;
+            if overfull {
                 if !allow_emergency || !break_params.fallback.allow_overfull {
                     return None;
                 }
                 emergency = true;
                 cost += costs.emergency.0 as i64;
+                ratio_value = ratio_milli(excess, shrink.max(1));
+                badness_value = badness(ratio_value, costs.badness_scale.0, costs.badness_exponent);
+                cost += badness_value;
                 adjustment = -saturating_i32(excess);
             } else {
                 let ratio = ratio_milli(excess, shrink);
