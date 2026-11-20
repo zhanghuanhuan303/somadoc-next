@@ -18,7 +18,10 @@ No path or git dependency points at a Typst-based project.
 
 `soma-metrics` ships `crates/soma-metrics/data/noto-cjk.smt`: **numbers only**
 (advance widths, ascent/descent/leading, space width), extracted from two open
-fonts. No outlines and no font binaries are redistributed.
+fonts. No outlines and no font binaries are redistributed. The committed blob
+is `soma.metrics/1`; a table built from a TrueType face can also carry the
+bounding-box gaps of punctuation (`soma.metrics/2`, ADR-0037), which are still
+four integers per glyph — no outline data is stored or shipped.
 
 | face | source | SHA-256 of the source file |
 |---|---|---|
