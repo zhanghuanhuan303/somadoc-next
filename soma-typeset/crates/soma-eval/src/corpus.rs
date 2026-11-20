@@ -43,11 +43,11 @@ pub struct CorpusReport {
 impl CorpusReport {
     pub fn csv(&self) -> String {
         let mut out = String::from(
-            "document,pages,paragraphs,lines,over_compress,emergency,continuation,widows,orphans,page_free_p95,page_free_max,jitter_p95,bdev_error_p95\n",
+            "document,pages,paragraphs,lines,over_compress,emergency,continuation,widows,orphans,fitness_jumps,page_free_p95,page_free_max,jitter_p95,bdev_error_p95\n",
         );
         for document in &self.documents {
             out.push_str(&format!(
-                "{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+                "{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
                 document.name,
                 document.pages,
                 document.paragraphs,
@@ -57,6 +57,7 @@ impl CorpusReport {
                 document.metrics.continuation_blocks,
                 document.metrics.widow_violations,
                 document.metrics.orphan_violations,
+                document.metrics.fitness_jumps,
                 document.metrics.page_free_p95(),
                 document.metrics.page_free_max(),
                 document.metrics.ratio_jitter_p95(),
@@ -64,7 +65,7 @@ impl CorpusReport {
             ));
         }
         out.push_str(&format!(
-            "ALL,{},{},{},{},{},{},{},{},{},{},{},{}\n",
+            "ALL,{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
             self.pages,
             self.paragraphs,
             self.metrics.lines,
@@ -73,6 +74,7 @@ impl CorpusReport {
             self.metrics.continuation_blocks,
             self.metrics.widow_violations,
             self.metrics.orphan_violations,
+            self.metrics.fitness_jumps,
             self.metrics.page_free_p95(),
             self.metrics.page_free_max(),
             self.metrics.ratio_jitter_p95(),

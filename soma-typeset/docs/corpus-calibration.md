@@ -31,26 +31,29 @@
 ## 2. 默认配置（`default-v1`）
 
 ```
-document,pages,paragraphs,lines,over_compress,emergency,continuation,widows,orphans,page_free_p95,page_free_max,jitter_p95,bdev_error_p95
-abstract,1,6,24,0,0,0,0,0,0,0,290,0
-classics,2,15,42,0,0,0,0,0,0,0,328,0
-editorial,2,7,30,0,0,1,0,0,423,423,314,0
-footnotes,2,6,22,0,0,1,0,0,1580,1580,308,0
-interview,2,15,38,0,0,0,0,0,0,0,608,0
-mixed,1,6,24,0,0,0,0,0,0,0,541,0
-notice,1,12,26,0,0,0,0,0,0,0,337,0
-science,2,8,35,0,0,1,0,0,0,0,329,0
-technical,2,8,32,0,0,0,0,0,0,0,302,0
-table-page,2,123,125,0,0,0,0,0,278,278,0,0
-math-page,1,3,5,0,0,0,0,0,0,0,452,0
-book,30,390,810,0,0,0,0,0,486,486,337,0
-ALL,48,599,1213,0,0,3,0,0,486,1580,337,0
+document,pages,paragraphs,lines,over_compress,emergency,continuation,widows,orphans,fitness_jumps,page_free_p95,page_free_max,jitter_p95,bdev_error_p95
+abstract,1,6,24,0,0,0,0,0,0,0,0,577,0
+classics,2,15,42,0,0,0,0,0,3,0,0,942,0
+editorial,2,7,30,0,0,1,0,0,0,423,423,905,0
+footnotes,2,6,22,0,0,1,0,0,0,1580,1580,455,9
+interview,2,15,38,0,0,0,0,0,0,0,0,608,0
+mixed,1,6,24,0,0,0,0,0,0,0,0,640,0
+notice,1,12,26,0,0,0,0,0,0,0,0,702,0
+science,2,8,35,0,0,1,0,0,0,0,0,328,0
+technical,2,8,32,0,0,0,0,0,0,0,0,591,0
+table-page,2,123,125,0,0,0,0,0,0,278,278,0,0
+math-page,1,3,5,0,0,0,0,0,0,0,0,452,0
+book,30,390,810,0,0,0,0,0,0,486,486,337,0
+ALL,48,599,1213,0,0,3,0,0,3,486,1580,368,9
 ```
 
 读法：
 
 - 孤行/寡行 **0**；跨页段落 3 次（`editorial`、`footnotes`、`science`）。
-- 压缩越过 shrink 下限 **0 行 / 1213 行**（`publish-v1` + 开标点半角 trim，ADR-0023）。
+- 压缩越过 shrink 下限 **0 行 / 1213 行**（`publish-v1` + 开标点半角 trim，ADR-0023）。ADR-0041
+  起 overfull 的齐行行不再当作正常断点，这一列从 3 变成 0，代价是 `jitter_p95` 从 351 抬到 368。
+- `fitness_jumps` = **3**，全部在 `classics`，来自两行非常松（>1000‰）的行。它们是强制的：
+  把 `badness_scale` 提高 10 倍，`classics` 的断点一字不变（ADR-0042）。
 - 底部留白 P95 = **486‰**，最大 **1580‰** 来自 `footnotes`：脚注区把正文挤到下一页，
   这是脚注与分页耦合的真实代价。
 - `book` 30 页/810 行，0 越界、抖动 337‰，说明分页在长篇上稳定。

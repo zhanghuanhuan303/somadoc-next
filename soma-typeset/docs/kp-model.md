@@ -1045,7 +1045,7 @@ struct KpTrace {
 | K4 | 行边裁剪 + 渲染坐标约定 + `Line.trim_*` | 裁剪案例通过；行宽对得上 |
 | K5 | 强制换行/segment 切分 | Markdown hard break 案例通过 |
 | K6 | 性能优化；Tier A 初标定 + 敏感度报告；可选保守 active-node 剪枝 + 差分测试 | n=2,000 在预算内；参数报告完成 |
-| K7 | 可选 fitness/rhythm DP 状态 | 仅在评估证明需要时启动；不在基线 |
+| K7 | ~~可选 fitness/rhythm DP 状态~~ | **否决（ADR-0042）**：语料 607 个相邻行对里只有 3 对跨一级以上 fitness，且这两行非常松（>1000‰）的行是强制的——`badness_scale` 提 10 倍断点不变。改为在 `soma-eval` 里报 `fitness_jumps`，等它真的动了再回来看 |
 | K8 | 接入 rules/eval/demo，更新 canonical schema；盲测统计 | 回归、盲测、文档完成 |
 
 **冻结基线（2026-11-20）：** K0–K5 约 15 天；K6 5 天；K8 3 天；盲测预实验/正式盲测/评估/文档 10 天；缓冲 7 天；合计 40 个工作日（8 周全职）。兼职 18–20 周。K7 不在基线内。执行中不重新估算；范围变化写变更记录，按 K7 → fitness → 剪枝 → demo 打磨的顺序砍，Gate T 不砍。

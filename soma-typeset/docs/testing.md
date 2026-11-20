@@ -169,7 +169,7 @@ Cumulative public test files:
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 | render-pdf unit | 4 | CFF INDEX round trip, glyph-preserving subset with identity charset, name-keyed promotion, `seac` expansion placed point by point |
 
-Total: **565 tests**.
+Total: **567 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

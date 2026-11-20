@@ -32,6 +32,19 @@ fn corpus_evaluation_is_deterministic() {
 }
 
 #[test]
+fn the_corpus_reports_fitness_jumps() {
+    let report = evaluate_all(&repository_dir(), &ParamSet::publish_v1()).expect("evaluate");
+    // ADR-0042: the two very loose lines in `classics` are forced, so their
+    // three class jumps are the floor. The column exists to notice a rise.
+    assert!(
+        report.metrics.fitness_jumps <= 3,
+        "{} class jumps: the corpus grew avoidable ones (ADR-0042)",
+        report.metrics.fitness_jumps
+    );
+    assert_eq!(report.csv().lines().count(), report.documents.len() + 2);
+}
+
+#[test]
 fn the_corpus_has_no_widows_or_orphans() {
     let report = evaluate_dir(&repository_dir(), &ParamSet::publish_v1()).expect("evaluate");
     assert_eq!(report.metrics.widow_violations, 0);
