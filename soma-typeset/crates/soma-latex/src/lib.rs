@@ -841,11 +841,17 @@ impl<'a> Parser<'a> {
                 label = self.read_optional().map(|text| text.trim().to_string());
             }
             let mut blocks = self.parse_blocks(Some(env), true);
+            let had_label = label.is_some();
             if let Some(label) = label.filter(|label| !label.is_empty()) {
-                let mut label_inlines = vec![Inline::Strong(Container::new(
-                    NodeMeta::synthesized(),
-                    vec![Inline::Text(Text::new(NodeMeta::synthesized(), label))],
-                ))];
+                let mut label_inlines = vec![
+                    Inline::Strong(Container::new(
+                        NodeMeta::synthesized(),
+                        vec![Inline::Text(Text::new(NodeMeta::synthesized(), label))],
+                    )),
+                    // A term is a run-in label: one ideographic space keeps it
+                    // from touching the definition.
+                    Inline::Text(Text::new(NodeMeta::synthesized(), "\u{3000}")),
+                ];
                 match blocks.first_mut() {
                     Some(Block::Paragraph(paragraph)) => {
                         label_inlines.append(&mut paragraph.inlines);
@@ -858,7 +864,13 @@ impl<'a> Parser<'a> {
                 }
             }
             if !blocks.is_empty() || !items.is_empty() {
-                items.push(ListItem::new(NodeMeta::synthesized(), blocks));
+                let mut meta = NodeMeta::synthesized();
+                // A description term is a run-in label, not a list marker:
+                // the layout prints no bullet and no hanging indent.
+                if env == "description" || had_label {
+                    meta.attrs.role = Some(String::from("description"));
+                }
+                items.push(ListItem::new(meta, blocks));
             }
             if self.peek_command() == Some("item") {
                 continue;

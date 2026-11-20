@@ -170,6 +170,12 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   XObjects, and every page carries a tagged structure tree with `/Alt` text
   (ADR-0047). The HTML and SVG renderers inline the same images as `data:`
   URIs, so a preview stays one self-contained file (ADR-0048).
+- Full-capability sample (ADR-0068): `examples/book/full.tex` +
+  `scripts/full.sh` render one 12-page book with every front-end and layout
+  feature in a single document — ruby, hyphenation, nested and description
+  lists, a table with merged cells, PNG/JPEG figures at their true aspect
+  ratio, numbered formulas, macros and counters, footnotes, and a pinyin index
+  with sub-entries, `see`/`see also`, and page ranges.
 - First-release artifact (`examples/book`, ADR-0031/ADR-0032/ADR-0033): `scripts/book.sh`
   renders an eleven-page book from `examples/book/book.tex` + `book.yaml` — generated
   cover, roman-numbered front matter, contents with leaders plus figure/table

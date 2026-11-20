@@ -170,14 +170,15 @@ Cumulative public test files:
 | `soma-metrics` unit | 14 | table round-trip, CJK/Latin widths, regular/bold/math faces, hash, truncation, ink sections, v1/v2 compatibility |
 | `soma-core` vertical unit | 1 | vertical cost model hash |
 | core unit | 24 | IR, units, breaker, result, presets |
-| layout unit | 18 | trim scaling at body and non-body sizes; math metric adapter; index grammar, ordering and page ranges; column hints |
+| layout unit | 20 | trim scaling at body and non-body sizes; math metric adapter; index grammar, ordering and page ranges; column hints |
+| `pagination.rs` unit | 2 | a figure and its caption never split; two figures fill one page |
 | `k7_rhythm.rs` (core) | 3 | preset validity and hash, class jumps removed by the rhythm term, zero weight equals the old solver |
 | `soma-collate` unit | 4 | pinyin rank lookup, Latin before Han, shared prefixes, table coverage |
 | `soma-hyphen` unit | 10 | pattern parsing (`%`, `\patterns{}`), the `hyphenation` fixture, left/right limits, UTF-8 offsets, ordering |
 | `soma-docx` (unit + integration) | 32 | zip store/deflate, inflate, XML entities, headings from style names, `basedOn` styles, tables, lists, metadata, embedded media, damaged archives |
 | render-pdf unit | 26 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing |
 
-Total: **749 tests**.
+Total: **752 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

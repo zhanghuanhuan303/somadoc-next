@@ -338,7 +338,7 @@ fn pipeline(options: &Options) -> Result<Pipeline, String> {
         .and_then(|value| value.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let (document, media) = if extension == "docx" {
+    let (mut document, media) = if extension == "docx" {
         let bytes =
             std::fs::read(&options.input).map_err(|error| format!("{}: {error}", options.input))?;
         soma_docx::parse_docx_with_media(&bytes)
@@ -348,6 +348,8 @@ fn pipeline(options: &Options) -> Result<Pipeline, String> {
             .map_err(|error| format!("{}: {error}", options.input))?;
         (parse_document(&options.input, &source)?, Vec::new())
     };
+
+    enrich_image_sizes(&mut document, &options.input);
 
     let template_source = match &options.template {
         Some(path) => std::fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))?,
@@ -373,6 +375,120 @@ fn pipeline(options: &Options) -> Result<Pipeline, String> {
         vertical,
         media,
     })
+}
+
+/// Read the intrinsic pixel size of each local image so the layout knows its
+/// aspect ratio. DocIR deliberately carries no width, but an image's own size
+/// is a fact about the asset, not a style (the same rule the Word importer
+/// follows). A missing or unsupported file is left alone: the layout keeps its
+/// aspect fallback.
+fn enrich_image_sizes(document: &mut Document, input: &str) {
+    let base = std::path::Path::new(input)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .to_path_buf();
+    enrich_blocks(&mut document.blocks, &base);
+    for footnote in &mut document.footnotes {
+        enrich_blocks(&mut footnote.blocks, &base);
+    }
+}
+
+fn enrich_blocks(blocks: &mut [soma_doc::Block], base: &std::path::Path) {
+    for block in blocks {
+        match block {
+            soma_doc::Block::Figure(node) => enrich_image(&mut node.image.source, base),
+            soma_doc::Block::Paragraph(node) => enrich_inlines(&mut node.inlines, base),
+            soma_doc::Block::Heading(node) => enrich_inlines(&mut node.inlines, base),
+            soma_doc::Block::Table(node) => {
+                enrich_inlines(&mut node.caption, base);
+                for row in &mut node.rows {
+                    for cell in &mut row.cells {
+                        enrich_blocks(&mut cell.blocks, base);
+                    }
+                }
+            }
+            soma_doc::Block::List(node) => {
+                for item in &mut node.items {
+                    enrich_blocks(&mut item.blocks, base);
+                }
+            }
+            soma_doc::Block::BlockQuote(node) => enrich_blocks(&mut node.blocks, base),
+            soma_doc::Block::Generated(node) => enrich_blocks(&mut node.blocks, base),
+            _ => {}
+        }
+    }
+}
+
+fn enrich_inlines(inlines: &mut [soma_doc::Inline], base: &std::path::Path) {
+    for inline in inlines {
+        match inline {
+            soma_doc::Inline::Image(node) => enrich_image(&mut node.source, base),
+            soma_doc::Inline::Strong(node)
+            | soma_doc::Inline::Emphasis(node)
+            | soma_doc::Inline::Underline(node)
+            | soma_doc::Inline::Strikethrough(node)
+            | soma_doc::Inline::SmallCaps(node)
+            | soma_doc::Inline::Superscript(node)
+            | soma_doc::Inline::Subscript(node) => enrich_inlines(&mut node.children, base),
+            soma_doc::Inline::Link(node) => enrich_inlines(&mut node.children, base),
+            _ => {}
+        }
+    }
+}
+
+fn enrich_image(image: &mut soma_doc::ImageRef, base: &std::path::Path) {
+    if image.intrinsic.is_some() || image.src.contains("://") || image.src.starts_with("data:") {
+        return;
+    }
+    let Ok(bytes) = std::fs::read(base.join(&image.src)) else {
+        return;
+    };
+    if let Some((width_px, height_px)) = image_size(&bytes) {
+        image.intrinsic = Some(soma_doc::ImageIntrinsic {
+            width_px,
+            height_px,
+        });
+    }
+}
+
+/// PNG IHDR or a JPEG start-of-frame, in pixels.
+fn image_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") && bytes.len() >= 24 {
+        let width = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+        let height = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+        return (width > 0 && height > 0).then_some((width, height));
+    }
+    if !bytes.starts_with(&[0xFF, 0xD8]) {
+        return None;
+    }
+    let mut at = 2usize;
+    while at + 9 <= bytes.len() {
+        if bytes[at] != 0xFF {
+            at += 1;
+            continue;
+        }
+        let marker = bytes[at + 1];
+        // Standalone markers carry no length.
+        if (0xD0..=0xD9).contains(&marker) || marker == 0x01 || marker == 0xFF {
+            at += 2;
+            continue;
+        }
+        let length = u16::from_be_bytes([bytes[at + 2], bytes[at + 3]]) as usize;
+        if length < 2 {
+            return None;
+        }
+        let frame = matches!(
+            marker,
+            0xC0..=0xC3 | 0xC5..=0xC7 | 0xC9..=0xCB | 0xCD..=0xCF
+        );
+        if frame && at + 9 <= bytes.len() {
+            let height = u16::from_be_bytes([bytes[at + 5], bytes[at + 6]]) as u32;
+            let width = u16::from_be_bytes([bytes[at + 7], bytes[at + 8]]) as u32;
+            return (width > 0 && height > 0).then_some((width, height));
+        }
+        at += 2 + length;
+    }
+    None
 }
 
 fn load_metrics(options: &Options) -> Result<MetricsTable, String> {

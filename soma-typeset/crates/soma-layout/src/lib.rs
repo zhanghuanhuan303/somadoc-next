@@ -839,6 +839,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
         index_terms: Vec::new(),
         note_index_terms: note_index_terms(doc),
         pending_ruby: Vec::new(),
+        suppress_hang: false,
         defer_index: false,
         index_entries: index.to_vec(),
         figure_refs: Vec::new(),
@@ -1538,6 +1539,8 @@ struct Builder<'a> {
     note_index_terms: Vec<Vec<index::IndexTerm>>,
     /// Ruby annotations seen while compiling the current block, in atom order.
     pending_ruby: Vec<String>,
+    /// Set while compiling a description term: no marker, no hanging indent.
+    suppress_hang: bool,
     /// While compiling a table cell the flow item is not known yet, so the
     /// markers stay in `pending_index` until the table has been placed.
     defer_index: bool,
@@ -1621,7 +1624,15 @@ impl Builder<'_> {
                     let list_indent = self.computed(style).indent_left;
                     for (index, item) in node.items.iter().enumerate() {
                         let item_style = self.style(item.meta.id, style);
-                        let item_indent = self.computed(item_style).indent_left;
+                        // A description term is a bold run-in label: it has no
+                        // marker, and it sits at the list indent rather than a
+                        // marker column further in.
+                        let description = item.meta.attrs.role.as_deref() == Some("description");
+                        let item_indent = if description {
+                            Width::ZERO
+                        } else {
+                            self.computed(item_style).indent_left
+                        };
                         self.extra_left = self
                             .extra_left
                             .saturating_add(list_indent)
@@ -1629,7 +1640,9 @@ impl Builder<'_> {
                         // `•` for a bullet, `1.` for a number. The marker goes
                         // into the item's first paragraph so it shares that
                         // paragraph's first line.
-                        let marker = if node.ordered {
+                        let marker = if description {
+                            String::new()
+                        } else if node.ordered {
                             alloc::format!("{}.", node.start + index as u32)
                         } else {
                             String::from("\u{2022}")
@@ -1638,15 +1651,21 @@ impl Builder<'_> {
                         for block in &item.blocks {
                             if !marked {
                                 if let Block::Paragraph(paragraph) = block {
-                                    let inlines =
-                                        self.prefixed_inlines(&paragraph.inlines, &marker);
+                                    let inlines = if description {
+                                        paragraph.inlines.clone()
+                                    } else {
+                                        self.prefixed_inlines(&paragraph.inlines, &marker)
+                                    };
                                     let style = self.style(paragraph.meta.id, item_style);
-                                    if let Some(item) = self.paragraph_item(
+                                    self.suppress_hang = description;
+                                    let result = self.paragraph_item(
                                         paragraph.meta.id,
                                         BoxKind::Paragraph,
                                         &inlines,
                                         style,
-                                    )? {
+                                    );
+                                    self.suppress_hang = false;
+                                    if let Some(item) = result? {
                                         items.push(item);
                                         marked = true;
                                         continue;
@@ -1698,6 +1717,11 @@ impl Builder<'_> {
                     let style = self.style(node.meta.id, fallback);
                     items.push(self.figure_item(node.meta.id, &node.image.source, style)?);
                     if !node.caption.is_empty() {
+                        // A figure and its caption are one unit: a page never
+                        // ends between them (a lone caption is not a caption).
+                        if let Some(figure) = items.last_mut() {
+                            figure.keep_with_next = true;
+                        }
                         let caption_node = node
                             .caption
                             .first()
@@ -2360,8 +2384,16 @@ impl Builder<'_> {
         let inner = Width(self.content_width.0 - consumed.0);
         // A negative `first-indent` is a hanging indent: the template says
         // where the marker goes, the kernel gets `hang` (ADR-0058).
-        let hang = Width((-computed.first_indent.0).max(0));
-        let first_indent = Width(computed.first_indent.0.max(0));
+        let hang = if self.suppress_hang {
+            Width::ZERO
+        } else {
+            Width((-computed.first_indent.0).max(0))
+        };
+        let first_indent = if self.suppress_hang {
+            Width::ZERO
+        } else {
+            Width(computed.first_indent.0.max(0))
+        };
         let paragraph_style = ParagraphStyle {
             width: inner,
             first_indent,
@@ -3490,6 +3522,10 @@ impl Builder<'_> {
             )?;
             let index = items.len();
             items.push(item);
+            // The index starts its own page, so that page uses the
+            // section-start master: no running head above a title that says the
+            // same thing.
+            items[index].section_start = true;
             // The index is a navigable destination too: it joins the running
             // title, the contents and the bookmark tree as a level-1 heading.
             self.headings.push(Heading {

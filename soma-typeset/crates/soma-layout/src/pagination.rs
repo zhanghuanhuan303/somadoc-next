@@ -76,6 +76,13 @@ fn push_item(out: &mut Vec<VItem>, index: usize, item: &FlowItem, params: Vertic
                 }
             }
         }
+        // A table's first part is often just the header row. A page must not
+        // end there: the header would sit alone at the foot of the page while
+        // its body starts on the next one.
+        let header_alone = matches!(
+            item.table,
+            Some(table) if table.header_rows > 0 && part_index == 0 && last > 0
+        );
         out.push(VItem {
             item: index,
             part: part_index,
@@ -92,7 +99,7 @@ fn push_item(out: &mut Vec<VItem>, index: usize, item: &FlowItem, params: Vertic
             },
             notes: part.notes.clone(),
             penalty,
-            can_break: !(part_index == last && item.keep_with_next),
+            can_break: !header_alone && !(part_index == last && item.keep_with_next),
             master: item.master,
             table: item.table.map(|mut table| {
                 table.row = part.row;
@@ -656,4 +663,102 @@ fn stretch_share(delta: i64, total: i64, cumulative: i64, plus: i64) -> i32 {
     let before = delta * cumulative / total;
     let after = delta * (cumulative + plus) / total;
     (after - before) as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(height: i32, keep: bool) -> VItem {
+        VItem {
+            item: 0,
+            part: 0,
+            height: Width(height),
+            before: Glue::ZERO,
+            after: Glue::ZERO,
+            notes: Vec::new(),
+            penalty: 0,
+            can_break: !keep,
+            master: 0,
+            table: None,
+        }
+    }
+
+    fn notes() -> crate::NoteMap {
+        crate::NoteMap {
+            labels: Vec::new(),
+            blocks: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_figure_and_its_caption_stay_together() {
+        // figure + caption + figure + caption + paragraph. The first four fit
+        // on a page; the paragraph does not, and no break may fall between a
+        // figure and its caption.
+        let items = vec![
+            item(85_514, true),
+            item(4_914, false),
+            item(85_514, true),
+            item(4_914, false),
+            item(13_926, false),
+        ];
+        let ends = place_kp(
+            &items,
+            &[(0, items.len())],
+            Width(194_600),
+            &notes(),
+            VerticalParams::default_v1(),
+        )
+        .expect("feasible");
+        assert_eq!(ends, vec![4, 5]);
+
+        // With room for everything, one page holds the whole run.
+        let one = place_kp(
+            &items,
+            &[(0, items.len())],
+            Width(200_000),
+            &notes(),
+            VerticalParams::default_v1(),
+        )
+        .expect("feasible");
+        assert_eq!(one, vec![items.len()]);
+    }
+
+    #[test]
+    fn debug_two_figures_with_paragraphs() {
+        let items = vec![
+            item(85_514, true),
+            item(4_914, false),
+            item(13_926, false),
+            item(85_514, true),
+            item(4_914, false),
+            item(13_926, false),
+        ];
+        let ends = place_kp(
+            &items,
+            &[(0, items.len())],
+            Width(194_600),
+            &notes(),
+            VerticalParams::default_v1(),
+        )
+        .expect("feasible");
+        println!("ends={ends:?}");
+    }
+
+    #[test]
+    fn a_page_never_ends_between_a_figure_and_its_caption() {
+        // A page that can hold the figure but not the caption must move the
+        // pair, not leave a lone figure at the foot.
+        let items = vec![item(60_000, false), item(85_514, true), item(4_914, false)];
+        let ends = place_kp(
+            &items,
+            &[(0, items.len())],
+            Width(150_000),
+            &notes(),
+            VerticalParams::default_v1(),
+        )
+        .expect("feasible");
+        assert_eq!(ends, vec![1, 3]);
+    }
 }

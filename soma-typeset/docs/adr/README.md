@@ -86,6 +86,7 @@ only).
 | [0065](0065-column-shares.md) | Relative column widths (`Column.share`) and HTML `<colgroup>` | Accepted |
 | [0066](0066-word-styles-and-media.md) | Word styles resolved through `basedOn`; embedded images as figures | Accepted |
 | [0067](0067-latex-macros.md) | LaTeX macros and counters expanded before parsing | Accepted |
+| [0068](0068-figure-units-and-image-sizes.md) | Figure/caption units, table headers that never stand alone, intrinsic image sizes | Accepted |
 
 ## Rules
 
