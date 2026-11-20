@@ -3673,59 +3673,59 @@ fn push_hyphenated_text(
     patterns: &soma_hyphen::Patterns,
     out: &mut Vec<OwnedSpan>,
 ) {
-    if text.is_ascii() {
-        let bytes = text.as_bytes();
-        let mut cuts: Vec<usize> = Vec::new();
-        let mut cursor = 0;
-        while cursor < bytes.len() {
-            if !bytes[cursor].is_ascii_alphabetic() {
-                cursor += 1;
-                continue;
-            }
-            let start = cursor;
-            while cursor < bytes.len() && bytes[cursor].is_ascii_alphabetic() {
-                cursor += 1;
-            }
-            let word = &text[start..cursor];
-            if word.len() < HYPHEN_MIN_WORD || word.bytes().any(|byte| byte.is_ascii_uppercase()) {
-                continue;
-            }
-            let before = start.checked_sub(1).map(|index| bytes[index]);
-            let after = bytes.get(cursor).copied();
-            let glued = |byte: u8| matches!(byte, b'/' | b':' | b'.' | b'@' | b'_' | b'-');
-            if before.is_some_and(glued) || after.is_some_and(glued) {
-                continue;
-            }
-            for offset in patterns.breaks(word) {
-                let at = start + offset as usize;
-                if at > start && at < cursor {
-                    cuts.push(at);
-                }
+    // Latin runs are found by bytes; every slice below starts or ends on an
+    // ASCII letter, so a mixed CJK/Latin span stays on character boundaries.
+    let bytes = text.as_bytes();
+    let mut cuts: Vec<usize> = Vec::new();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if !bytes[cursor].is_ascii_alphabetic() {
+            cursor += 1;
+            continue;
+        }
+        let start = cursor;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_alphabetic() {
+            cursor += 1;
+        }
+        let word = &text[start..cursor];
+        if word.len() < HYPHEN_MIN_WORD || word.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            continue;
+        }
+        let before = start.checked_sub(1).map(|index| bytes[index]);
+        let after = bytes.get(cursor).copied();
+        let glued = |byte: u8| matches!(byte, b'/' | b':' | b'.' | b'@' | b'_' | b'-');
+        if before.is_some_and(glued) || after.is_some_and(glued) {
+            continue;
+        }
+        for offset in patterns.breaks(word) {
+            let at = start + offset as usize;
+            if at > start && at < cursor {
+                cuts.push(at);
             }
         }
-        if !cuts.is_empty() {
-            let mut cursor = 0;
-            let mut kind = SpanKind::Text;
-            for cut in cuts {
-                out.push(OwnedSpan {
-                    text: String::from(&text[cursor..cut]),
-                    style,
-                    kind,
-                    decor,
-                    link: link.map(String::from),
-                });
-                cursor = cut;
-                kind = SpanKind::Hyphen;
-            }
+    }
+    if !cuts.is_empty() {
+        let mut cursor = 0;
+        let mut kind = SpanKind::Text;
+        for cut in cuts {
             out.push(OwnedSpan {
-                text: String::from(&text[cursor..]),
+                text: String::from(&text[cursor..cut]),
                 style,
                 kind,
                 decor,
                 link: link.map(String::from),
             });
-            return;
+            cursor = cut;
+            kind = SpanKind::Hyphen;
         }
+        out.push(OwnedSpan {
+            text: String::from(&text[cursor..]),
+            style,
+            kind,
+            decor,
+            link: link.map(String::from),
+        });
+        return;
     }
     out.push(OwnedSpan {
         text: String::from(text),

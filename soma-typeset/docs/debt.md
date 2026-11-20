@@ -24,7 +24,7 @@
 | D06 | ~~真实字体度量~~ | **已关闭（E1）**：`soma-metrics`（零依赖、no_std）+ `tools/metrics-gen` + Noto CJK SC 整数表；`TableMetrics`/`StyledMetrics` 按字号缩放；`metricsHash` 进入 `soma.pages/2`。覆盖范围与 bold 近似见 D61/D63 | — | ✅ 已关闭 | 否 |
 | D07 | wasm 执行时延 | 只证明了编译 + 字节一致，没测运行时间 | wasm 预算只有推算 | A5 | 否 |
 | D08 | ~~叠标点挤压 / 按字号缩放 trim~~ | **已关闭（E3）**：`trim.pair`（1/4em，ParamOnly）+ trim 按 atom 字号缩放 + 行尾悬挂标点（`hanging-punctuation`，opt-in） | — | ✅ 已关闭 | 否 |
-| D09 | 无 hyphenation | 长英文 run 只能在 `-`、`/` 后断（E6）；无词典、无 tracking | 英文长词/URL 仍可能超宽 | 未排期（跟踪见 D60） | 否 |
+| D09 | ~~无 hyphenation~~ | **已关闭（ADR-0059）**：`soma-hyphen`（Liang 算法，模式集外置），CLI `--hyphenation`；内核新增 `BoundaryKind::Hyphen` 与 `Line.hyphenated`，连字符宽度计入行宽。URL/路径/全大写词不参与 | — | ✅ 已关闭 | 否 |
 | D10 | `boundary_deviation` 假设无自动告警 | `Line.boundary_deviation` 是比例分配近似，`LineTrace.boundary_deviation_exact` 是精确值；两者都在 `inspect` 输出，但 `bench` 只打近似值，没有相对误差门限 | 比例分配假设失效时不会报警 | A4 后加 P95 相对误差报告项 | 否 |
 | D11 | active-node 剪枝 | 未实现；atom 数窗口已够（4,000 atoms 最差 1.2 ms） | 无 | 未排期（等 wasm 实测） | 否 |
 | D12 | K7 fitness / rhythm | 相邻行松紧节奏不进代价 | 「松紧交替」无法优化 | 未排期（需 A4 页面上下文 + 评估证据） | 否 |
@@ -41,7 +41,7 @@
 | D21 | ~~`soma-template`（纯 YAML）~~ | **已关闭（A2）**：YAML 子集解析、精确单位、级联/继承、`StyledDoc`（纯数据）、`templateHash` + `styleHash`；schema `soma.template/1` / `soma.styles/1` | — | ✅ 已关闭 | 否 |
 | D22 | ~~`soma-layout`（盒子树）~~ | **已关闭（A3）**：`PagedLayout`/页面/放置块/行；段落盒与直接 K-P 逐行一致 | — | ✅ 已关闭 | 否 |
 | D23 | ~~分页~~ | **已关闭（A4）**：确定性贪心、强制分页、keep-with-next、溢出标记、脚注区重排 | — | ✅ 已关闭 | 否 |
-| D24 | 语法前端 | **Markdown（A5）、HTML（ADR-0024）、LaTeX（ADR-0025）子集已完成**；Word 未做 | Word 源仍不可用 | 后续 | 否 |
+| D24 | ~~Word 前端~~ | **已关闭（ADR-0063）**：`soma-docx` 自写 zip/inflate + OOXML，只读导入段落/标题/行内强调/表格/列表/元数据；样式表、图片、脚注、域、修订不承诺保真 | 复杂 Word 会降级，符合 N1 | ✅ 已关闭 | 否 |
 | D25 | ~~正式 HTML 渲染器~~ | **已关闭（A5）**：`soma-render-html` 消费 `PagedLayout` + `TextSource`，不重排 | — | ✅ 已关闭 | 否 |
 | D26 | ~~脚注 / 图 / 表 / 公式适配~~ | **已关闭（A6 起，ADR-0017/0019/0026/0047）**：脚注整块移页 + 编号、图片 XObject、表格网格与行线/列线/colspan/rowspan、数学适配器全都在；剩余边界分别记在 D51、D71 | — | ✅ 已关闭 | 否 |
 | D27 | ~~全管线 native/wasm 哈希~~ | **已关闭（A6）**：fixture 含 DocIR + 行内 + 页面，8,979 bytes 一致 | — | ✅ 已关闭 | 否 |
@@ -54,7 +54,7 @@
 | D34 | `Date` 不校验月份天数 | 接受 2 月 30 日；只检查 year/month/day 范围 | 无法发现源侧的非法日期 | 未排期（来源已经是日期文本） | 否 |
 | D35 | DocIR 两条平行遍历 | `for_each_meta` / `for_each_meta_mut` 是两份手写 match，靠测试锁同步 | 加字段时两处都可能漏 | 用宏/visitor 合并 | 否 |
 | D36 | ~~Raw 内容未做安全白名单~~ | **已关闭（Gate C）**：渲染器只画 fallback 文本，输出转义且不含 `href`/`src`/脚本；内容侧无执行路径 | — | ✅ 已关闭 | 否 |
-| D37 | Ruby 只有数据没有行为 | IR 保留 `base`/`annotation`，模板与布局还没有 ruby 策略 | 注音不会渲染 | A4/A6 | 否 |
+| D37 | ~~Ruby 只有数据没有行为~~ | **已关闭（ADR-0060）**：`\ruby{base}{reading}` 与 `[[ruby:base\|reading]]`；基字为单原子，行盒向上预留注音，PDF/SVG/HTML 均绘制 | — | ✅ 已关闭 | 否 |
 | D38 | `Atom.text: String` 每 atom 一次分配 | 冻结内核里 `Atom` 拥有 `String`；`DocIR -> ParaIR` 必然物化 | 4,000 atoms ≈ 4,000 次分配，是当前 0.5 ms 的一部分 | A3 先测量；改内核需 ADR-0007 + modelVersion | 否 |
 | D39 | wasm/FFI 边界形状未实现 | ADR-0010 §7 已定原则（句柄表或 JSON 进出，不用 `Arc`），但无代码 | wasm 宿主拿不到文档/结果 | A5 | 否 |
 | D40 | `soma-layout-par` 不存在 | ADR-0010 §5 决定并行在独立 std crate；未创建 | 长文档墙钟未优化 | A6 后（P2） | 否 |
@@ -91,8 +91,8 @@
 | D90 | ~~表格列宽一律平分~~ | **已关闭（ADR-0058）**：布局先量每列的自然宽（含 colspan 摊派），再按比例分配，`measure / 6n` 作下限，最大余数法保证列宽之和精确等于版心 | — | ✅ 已关闭 | 否 |
 | D91 | 混排 2000 atoms 的性能预算擦边 | `bench --check` 的门槛是 ≤2000 atoms 20 ms、≤4000 atoms 80 ms。本机 release 实测：混排 2000 atoms p95 **20.23 ms**（超）、4000 atoms 79.0 ms（内存 4 MB）；纯中文 2000 atoms 0.24 ms，标点密集 0.62 ms，都远低于门槛。差值是 1.28M 次行评估里的整数除法与缓存 | 2,000 字的混排段落在最慢的一档上刚好越线 | 除法换乘法逆元、或按 D11 加保守剪枝；先测 wasm 再决定门槛是否上调 | 否 |
 | D89 | ~~列表没有悬挂缩进~~ | **已关闭（ADR-0058）**：内核 `ParagraphStyle.hang`（默认 0，行为不变）；模板里写负的 `first-indent` 即悬挂缩进，记号落在文字列左侧 1.2em，续行回到文字列 | — | ✅ 已关闭 | 否 |
-| D80 | 索引按码位排序 | 词条按 Unicode 标量排序，没有拼音/笔画排序；`index:` 尚无 `sort` 字段 | 中文索引的排序不符合部分出版习惯 | 需要时加模板字段（不改 DocIR） | 否 |
-| D81 | 索引标记覆盖有限 | 表格单元与脚注定义里的 `\index`/`[[index:]]` 不收集；无 `see`/`see also`、无子条目、无页码范围合并 | 复杂索引需人工整理 | 有真实索引需求时扩 | 否 |
+| D80 | ~~索引按码位排序~~ | **已关闭（ADR-0061）**：`soma-collate` 内置 27,584 个码位的拼音序表；模板 `index.sort: codepoint\|pinyin`（默认 codepoint，canonical 字节不变） | — | ✅ 已关闭 | 否 |
+| D81 | ~~索引标记覆盖有限~~ | **已关闭（ADR-0061）**：`a!b` 子条目、`@排序键`、`\|see{}`/`\|seealso{}`；表格单元与脚注定义里的标记按所在页收集；父项未标时自动补父行；页码去重 | 无页码范围合并（如 `3–5`） | 未排期 | 否 |
 | D82 | ~~PDF 后端有边界~~ | **已关闭（ADR-0034…0047）**：`glyf`/CFF 嵌入（0039/0040）且 CFF 子集压缩排（0046）；动态 Huffman 流压缩（0045）；下划线/删除线与链接注解（0044）；PNG/JPEG 图片 XObject 与 tagged PDF（0047）。仍有的窄边界：无 ICC/CMYK 配置、图片只按盒缩放、不支持 >8-bit PNG 与 inline image、表格单元在结构树里当段落、PDF 只在 CLI 暴露 | — | ✅ 已关闭 | 否 |
 | D83 | ~~部分全角标点没有标点类~~ | **已关闭（ADR-0058）**：`…`/`—`/`–`/`·` 归入新的 `PunctClass::Dash`——前面不许断行、两侧不裁量、不悬挂；`——` 与 `……` 保持 2em | — | ✅ 已关闭 | 否 |
 | D85 | ~~name-keyed CFF 不能嵌入~~ | **已关闭（ADR-0040）**：name-keyed 脸被提升为 CID-keyed（合成 ROS/FDArray/FDSelect），`seac` 复合由 Type 2 解释器展开成显式轮廓（子程序内联、hint 丢弃、笔位置跟踪）；解释器不认识的算子直接报错 | — | — | ✅ 已关闭 |
@@ -105,9 +105,9 @@
 | D50 | ~~无页面母版 / 页眉页脚 / 页码~~ | **已关闭（E4）**：页眉（running-title 或字面量）、页脚、`{page}`/`{pages}` 页码；两遍无重排 | 首页/封面变体未做（D62） | ✅ 已关闭 | 否 |
 | D51 | 盒子树是扁平的 | **colspan、rowspan、表头重复、单元格跨页续排、行线、tagged 表格层次已支持**（ADR-0017/0018/0019/0050）：结构树现在是 `/Table` → `/TR` → `/TD`，跨行列带 `/RowSpan`/`/ColSpan`，一个单元里的多段共用一个 `/TD`。仍无嵌套 VBox/HBox、逐表覆盖线宽、单元格四边框 | 嵌套布局与逐表线宽受限 | 后续 | 否 |
 | D52 | ~~公式是文本占位~~ | **已关闭（ADR-0026）**：`soma-math` 解析 TeX 子集 → 整数 `MathLayout`（符号 + 分数线/根号横线）；`soma-layout` 居中放一个 `MathBox`（带基线），页面 schema 升到 `soma.pages/5`；解析失败仍回退到文本占位。剩余边界见 D71 | — | ✅ 已关闭 | 否 |
-| D53 | Markdown 子集有限 | 无嵌套列表、setext 标题、表格、HTML 块、链接引用定义 | 复杂 Markdown 会退化为文本 | 未排期 | 否 |
+| D53 | ~~Markdown 子集有限~~ | **已关闭（ADR-0062）**：嵌套列表（按缩进递归）、GFM 表格（对齐与 `\|` 转义）、setext 标题。仍无 HTML 块、链接引用定义 | 纯语义子集，未知语法保留为文本 | ✅ 已关闭 | 否 |
 | D54 | ~~行内代码无独立度量~~ | **已关闭**：代码 span 的 atom 带 `code` 元素样式，宽度按该样式的面与字号量（测试 `inline_code_is_measured_with_the_code_style` 锁住；实测 9pt 无衬线窄于 10.5pt 正文） | — | ✅ 已关闭 | 否 |
-| D55 | ~~图只画占位框~~ | **已关闭（ADR-0047/0048）**：PNG/JPEG 在 PDF 里是 XObject（PNG 走 Flate、JPEG 直通），HTML/SVG 用 `data:` URI；盒子的宽高比来自图片本身。`Ruby` 仍只输出 base 文本，见 D37 | — | ✅ 已关闭 | 否 |
+| D55 | ~~图只画占位框~~ | **已关闭（ADR-0047/0048）**：PNG/JPEG 在 PDF 里是 XObject（PNG 走 Flate、JPEG 直通），HTML/SVG 用 `data:` URI；盒子的宽高比来自图片本身。Ruby 见 ADR-0060 | — | ✅ 已关闭 | 否 |
 | D56 | `Section` 级脚注编号回退 | `numbering: section` 按全文连续处理 | 分节编号不准确 | 未排期 | 否 |
 | D57 | `Line` 序列化上提到 kernel | `Line::write_canonical` 是增量 API（页面结果复用），`soma.layout/6` 字节不变 | 无 | — | 否 |
 
@@ -152,4 +152,5 @@
 | 书稿能力 | **已完成（ADR-0032）**：级别选择器、自动编号、前置页页码、目录引导点与图/表目录；新增 D78、D79 |
 | 长文档能力 | **已完成（ADR-0033）**：题注样式、可换行目录、书签 outline、索引；关闭 D78、D79，新增 D80、D81 |
 | PDF 输出 | **已完成（ADR-0034/ADR-0039）**：TrueType 稀疏子集与 CID-keyed CFF、Identity-H、书签树、PageLabels；边界见 D82/D85 |
-| 未排期 | D01、D03、D04、D05、D10、D11、D12、D13、D60、D62、D69、D70、D71、D74、D80、D81、D91、N1–N6 |
+| 全量补课 | **已完成（ADR-0059–0063）**：关闭 D09、D24、D37、D53、D80、D81 |
+| 未排期 | D01、D03、D04、D05、D10、D11、D12、D13、D60、D62、D69、D70、D71、D74、D91、N1–N6 |

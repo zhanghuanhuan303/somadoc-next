@@ -393,8 +393,9 @@ struct Shaped<'a> {
     shrink: Vec<i64>,
     atom_prefix: Vec<i64>,
     glue_prefix: Vec<i64>,
-    /// Prefix sum of the hyphen glyph width at hyphenation boundaries.
-    hyphen_prefix: Vec<i64>,
+    /// Hyphen glyph width per boundary, else zero. Only the boundary a line
+    /// actually breaks at contributes its width.
+    hyphen: Vec<i64>,
     stretch_prefix: Vec<i64>,
     shrink_prefix: Vec<i64>,
     cjk_latin_stretch_prefix: Vec<i64>,
@@ -475,7 +476,6 @@ impl<'a> Shaped<'a> {
                 }
             })
             .collect();
-        let hyphen_prefix = prefix_sums(&hyphen);
         let stretch_prefix = prefix_sums(&stretch);
         let shrink_prefix = prefix_sums(&shrink);
         let cjk_latin_stretch_prefix = prefix_sums(&cjk_latin_stretch);
@@ -512,7 +512,7 @@ impl<'a> Shaped<'a> {
             shrink,
             atom_prefix,
             glue_prefix,
-            hyphen_prefix,
+            hyphen,
             stretch_prefix,
             shrink_prefix,
             cjk_latin_stretch_prefix,
@@ -549,8 +549,14 @@ impl<'a> Shaped<'a> {
     fn natural(&self, start: usize, end: usize) -> i64 {
         let atoms = self.atom_prefix[end] - self.atom_prefix[start];
         let boundaries = self.glue_prefix[end - 1] - self.glue_prefix[start];
-        let hyphens = self.hyphen_prefix[end - 1] - self.hyphen_prefix[start];
-        atoms + boundaries + hyphens
+        // A hyphen exists only where the line breaks; internal hyphenation
+        // points contribute nothing (they are not a rendered glyph).
+        let hyphen = if end < self.len() {
+            self.hyphen[end - 1]
+        } else {
+            0
+        };
+        atoms + boundaries + hyphen
     }
 
     fn total_stretch(&self, start: usize, end: usize) -> i64 {
@@ -1363,7 +1369,7 @@ fn build_boxes(
 ) -> Vec<AtomBox> {
     let mut boxes = Vec::with_capacity(end - start);
     let weights = boundary_weights(shaped, start, end, adjustment);
-    let adjustments = distribute(adjustment as i64, &weights);
+    let adjustments = spread(adjustment, &weights);
 
     let mut x = indent.0 as i64 - trim_left.0 as i64;
     for atom_index in start..end {
@@ -1401,7 +1407,7 @@ fn cjk_latin_adjustments(
     }
 
     let weights = boundary_weights(shaped, start, end, adjustment);
-    let adjustments = distribute(adjustment as i64, &weights);
+    let adjustments = spread(adjustment, &weights);
     let mut out = Vec::new();
 
     for (offset, adjustment) in adjustments.iter().enumerate() {
@@ -1429,11 +1435,22 @@ fn boundary_weights(shaped: &Shaped<'_>, start: usize, end: usize, adjustment: i
         weights.push(weight);
     }
 
-    if weights.iter().all(|weight| *weight <= 0) {
-        weights.fill(1);
-    }
-
     weights
+}
+
+/// Spread a justification adjustment over the boundaries that can actually
+/// take it. A boundary with no stretch (a hyphenation point, two objects set
+/// against each other) never opens up; a line with nothing to stretch is left
+/// short, which is what a compositor sees as an underfull line. Smearing the
+/// adjustment evenly instead would put space between the letters of a word.
+fn spread(adjustment: i32, weights: &[i64]) -> Vec<i32> {
+    let can_grow = weights.iter().any(|weight| *weight > 0);
+    let can_shrink = adjustment < 0 && weights.iter().any(|weight| *weight < 0);
+    if can_grow || can_shrink {
+        distribute(adjustment as i64, weights)
+    } else {
+        alloc::vec![0; weights.len()]
+    }
 }
 
 fn distribute(total: i64, weights: &[i64]) -> Vec<i32> {

@@ -28,11 +28,12 @@
 | `thematic_break` | supported | `---`/`***`/`___` → `ThematicBreak` |
 | `footnote_def` | supported | `[^label]: text` → `FootnoteDef` |
 | `footnote_ref` | supported | `[^label]` → `FootnoteRef` |
+| `ruby_marker` | supported | `[[ruby:base\|reading]]` → `Inline::Ruby` |
 | `index_marker` | supported | `[[index:term]]` → `Inline::Index` |
 | `escape` | supported | 反斜杠转义下一个字符 |
-| `nested_list` | degraded | 缩进项并入父项文本 |
-| `setext_heading` | degraded | 下划线标题退化为段落 + 分隔线 |
-| `table` | degraded | 竖线表格保持文本；要真表格请构造 `Table` |
+| `nested_list` | supported | 缩进记号成为父项内的 `List` |
+| `setext_heading` | supported | 段落下方的 `===` / `---` 成为一/二级 `Heading` |
+| `table` | supported | 带分隔行的 GFM 竖线表格成为 `Table`；`\|` 是字面竖线 |
 | `html_block` | degraded | 原样保留为文本，永不执行 |
 | `html_inline` | degraded | 原样保留为文本，永不执行 |
 | `link_reference` | degraded | `[label]: url` 定义保持文本 |

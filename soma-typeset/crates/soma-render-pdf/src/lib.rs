@@ -573,6 +573,27 @@ fn collect_blocks(
                 for character in text.atom_text(block.node, atom.atom).chars() {
                     used.add(role, fonts.font(role), character);
                 }
+                if let Some(note) = block.ruby.iter().find(|note| note.atom == atom.atom) {
+                    for character in note.text.chars() {
+                        let note_role = ruby_role(fonts, character, role);
+                        used.add(note_role, fonts.font(note_role), character);
+                    }
+                }
+            }
+            // The hyphen of a hyphenated line is synthetic: it is not in the
+            // atom text, so it has to be added to the subset explicitly.
+            if placed.line.hyphenated {
+                if let Some(last) = placed.line.boxes.last() {
+                    let style_id = text
+                        .atom_style(block.node, last.atom)
+                        .unwrap_or(block.style);
+                    let style = styles
+                        .style(style_id)
+                        .cloned()
+                        .unwrap_or_else(ComputedStyle::base);
+                    let role = fonts.role_for(&style, text.uses_fallback(block.node, last.atom));
+                    used.add(role, fonts.font(role), '-');
+                }
             }
         }
         if let Some(math) = &block.math {
@@ -584,6 +605,24 @@ fn collect_blocks(
 /// The face that draws `character` inside a formula: the math face when it has
 /// the glyph, else the text face (a `\text{...}` run in Han, say), else the
 /// rescue face.
+/// The face that draws one ruby character: the base's face when it has the
+/// glyph, else the fallback text face, else the math face.
+fn ruby_role(fonts: &PdfFonts<'_>, character: char, text_role: Role) -> Role {
+    if fonts.font(text_role).glyph(character as u32) != 0 {
+        return text_role;
+    }
+    if let Some(fallback) = fonts.fallback {
+        if fallback.glyph(character as u32) != 0 {
+            return Role::Fallback;
+        }
+    }
+    let math = fonts.math_role();
+    if fonts.font(math).glyph(character as u32) != 0 {
+        return math;
+    }
+    text_role
+}
+
 fn math_face(fonts: &PdfFonts<'_>, character: char, text_role: Role) -> Role {
     let math = fonts.math_role();
     if math == text_role {
@@ -1307,25 +1346,45 @@ fn paint_block(
             // ascent. The layout reserved room for it, so it cannot collide
             // with the previous line (ADR-0060).
             if let Some(note) = block.ruby.iter().find(|note| note.atom == atom.atom) {
-                let note_glyphs: Vec<u16> = note
-                    .text
-                    .chars()
-                    .map(|character| font.glyph(character as u32))
-                    .collect();
-                let note_width: i64 = note_glyphs
+                // One face per character: a reading in accented Latin often
+                // needs a face the base does not use (ADR-0060).
+                let mut runs: Vec<(Role, Vec<u16>)> = Vec::new();
+                for character in note.text.chars() {
+                    let note_role = ruby_role(fonts, character, role);
+                    let glyph = fonts.font(note_role).glyph(character as u32);
+                    match runs.last_mut() {
+                        Some((last_role, glyphs)) if *last_role == note_role => glyphs.push(glyph),
+                        _ => runs.push((note_role, vec![glyph])),
+                    }
+                }
+                let note_width: i64 = runs
                     .iter()
-                    .map(|glyph| font.width_1000(*glyph) as i64 * note.size.0 as i64 / 1000)
+                    .flat_map(|(role, glyphs)| {
+                        let font = fonts.font(*role);
+                        glyphs.iter().map(move |glyph| {
+                            font.width_1000(*glyph) as i64 * note.size.0 as i64 / 1000
+                        })
+                    })
                     .sum();
-                let note_x = x as i64 + (atom.advance.0 as i64 - note_width) / 2;
+                let mut note_x = x as i64 + (atom.advance.0 as i64 - note_width) / 2;
                 let note_y = layout.page.height.0 - (baseline - note.shift.0);
                 painter.set_fill(atom_style.color.unwrap_or(0));
-                painter.start_text();
-                painter.set_font(role, painter.scale.milli(note.size.0));
-                painter.show(
-                    painter.scale.milli(note_x as i32),
-                    painter.scale.milli(note_y),
-                    &note_glyphs,
-                );
+                for (note_role, glyphs) in runs {
+                    let note_font = fonts.font(note_role);
+                    painter.start_text();
+                    painter.set_font(note_role, painter.scale.milli(note.size.0));
+                    painter.show(
+                        painter.scale.milli(note_x as i32),
+                        painter.scale.milli(note_y),
+                        &glyphs,
+                    );
+                    note_x += glyphs
+                        .iter()
+                        .map(|glyph| {
+                            note_font.width_1000(*glyph) as i64 * note.size.0 as i64 / 1000
+                        })
+                        .sum::<i64>();
+                }
             }
 
             // Decorations and links are decided by the source, not the style:

@@ -122,6 +122,11 @@ pub const CAPABILITIES: &[Capability] = &[
         note: "`[^label]: text` becomes `FootnoteDef`",
     },
     Capability {
+        syntax: "ruby_marker",
+        status: CapabilityStatus::Supported,
+        note: "`[[ruby:base|reading]]` becomes `Inline::Ruby`",
+    },
+    Capability {
         syntax: "index_marker",
         status: CapabilityStatus::Supported,
         note: "`[[index:term]]` becomes `Inline::Index`",
@@ -138,18 +143,18 @@ pub const CAPABILITIES: &[Capability] = &[
     },
     Capability {
         syntax: "nested_list",
-        status: CapabilityStatus::Degraded,
-        note: "indented items join the parent item as text",
+        status: CapabilityStatus::Supported,
+        note: "an indented marker becomes a `List` inside the parent item",
     },
     Capability {
         syntax: "setext_heading",
-        status: CapabilityStatus::Degraded,
-        note: "underlined heading becomes a paragraph plus a rule",
+        status: CapabilityStatus::Supported,
+        note: "`===` / `---` under a paragraph becomes a level 1/2 `Heading`",
     },
     Capability {
         syntax: "table",
-        status: CapabilityStatus::Degraded,
-        note: "pipe rows stay text; build `Table` in DocIR to get a table",
+        status: CapabilityStatus::Supported,
+        note: "GFM pipe table with a delimiter row becomes `Table`; a backslash-bar is literal",
     },
     Capability {
         syntax: "html_block",

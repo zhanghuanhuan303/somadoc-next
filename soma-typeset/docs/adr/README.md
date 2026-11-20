@@ -77,6 +77,11 @@ only).
 | [0056](0056-tags-text-math-and-braces.md) | `\tag`/`\notag`, maths inside `\text`, braces assembled from rules when wide | Accepted |
 | [0057](0057-containers-indent-their-children.md) | A container indents its children; a list item carries its marker | Accepted |
 | [0058](0058-hanging-columns-and-dashes.md) | Hanging indents, content-sized table columns, wide dashes, cells as inlines | Accepted |
+| [0059](0059-hyphenation.md) | Hyphenation: a boundary kind, an external pattern set, and a hyphen charged to the line | Accepted |
+| [0060](0060-ruby.md) | Ruby annotations: one base atom, line ascent reserved, geometry resolved in layout | Accepted |
+| [0061](0061-index-structure-and-order.md) | Index tree, `see`/`see also`, pinyin order from a checked-in table | Accepted |
+| [0062](0062-markdown-structures.md) | Nested lists, GFM tables, and setext headings in Markdown | Accepted |
+| [0063](0063-docx-reader.md) | Word reader: dependency-free zip/inflate + OOXML to DocIR | Accepted |
 
 ## Rules
 

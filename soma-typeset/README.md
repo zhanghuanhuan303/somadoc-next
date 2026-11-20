@@ -63,7 +63,7 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   (`docHash` for exact reproduction, `contentHash` for content identity). The
   crate has **zero dependencies** and no floats; Gate A enforces that.
 - A3–A6 pipeline: `soma-layout` builds paragraph boxes over the frozen kernel and
-  paginates with **line-level vertical K-P** by default (`soma.pages/9`):
+  paginates with **line-level vertical K-P** by default (`soma.pages/10`):
   paragraphs split across pages, widows/orphans are penalties, vertical glue can
   stretch, footnotes are charged to the marker's line, and page masters add a
   running header, footer, and folio. Figure boxes, table cell boxes,
@@ -121,8 +121,26 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   elements (`figureCaption`/`tableCaption`); contents rows wrap and keep the
   page number on the last line; the page result carries an `outline` (one
   bookmark per heading with physical and printed page) and an `index` report.
-  `\index{term}` in LaTeX or `[[index:term]]` in Markdown, plus `index: {title}`
-  in the template, produces a sorted index with merged page lists.
+  `\index{term}` in LaTeX or `[[index:term]]` in Markdown, plus
+  `index: {title, sort}` in the template, produces an index with merged page
+  lists. The marker grammar supports sub-entries (`宋体!字面`), per-part sort
+  keys (`宋体@songti`), `|see{}` and `|seealso{}`; markers inside table cells
+  and footnote definitions are collected on the page that prints them. Order is
+  code point (`codepoint`, the default) or **pinyin** from the checked-in
+  `soma-collate` table (ADR-0061).
+- Ruby (ADR-0060): `\ruby{汉字}{hànzì}` in LaTeX and `[[ruby:汉字|hànzì]]` in
+  Markdown. The base stays one atom, the line reserves space above its ascent,
+  and the PDF, SVG, and HTML renderers each draw the annotation.
+- Hyphenation (ADR-0059): `soma-hyphen` implements Liang's algorithm over an
+  external TeX pattern file (`soma render --hyphenation en.pat`). A broken line
+  ends in a real hyphen whose width is charged to the line; a document without
+  patterns is byte-identical to before.
+- Word input (ADR-0063): `soma render --input draft.docx` reads the archive
+  with a dependency-free zip/inflate and maps paragraphs, headings, inline
+  emphasis, tables, lists, and core metadata to DocIR. No layout fidelity is
+  promised (N1).
+- Markdown structure (ADR-0062): nested lists, GFM tables (alignment, escaped
+  bars), and setext headings join the existing subset.
 - One command (ADR-0029): `soma render --input doc.tex --template book.yaml
   --format html|svg|json|pdf` runs the whole pipeline; `soma check` prints
   layout facts and the canonical hash. See [`docs/cli.md`](docs/cli.md).
@@ -170,7 +188,7 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
 
 ## What is not here yet
 
-- Word import, browser WASM packaging, incremental layout, and the human
+- Browser WASM packaging, incremental layout, and the human
   blind-test run. Gate Q remains `Inconclusive` until that run exists; the
   effect scorecard (Q′) is a structural report, not a quality claim. See
   [`docs/roadmap-v2.md`](docs/roadmap-v2.md) and
@@ -181,9 +199,10 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
 - Font metrics come from a committed table, not from shaping: no kerning pairs
   yet, bold uses regular advances, and rare codepoints fall back to 1em (D61,
   D63).
-- No hyphenation dictionary. Latin runs may break after `-` and `/`, and nothing
-  else; a long unbreakable run can still compress past its shrink limit (D09,
-  D60).
+- Hyphenation needs a pattern set supplied by the caller: there is no built-in
+  dictionary, and a run that the patterns do not cover can still compress past
+  its shrink limit. Tracking is opt-in per style, not automatic for hard cases
+  (D60).
 - The punctuation hard rules are cited against GB/T 15834-2011 via W3C clreq
   §6.1.1 (basic). Trim and pair-compression ratios remain `ParamOnly` and
   uncalibrated.
@@ -205,6 +224,9 @@ crates/
   soma-md/     # Markdown subset -> DocIR
   soma-html/   # HTML subset (semantic whitelist) -> DocIR
   soma-latex/  # LaTeX subset (sections, inline, environments) -> DocIR
+  soma-docx/   # Word .docx (zip + OOXML) -> DocIR
+  soma-collate/ # pinyin order for the index
+  soma-hyphen/ # Liang hyphenation over an external pattern set
   soma-cli/    # `soma`: source + template -> HTML/SVG/PDF/canonical JSON
   soma-math/   # TeX subset -> integer math boxes (symbols + rules)
   soma-render-html/ # PagedLayout -> absolutely positioned HTML

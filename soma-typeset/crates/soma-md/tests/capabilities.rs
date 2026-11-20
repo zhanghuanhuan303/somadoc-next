@@ -23,7 +23,8 @@ fn capability_ids_are_unique_and_non_empty() {
 #[test]
 fn every_status_has_entries() {
     assert!(with_status(CapabilityStatus::Supported).count() >= 15);
-    assert!(with_status(CapabilityStatus::Degraded).count() >= 5);
+    // The honest set: constructs that survive as text but lose structure.
+    assert!(with_status(CapabilityStatus::Degraded).count() >= 4);
     // Rejected is allowed to be empty: a forgiving front end keeps text.
     let _ = with_status(CapabilityStatus::Rejected).count();
 }
@@ -83,9 +84,6 @@ fn plain_text_of(source: &str) -> String {
 #[test]
 fn degraded_constructs_keep_their_text() {
     let cases: &[(&str, &str, &str)] = &[
-        ("nested_list", "- outer\n  - inner\n", "inner"),
-        ("setext_heading", "Title\n---\n", "Title"),
-        ("table", "| a | b |\n| - | - |\n", "| a | b |"),
         ("html_block", "<div>kept</div>\n", "<div>kept</div>"),
         ("html_inline", "text <b>bold</b> end\n", "<b>bold</b>"),
         (
@@ -110,7 +108,7 @@ fn degraded_constructs_keep_their_text() {
 #[test]
 fn supported_constructs_produce_structure() {
     let document = soma_md::parse_markdown(
-        "# 标题\n\n正文 **粗** `code` [链接](x) ![图](a.png)\n\n- 项\n\n> 引用\n\n---\n\n```rust\nx\n```\n",
+        "# 标题\n\n正文 **粗** `code` [链接](x) ![图](a.png) [[ruby:汉字|hànzì]]\n\n- 项\n  - 子项\n\n> 引用\n\n---\n\n```rust\nx\n```\n\n集注\n===\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n",
     );
     document.validate().expect("valid DocIR");
 
@@ -120,10 +118,32 @@ fn supported_constructs_produce_structure() {
     assert!(matches!(document.blocks[3], Block::BlockQuote(_)));
     assert!(matches!(document.blocks[4], Block::ThematicBreak(_)));
     assert!(matches!(document.blocks[5], Block::CodeBlock(_)));
+    assert!(matches!(document.blocks[6], Block::Heading(_)), "setext");
+    assert!(matches!(document.blocks[7], Block::Table(_)), "GFM table");
+    let Block::List(list) = &document.blocks[2] else {
+        unreachable!()
+    };
+    assert!(
+        list.items[0]
+            .blocks
+            .iter()
+            .any(|block| matches!(block, Block::List(_))),
+        "nested list"
+    );
+    let Block::Paragraph(paragraph) = &document.blocks[1] else {
+        unreachable!()
+    };
+    assert!(
+        paragraph
+            .inlines
+            .iter()
+            .any(|inline| matches!(inline, soma_doc::Inline::Ruby(_))),
+        "ruby"
+    );
 }
 
 #[test]
 fn the_matrix_is_stable() {
     // Pinning the count makes an accidental silent removal visible.
-    assert_eq!(CAPABILITIES.len(), 27);
+    assert_eq!(CAPABILITIES.len(), 28);
 }

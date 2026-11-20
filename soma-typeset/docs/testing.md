@@ -126,7 +126,7 @@ Cumulative public test files:
 | `effect.rs` (eval) | 7 | Gate Q′ structural claims on the scorecard |
 | `engine.rs` | 15 | `soma.engine/1`: parse, reject, canonical hash, layout equivalence |
 | `corpus.rs` (eval) | 9 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
-| `a5_md.rs` | 15 | Markdown subset, inlines (including GFM `~~`), spans, index extension, front matter, validity |
+| `a5_md.rs` | 22 | Markdown subset (nested lists, GFM tables, setext headings), inlines (including GFM `~~`), spans, index/ruby extensions, front matter, validity |
 | `html.rs` (html) | 10 | HTML subset shapes, table grid and caption, degradation, recovery, pipeline |
 | `latex.rs` (latex) | 16 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, inline command opening a block, recovery, pipeline |
 | `math.rs` (soma-math) | 43 | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, spacing, styles, errors, italic variables, `array` formats, `\substack`, brace ink and labels, assembled braces, `\color`, text-mode maths, tags |
@@ -139,7 +139,9 @@ Cumulative public test files:
 | `e17_front_matter.rs` (layout) | 5 | continuous/roman/hidden labels, `{pages}` = body pages, no folio on hidden pages |
 | `e18_captions.rs` (layout) | 4 | figure/table caption elements, indent reset, emphasis keeps the caption base |
 | `e19_outline.rs` (layout) | 3 | one bookmark per heading, printed labels, empty document |
-| `e20_index.rs` (layout) | 5 | sorted unique terms, page lists, own page, entry styles, empty index |
+| `e20_index.rs` (layout) | 11 | sorted unique terms, page lists, own page, entry styles, empty index, sub-entry indentation, orphan parents, pinyin order, `see`, table-cell and footnote markers |
+| `e25_ruby.rs` (layout) | 4 | one base atom, annotation text and geometry, line ascent reserved, canonical key only when present |
+| `e26_hyphen.rs` (layout) | 5 | pattern breaks, hyphen charged to the line, no patterns keeps the word whole, URLs untouched, canonical marker |
 | `e21_line_end_punctuation.rs` (layout) | 6 | trailing bearing trimmed on justified lines, ink on the text edge, ragged lines untouched |
 | `e22_fallback.rs` (layout) | 2 | a rescue face measures the glyph and its edge is what a line end trims |
 | `e23_space_shrink.rs` (layout) | 2 | a space gives up at most a third of itself; an unbreakable word still lays out |
@@ -167,10 +169,13 @@ Cumulative public test files:
 | `soma-metrics` unit | 14 | table round-trip, CJK/Latin widths, regular/bold/math faces, hash, truncation, ink sections, v1/v2 compatibility |
 | `soma-core` vertical unit | 1 | vertical cost model hash |
 | core unit | 24 | IR, units, breaker, result, presets |
-| layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
+| layout unit | 12 | trim scaling at body and non-body sizes; math metric adapter; index grammar and ordering |
+| `soma-collate` unit | 4 | pinyin rank lookup, Latin before Han, shared prefixes, table coverage |
+| `soma-hyphen` unit | 10 | pattern parsing (`%`, `\patterns{}`), the `hyphenation` fixture, left/right limits, UTF-8 offsets, ordering |
+| `soma-docx` (unit + integration) | 29 | zip store/deflate, inflate (stored/fixed/dynamic), XML entities, headings, emphasis, tables, lists, metadata, damaged archives |
 | render-pdf unit | 26 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing |
 
-Total: **634 tests**.
+Total: **713 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.
