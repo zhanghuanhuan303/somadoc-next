@@ -57,8 +57,9 @@ rescued,weight_gap,distance,path,face,profile
 
 Weight distance comes before style distance on purpose: a Light face next to a
 Regular body is visible on every rescued glyph, so a weight-matched stranger
-beats a stylistically closer cousin. CFF faces are excluded — a rescue face has
-to be embeddable, not merely measurable.
+beats a stylistically closer cousin. Faces with neither `glyf` nor a
+CID-keyed CFF program are excluded — a rescue face has to be embeddable, not
+merely measurable (ADR-0039).
 
 ## Fingerprint and coverage answer different questions
 

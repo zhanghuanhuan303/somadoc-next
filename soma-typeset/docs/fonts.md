@@ -1,8 +1,8 @@
 # Choosing a body font
 
 The engine never opens a font: layout reads a `soma.metrics/2` table, the PDF
-backend embeds a TrueType face by `glyf`. A face is therefore usable only when
-it can produce both. `tools/metrics-gen --audit` scores every face on disk
+backend embeds `glyf` outlines or CID-keyed CFF programs (ADR-0039). A face is
+therefore usable for PDF only when it has one of those two outline formats. `tools/metrics-gen --audit` scores every face on disk
 against what Chinese body typesetting actually needs, so the choice is a
 measurement instead of a guess.
 
@@ -30,7 +30,7 @@ A face is rejected before scoring when any of these fails:
 
 | Gate | Why |
 | --- | --- |
-| `glyf` + `loca` present | the PDF backend subsets outlines; CFF faces are rejected there (`no-outlines`) |
+| `glyf` + `loca` present | the audit reads `glyf` to measure marks; a CID-keyed CFF face is embeddable (ADR-0039) but its ink is unknown here, so it is reported as `no-outlines` |
 | CJK coverage ≥ 95% | missing Han characters fall back mid-paragraph |
 | Han advance is 1em for ≥ 95% of the sample | a proportional Han face breaks justify and the baseline grid (`proportional-han`) |
 | Full-width marks are 1em wide for ≥ 90% | the line-width accounting assumes it (`bad-punctuation`) |
@@ -85,10 +85,13 @@ keep their marks within a narrow band; Kai-style and Latin-first CJK faces
 spread wider, which shows up as uneven line ends even when every break is
 optimal.
 
-Noto Sans/Serif CJK (`.ttc`, 44,810 glyphs) is the one surprising rejection: it
-has the best coverage here, but the distributed collection is CFF-outlined, so
-the PDF backend cannot subset it. The committed `noto-cjk.smt` is built from
-those faces and therefore has no ink section.
+Noto Sans/Serif CJK (`.ttc`, 65,535 glyphs) is the one surprising `no-outlines`
+row: it has the best coverage here, but the distributed collection is
+CFF-outlined, so this tool cannot measure its marks. That is a limit of the
+*audit*, not of the backend: a CID-keyed CFF face is embedded as
+`/CIDFontType0` (ADR-0039) and can be a body or rescue face. The committed
+`noto-cjk.smt` is built from those faces and therefore has no ink section, which
+means line-end trim falls back to the class constants (ADR-0037).
 
 ## Automatic selection
 
@@ -169,7 +172,8 @@ metrics-gen --fallback serif:normal:/path/Body.ttf --text book.tex --audit /usr/
 `--coverage` reports how much of a document's character set the face can draw
 and lists what is missing. `--fallback` ranks installed faces by how many of
 those characters they rescue, preferring a matching weight before a matching
-style, and skips CFF faces because a rescue face must be embeddable.
+style, and skips faces with neither `glyf` nor a CID-keyed CFF program, because
+a rescue face has to be embeddable.
 
 ## Two typefaces in one line
 

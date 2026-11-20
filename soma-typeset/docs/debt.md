@@ -90,8 +90,9 @@
 | D79 | ~~目录行是不可折断的整体~~ | **已关闭（ADR-0033）**：目录/索引标题按文本编译，可在标题盒内换行；页码与引导点跟随最后一行 | — | ✅ 已关闭 | 否 |
 | D80 | 索引按码位排序 | 词条按 Unicode 标量排序，没有拼音/笔画排序；`index:` 尚无 `sort` 字段 | 中文索引的排序不符合部分出版习惯 | 需要时加模板字段（不改 DocIR） | 否 |
 | D81 | 索引标记覆盖有限 | 表格单元与脚注定义里的 `\index`/`[[index:]]` 不收集；无 `see`/`see also`、无子条目、无页码范围合并 | 复杂索引需人工整理 | 有真实索引需求时扩 | 否 |
-| D82 | PDF 后端有边界 | 只接受 TrueType（`glyf`）字体，CFF/OTF 拒绝；图片只画占位框（无 XObject 嵌入）；无 tagged PDF/链接注解/流压缩；下划线不绘制；PDF 只在 CLI 暴露 | 扫描版/带图/无障碍交付需另做 | 有真实交付需求时扩 | 否 |
+| D82 | PDF 后端有边界 | 接受 `glyf` 与 CID-keyed CFF（ADR-0039）；图片只画占位框（无 XObject 嵌入）；无 tagged PDF/链接注解/流压缩；下划线不绘制；PDF 只在 CLI 暴露 | 扫描版/带图/无障碍交付需另做 | 有真实交付需求时扩 | 否 |
 | D83 | 部分全角标点没有标点类 | `punct_class` 没有 `…`、`—`、`·` 的条目，它们按 `PunctClass::None` 处理，既无侧空可裁也无法参与禁则（`…` 落在行首不被拦） | 省略号/破折号多的地方行末对齐与禁则会退化 | 扩 `punct_class` 表并补 golden；不改 IR | 否 |
+| D85 | name-keyed CFF 不能嵌入 | 只嵌入 CID-keyed CFF；name-keyed（多数西文 OTF）在 `PdfFont::subset` 阶段以可读错误拒绝，因为改字符集（identity charset）会让 `endchar` 的四操作数 `seac` 复合找不到基字/重音符，静默画错字；可靠检测需要带子程序与参数栈的 Type 2 解释器 | 西文 OTF 只能换用 TrueType/glyf 或转成 CID-keyed | 需要西文 OTF 时实现 Type 2 解释器（新增 ADR） | 否 |
 | D84 | ~~行末侧空是常量而不是墨迹边界~~ | **已关闭（ADR-0037）**：`soma.metrics/2` 记录标点的 `ink_left`/`ink_right`，`scale_trim` 优先用真实轮廓；v1 表或无 `glyf` 的字体回退到类别常量 | — | — | ✅ 已关闭 |
 | D69 | HTML 子集有边界 | `soma-html` 只做语义白名单：无 CSS/脚本/表单/框架，无 `<caption>`/`<colgroup>`/脚注标记，实体集有限，`SourceSpan` 为空 | 复杂 HTML 会降级或丢表现 | 有真实需求时扩 | 否 |
 | D68 | 表格线只能整表配置 | **已关闭（ADR-0020）**：五条线宽、竖线/左右框、实线/虚线、颜色都进模板；剩余限制是 `table:` 只能全局一套，不能按表/按行覆盖 | 多套表格外观要多个模板 | ✅ 已关闭 | 否 |
@@ -144,5 +145,5 @@
 | 首发成品 | **已完成（ADR-0031）**：`align: left/center/right` 真正可用；生成封面；`examples/book` 十页成品 |
 | 书稿能力 | **已完成（ADR-0032）**：级别选择器、自动编号、前置页页码、目录引导点与图/表目录；新增 D78、D79 |
 | 长文档能力 | **已完成（ADR-0033）**：题注样式、可换行目录、书签 outline、索引；关闭 D78、D79，新增 D80、D81 |
-| PDF 输出 | **已完成（ADR-0034）**：TrueType 稀疏子集、Identity-H、书签树、PageLabels；新增 D82 |
+| PDF 输出 | **已完成（ADR-0034/ADR-0039）**：TrueType 稀疏子集与 CID-keyed CFF、Identity-H、书签树、PageLabels；边界见 D82/D85 |
 | 未排期 | D01、D03、D04、D05、D10、D11、D12、D13、D60、D62、D69、D70、D71、D74、D80、D81、D83、N1–N6 |

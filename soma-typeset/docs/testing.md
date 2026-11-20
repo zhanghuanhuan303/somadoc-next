@@ -145,7 +145,7 @@ Cumulative public test files:
 | `cli.rs` (soma-cli) | 17 | render md/tex to html/svg/json/pdf, template geometry, TOC template, example book, fonts, `--metrics`, `--out`, check, error paths |
 | `blind_pipeline.rs` (eval) | 3 | dry-run fixture through key + statistics + decision |
 | `k7_object_metrics.rs` | 4 | object hooks vs text paths, default-hook equivalence |
-| `pdf.rs` (render-pdf) | 5 | TrueType cmap/subset, CFF rejection, PDF objects, bookmarks, byte determinism |
+| `pdf.rs` (render-pdf) | 8 | TrueType cmap/subset, CID-keyed CFF subset and `/CIDFontType0`, name-keyed CFF refusal, CFF2 refusal, PDF objects, bookmarks, byte determinism |
 | `math.rs` (svg) | 4 | exact formula coordinates |
 | `inline_math.rs` (svg) | 2 | inline items on the line baseline, marker never drawn |
 | `math.rs` (html) | 4 | formula preview spans, placeholder fallback |
@@ -166,8 +166,9 @@ Cumulative public test files:
 | `soma-core` vertical unit | 1 | vertical cost model hash |
 | core unit | 24 | IR, units, breaker, result, presets |
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
+| render-pdf unit | 3 | CFF INDEX round trip, glyph-preserving subset with identity charset, name-keyed refusal |
 
-Total: **555 tests**.
+Total: **561 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.
