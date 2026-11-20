@@ -216,6 +216,7 @@ scripts/
   kp-verify.sh # K-P closure: gates + bench budget + length policy
 docs/
   architecture-v2.md  # frozen architecture
+  fonts.md            # how a body font is scored and a metrics table is built
   adr/                # accepted decisions (ADR-0001 … 0037)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
   debt.md             # global not-done register (D01–D77, N1–N6)

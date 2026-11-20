@@ -24,6 +24,8 @@ soma --help
 | `--engine` | `soma.engine/1` file. Omitted: `publish-v1` defaults. |
 | `--format`, `-f` | `html` (default), `svg`, `json` (canonical page result), or `pdf`. |
 | `--metrics` | `soma.metrics/2` table; omitted uses the embedded Noto table. Version 1 tables still load. A version 2 table built from the PDF font also carries punctuation ink, so layout can land a line end on the ink instead of a class average. |
+
+`tools/metrics-gen` also audits installed fonts (`--audit <dir>`, see [`docs/fonts.md`](fonts.md)) and writes the table for the face you pick.
 | `--font` | TrueType font for `--format pdf`; `path#index` selects a TTC face. Required for PDF. |
 | `--font-bold`, `--font-math` | Optional bold/math faces; fall back to `--font`. |
 | `--out`, `-o` | Output path; `-` or omitted writes to stdout. |

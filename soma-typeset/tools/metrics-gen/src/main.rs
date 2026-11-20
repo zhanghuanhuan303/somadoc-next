@@ -54,6 +54,26 @@ const INK_RANGES: &[(u32, u32)] = &[
     (0xff00, 0xffef), // halfwidth and fullwidth forms
 ];
 
+/// Full-width marks a Chinese body face is expected to draw one em wide.
+const FULL_WIDTH_MARKS: &[char] = &[
+    '。', '，', '、', '；', '：', '？', '！', '（', '）', '「', '」', '《', '》',
+];
+
+/// The most frequent Han characters. A body face must have all of them.
+const COMMON_HAN: &str = "的一是不了人我在有他这为之大来以个中上们到说国和地也子时道出而要于就下得可你年生自会那后能对着事其里所去行过家十用发天如然作方成者多日都三小军二无同么经法当起与好看学进种将还分此心前面又定见只主没公从";
+
+/// How many evenly spaced codepoints stand in for the unified ideograph block.
+const CJK_SAMPLE: u32 = 512;
+
+/// Evenly spaced probes across CJK Unified Ideographs. Enough to separate a
+/// symbol font from a GB2312 face from a full 20k-glyph face.
+fn cjk_sample() -> impl Iterator<Item = u32> {
+    let start = 0x4E00u32;
+    let end = 0x9FFFu32;
+    let step = (end - start) / CJK_SAMPLE;
+    (0..CJK_SAMPLE).map(move |index| start + index * step)
+}
+
 struct FaceSpec {
     family: u8,
     weight: u8,
@@ -161,7 +181,10 @@ impl<'a> Font<'a> {
             if rank == 0 {
                 continue;
             }
-            if best.map_or(true, |(_, current)| rank > current) {
+            if match best {
+                None => true,
+                Some((_, current)) => rank > current,
+            } {
                 best = Some((offset, rank));
             }
         }
@@ -357,10 +380,7 @@ fn modal(values: &[i32]) -> Option<(i32, usize)> {
     for value in values {
         *counts.entry(*value).or_insert(0) += 1;
     }
-    counts
-        .into_iter()
-        .max_by_key(|(_, count)| *count)
-        .map(|(value, count)| (value, count))
+    counts.into_iter().max_by_key(|(_, count)| *count)
 }
 
 struct OutFace {
@@ -386,9 +406,272 @@ fn main() -> ExitCode {
     }
 }
 
+/// One font face scored for Chinese body typesetting.
+struct AuditRow {
+    path: String,
+    face: usize,
+    outlines: bool,
+    glyphs: usize,
+    coverage: f64,
+    uniform: f64,
+    punctuation: f64,
+    ink_range: f64,
+    ink_mean: f64,
+    ink_std: f64,
+    line_ratio: f64,
+    score: f64,
+    verdict: &'static str,
+}
+
+fn audit(directories: &[String], top: usize) -> Result<(), String> {
+    let mut paths: Vec<std::path::PathBuf> = Vec::new();
+    for directory in directories {
+        collect_fonts(std::path::Path::new(directory), &mut paths);
+    }
+    paths.sort();
+    paths.dedup();
+
+    let mut rows = Vec::new();
+    for path in &paths {
+        let Ok(data) = fs::read(path) else { continue };
+        let faces = face_count(&data);
+        for face in 0..faces {
+            if let Some(mut row) = audit_face(&data, face) {
+                row.path = path.display().to_string();
+                rows.push(row);
+            }
+        }
+    }
+
+    // Usable faces first, then by score, then by path: a stable order so a
+    // rerun against the same font directory produces the same table.
+    rows.sort_by(|left, right| {
+        let left_usable = left.verdict == "usable";
+        let right_usable = right.verdict == "usable";
+        right_usable
+            .cmp(&left_usable)
+            .then(right.score.total_cmp(&left.score))
+            .then(left.path.cmp(&right.path))
+            .then(left.face.cmp(&right.face))
+    });
+
+    println!(
+        "score,verdict,path,face,glyphs,coverage,uniform,punct,ink_range,ink_mean,ink_std,line,outlines"
+    );
+    for row in rows.iter().take(top) {
+        println!(
+            "{:.1},{},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{}",
+            row.score,
+            row.verdict,
+            row.path,
+            row.face,
+            row.glyphs,
+            row.coverage,
+            row.uniform,
+            row.punctuation,
+            row.ink_range,
+            row.ink_mean,
+            row.ink_std,
+            row.line_ratio,
+            row.outlines
+        );
+    }
+    let usable = rows.iter().filter(|row| row.verdict == "usable").count();
+    eprintln!(
+        "audited {} faces in {} files; {usable} usable",
+        rows.len(),
+        paths.len()
+    );
+    Ok(())
+}
+
+fn collect_fonts(directory: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_fonts(&path, out);
+            continue;
+        }
+        let extension = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if matches!(extension.as_str(), "ttf" | "ttc" | "otf") {
+            out.push(path);
+        }
+    }
+}
+
+fn face_count(data: &[u8]) -> usize {
+    if data.len() >= 12 && read_u32(data, 0).ok() == Some(0x7474_6366) {
+        read_u32(data, 8).ok().unwrap_or(1) as usize
+    } else {
+        1
+    }
+}
+
+fn audit_face(data: &[u8], index: usize) -> Option<AuditRow> {
+    let font = Font::open(data, index).ok()?;
+    let upem = font.units_per_em().ok()?;
+    let map = font.cmap().ok()?;
+    let advances = font.advances().ok()?;
+    let (ascent, descent, _) = font.line_metrics().ok()?;
+    let outlines = font.table(b"glyf").is_some() && font.table(b"loca").is_some();
+
+    let glyphs = map.len();
+    if glyphs == 0 {
+        return None;
+    }
+    let has = |codepoint: u32| map.contains_key(&codepoint);
+    let width = |codepoint: u32| {
+        map.get(&codepoint)
+            .and_then(|gid| advances.get(*gid as usize))
+            .map(|advance| scale(*advance as i32, upem))
+    };
+
+    let mut covered = 0usize;
+    let mut total = 0usize;
+    for codepoint in cjk_sample() {
+        total += 1;
+        if has(codepoint) {
+            covered += 1;
+        }
+    }
+    for mark in FULL_WIDTH_MARKS {
+        total += 1;
+        if has(*mark as u32) {
+            covered += 1;
+        }
+    }
+    for mark in COMMON_HAN.chars() {
+        total += 1;
+        if has(mark as u32) {
+            covered += 1;
+        }
+    }
+    let coverage = covered as f64 / total as f64;
+
+    // Han must be one em wide or nothing downstream (justify, the baseline
+    // grid, hanging marks) lines up.
+    let mut uniform = 0usize;
+    let mut uniform_total = 0usize;
+    for codepoint in cjk_sample().take(256) {
+        if let Some(advance) = width(codepoint) {
+            uniform_total += 1;
+            if advance == UNIT {
+                uniform += 1;
+            }
+        }
+    }
+
+    let mut punctuation_ok = 0usize;
+    let mut punctuation_total = 0usize;
+    let mut ink_rights: Vec<f64> = Vec::new();
+    for mark in FULL_WIDTH_MARKS {
+        let codepoint = *mark as u32;
+        let Some(advance) = width(codepoint) else {
+            continue;
+        };
+        punctuation_total += 1;
+        if (advance - UNIT).abs() <= UNIT / 20 {
+            punctuation_ok += 1;
+        }
+        let Some(gid) = map.get(&codepoint) else {
+            continue;
+        };
+        let Some((_, x_max)) = font.ink_bounds(*gid).ok().flatten() else {
+            continue;
+        };
+        let right = advance - scale(x_max, upem);
+        ink_rights.push(right as f64 / UNIT as f64);
+    }
+
+    let ink_total = ink_rights.len();
+    // A mark whose ink fills 0.40-0.85 em of its advance leaves a bearing that
+    // can carry a line end without a visible hole.
+    let ink_ok = ink_rights
+        .iter()
+        .filter(|right| (0.40..=0.85).contains(*right))
+        .count();
+    let ink_mean = if ink_total == 0 {
+        0.0
+    } else {
+        ink_rights.iter().sum::<f64>() / ink_total as f64
+    };
+    let ink_std = if ink_total == 0 {
+        0.0
+    } else {
+        (ink_rights
+            .iter()
+            .map(|right| (right - ink_mean).powi(2))
+            .sum::<f64>()
+            / ink_total as f64)
+            .sqrt()
+    };
+    // Marks in one face should share a style: a large spread means a line end
+    // is tight on one line and loose on the next. A weight change moves every
+    // mark together, so the spread — not the mean — is the quality signal.
+    let ink_consistency = 1.0 - ((ink_std - 0.10) / 0.25).clamp(0.0, 1.0);
+
+    let uniformity = ratio(uniform, uniform_total);
+    let punctuation = ratio(punctuation_ok, punctuation_total);
+    let ink_range = ratio(ink_ok, ink_total);
+    let line_ratio = scale(ascent + descent, upem) as f64 / UNIT as f64;
+    let line_score = (1.0 - ((line_ratio - 1.15).abs() / 0.35)).clamp(0.0, 1.0);
+    let score = 30.0 * coverage
+        + 15.0 * uniformity
+        + 30.0 * ink_consistency
+        + 15.0 * punctuation
+        + 10.0 * line_score;
+
+    let verdict = if !outlines {
+        "no-outlines"
+    } else if coverage < 0.30 {
+        "no-cjk"
+    } else if coverage < 0.95 {
+        "low-coverage"
+    } else if uniformity < 0.95 {
+        "proportional-han"
+    } else if punctuation < 0.90 {
+        "bad-punctuation"
+    } else {
+        "usable"
+    };
+
+    Some(AuditRow {
+        path: String::new(),
+        face: index,
+        outlines,
+        glyphs,
+        coverage,
+        uniform: uniformity,
+        punctuation,
+        ink_range,
+        ink_mean,
+        ink_std,
+        line_ratio,
+        score,
+        verdict,
+    })
+}
+
+fn ratio(hit: usize, total: usize) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        hit as f64 / total as f64
+    }
+}
+
 fn run() -> Result<(), String> {
     let mut out = String::from("crates/soma-metrics/data/noto-cjk.smt");
     let mut specs = Vec::new();
+    let mut audit_dirs: Vec<String> = Vec::new();
+    let mut top = 40usize;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -396,8 +679,19 @@ fn run() -> Result<(), String> {
             "--face" => specs.push(FaceSpec::parse(
                 &args.next().ok_or("--face needs a value")?,
             )?),
+            "--audit" => audit_dirs.push(args.next().ok_or("--audit needs a directory")?),
+            "--top" => {
+                top = args
+                    .next()
+                    .ok_or("--top needs a value")?
+                    .parse()
+                    .map_err(|_| "--top needs a number".to_string())?
+            }
             other => return Err(format!("unknown argument {other}")),
         }
+    }
+    if !audit_dirs.is_empty() {
+        return audit(&audit_dirs, top);
     }
     if specs.is_empty() {
         return Err("at least one --face is required".into());
