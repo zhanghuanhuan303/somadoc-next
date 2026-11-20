@@ -83,6 +83,72 @@ has the best coverage here, but the distributed collection is CFF-outlined, so
 the PDF backend cannot subset it. The committed `noto-cjk.smt` is built from
 those faces and therefore has no ink section.
 
+## Automatic selection
+
+```sh
+scripts/fonts.sh                    # -> examples/book/metrics-auto.smt
+scripts/fonts.sh /tmp/my-table.smt
+```
+
+The script audits the usual directories, then picks the highest-scoring face
+whose family is in a redistributable allow-list (OFL first, GPL-with-exception
+second, anything usable last). Inside a family it requires a `Regular` or
+`Normal` cut: a Light or Thin face would quietly set the whole document
+lighter. A `Bold` companion is added when the file naming offers one, and the
+Noto Sans Math face when present.
+
+`scripts/book.sh` falls back to the committed `metrics-lxgw.smt` when no
+TrueType font exists, so HTML, SVG and JSON still reproduce the example book's
+line breaks. Only the PDF step is skipped.
+
+## Fingerprints and recognition
+
+The same measurements double as a fingerprint, so a face you have never seen
+can be placed next to the ones you have.
+
+```sh
+# Build a library once
+cargo run -p tools/metrics-gen --   --audit /usr/share/fonts --audit ~/.fonts   --fingerprints /tmp/fonts.csv --top 1
+
+# Ask about a face that is not in the library
+cargo run -p tools/metrics-gen --   --identify serif:normal:/path/Unknown.ttf --library /tmp/fonts.csv
+```
+
+Nine axes, all normalised to 0–1:
+
+| Axis | Meaning |
+| --- | --- |
+| `coverage` | CJK coverage (same probe set as the score) |
+| `uniform` | share of Han glyphs exactly 1em wide |
+| `punct_em` | mean full-width mark advance / 1.2em |
+| `ink_mean` | mean gap between mark ink and its advance |
+| `ink_std` | spread of those gaps / 0.5 |
+| `ink_asym` | `(ink_left_mean - ink_right_mean + 1) / 2` |
+| `latin_spread` | `(advance('W') - advance('i')) / 1em` |
+| `digit_uniform` | share of digits sharing one advance |
+| `line` | `((ascent+descent)/1em - 0.8) / 0.6` |
+
+Distance is a weighted Euclidean (`[3,2,1,1,2,1,1,1,0.5]`, averaged). The three
+ink axes are **skipped when either side has no outlines**, so a CFF face is
+compared on what is actually known about it instead of looking like a face with
+zero ink. Results are collapsed to one row per family: eight weights of one cut
+are one answer.
+
+`--identify` also prints a profile derived only from measurements:
+
+```text
+profile: cjk/monospaced/full-width/w400
+distance,path,face,profile
+0.0048,/usr/share/fonts/TTF/LXGWWenKai-Light.ttf,0,cjk/monospaced/full-width/w300
+0.0244,/home/badleric/.fonts/IBMPlexSansSC_Regular.ttf,0,cjk/monospaced/full-width/w400
+```
+
+`script` is `cjk` / `cjk-partial` / `latin`, `width` is `monospaced` /
+`proportional`, `punct` is `full-width` / `mixed` / `half-width`, and the last
+token is the `OS/2` weight class. Style — Song, Hei, Kai, Yuan — is **not**
+guessed: it is a design decision that the outline bounding box cannot recover
+reliably, so the fingerprint stops at what it can measure.
+
 ## Producing a table for the chosen face
 
 ```sh

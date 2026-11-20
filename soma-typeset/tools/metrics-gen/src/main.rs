@@ -16,6 +16,7 @@
 //! ```
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::process::ExitCode;
 
@@ -423,7 +424,7 @@ struct AuditRow {
     verdict: &'static str,
 }
 
-fn audit(directories: &[String], top: usize) -> Result<(), String> {
+fn audit(directories: &[String], top: usize, fingerprints_out: Option<&str>) -> Result<(), String> {
     let mut paths: Vec<std::path::PathBuf> = Vec::new();
     for directory in directories {
         collect_fonts(std::path::Path::new(directory), &mut paths);
@@ -431,17 +432,25 @@ fn audit(directories: &[String], top: usize) -> Result<(), String> {
     paths.sort();
     paths.dedup();
 
-    let mut rows = Vec::new();
+    let mut measured: Vec<(String, usize, Measure)> = Vec::new();
     for path in &paths {
         let Ok(data) = fs::read(path) else { continue };
         let faces = face_count(&data);
         for face in 0..faces {
-            if let Some(mut row) = audit_face(&data, face) {
-                row.path = path.display().to_string();
-                rows.push(row);
+            if let Some(measure) = measure(&data, face) {
+                measured.push((path.display().to_string(), face, measure));
             }
         }
     }
+
+    if let Some(out) = fingerprints_out {
+        write_fingerprints(&measured, out)?;
+    }
+
+    let mut rows: Vec<AuditRow> = measured
+        .iter()
+        .map(|(path, face, measure)| row(measure, path.clone(), *face))
+        .collect();
 
     // Usable faces first, then by score, then by path: a stable order so a
     // rerun against the same font directory produces the same table.
@@ -514,7 +523,26 @@ fn face_count(data: &[u8]) -> usize {
     }
 }
 
-fn audit_face(data: &[u8], index: usize) -> Option<AuditRow> {
+/// Every number the audit and the fingerprint need, measured once per face.
+/// Ratios are 0..1 unless the name says otherwise; lengths are in em.
+struct Measure {
+    glyphs: usize,
+    outlines: bool,
+    coverage: f64,
+    uniform: f64,
+    punct_em: f64,
+    punct_ok: f64,
+    ink_range: f64,
+    ink_mean: f64,
+    ink_std: f64,
+    ink_left_mean: f64,
+    latin_spread: f64,
+    digit_uniform: f64,
+    line_ratio: f64,
+    weight_class: u16,
+}
+
+fn measure(data: &[u8], index: usize) -> Option<Measure> {
     let font = Font::open(data, index).ok()?;
     let upem = font.units_per_em().ok()?;
     let map = font.cmap().ok()?;
@@ -570,6 +598,8 @@ fn audit_face(data: &[u8], index: usize) -> Option<AuditRow> {
 
     let mut punctuation_ok = 0usize;
     let mut punctuation_total = 0usize;
+    let mut punct_em_sum = 0.0f64;
+    let mut ink_lefts: Vec<f64> = Vec::new();
     let mut ink_rights: Vec<f64> = Vec::new();
     for mark in FULL_WIDTH_MARKS {
         let codepoint = *mark as u32;
@@ -577,17 +607,18 @@ fn audit_face(data: &[u8], index: usize) -> Option<AuditRow> {
             continue;
         };
         punctuation_total += 1;
+        punct_em_sum += advance as f64 / UNIT as f64;
         if (advance - UNIT).abs() <= UNIT / 20 {
             punctuation_ok += 1;
         }
         let Some(gid) = map.get(&codepoint) else {
             continue;
         };
-        let Some((_, x_max)) = font.ink_bounds(*gid).ok().flatten() else {
+        let Some((x_min, x_max)) = font.ink_bounds(*gid).ok().flatten() else {
             continue;
         };
-        let right = advance - scale(x_max, upem);
-        ink_rights.push(right as f64 / UNIT as f64);
+        ink_lefts.push(scale(x_min, upem) as f64 / UNIT as f64);
+        ink_rights.push((advance - scale(x_max, upem)) as f64 / UNIT as f64);
     }
 
     let ink_total = ink_rights.len();
@@ -612,51 +643,105 @@ fn audit_face(data: &[u8], index: usize) -> Option<AuditRow> {
             / ink_total as f64)
             .sqrt()
     };
+    let ink_left_mean = if ink_total == 0 {
+        0.0
+    } else {
+        ink_lefts.iter().sum::<f64>() / ink_total as f64
+    };
+
+    // A proportional Latin face has a wide `W` and a narrow `i`; a monospaced
+    // one has neither. Digits stand in for the same question.
+    let latin_spread = match (width('W' as u32), width('i' as u32)) {
+        (Some(wide), Some(narrow)) => ((wide - narrow) as f64 / UNIT as f64).clamp(0.0, 1.0),
+        _ => 0.0,
+    };
+    let mut digit_widths: Vec<i32> = Vec::new();
+    for digit in '0'..='9' {
+        if let Some(advance) = width(digit as u32) {
+            digit_widths.push(advance);
+        }
+    }
+    let digit_uniform = if digit_widths.is_empty() {
+        0.0
+    } else {
+        let first = digit_widths[0];
+        ratio(
+            digit_widths.iter().filter(|width| **width == first).count(),
+            digit_widths.len(),
+        )
+    };
+
+    let line_ratio = scale(ascent + descent, upem) as f64 / UNIT as f64;
+    let weight_class = font
+        .table(b"OS/2")
+        .and_then(|(offset, length)| {
+            if length >= 6 {
+                read_u16(font.data, offset + 4).ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(400);
+
+    Some(Measure {
+        glyphs,
+        outlines,
+        coverage,
+        uniform: ratio(uniform, uniform_total),
+        punct_em: ratio_f64(punct_em_sum, punctuation_total),
+        punct_ok: ratio(punctuation_ok, punctuation_total),
+        ink_range: ratio(ink_ok, ink_total),
+        ink_mean,
+        ink_std,
+        ink_left_mean,
+        latin_spread,
+        digit_uniform,
+        line_ratio,
+        weight_class,
+    })
+}
+
+fn row(measure: &Measure, path: String, face: usize) -> AuditRow {
     // Marks in one face should share a style: a large spread means a line end
     // is tight on one line and loose on the next. A weight change moves every
     // mark together, so the spread — not the mean — is the quality signal.
-    let ink_consistency = 1.0 - ((ink_std - 0.10) / 0.25).clamp(0.0, 1.0);
-
-    let uniformity = ratio(uniform, uniform_total);
-    let punctuation = ratio(punctuation_ok, punctuation_total);
-    let ink_range = ratio(ink_ok, ink_total);
-    let line_ratio = scale(ascent + descent, upem) as f64 / UNIT as f64;
-    let line_score = (1.0 - ((line_ratio - 1.15).abs() / 0.35)).clamp(0.0, 1.0);
-    let score = 30.0 * coverage
-        + 15.0 * uniformity
+    let ink_consistency = 1.0 - ((measure.ink_std - 0.10) / 0.25).clamp(0.0, 1.0);
+    let line_score = (1.0 - ((measure.line_ratio - 1.15).abs() / 0.35)).clamp(0.0, 1.0);
+    let score = 30.0 * measure.coverage
+        + 15.0 * measure.uniform
         + 30.0 * ink_consistency
-        + 15.0 * punctuation
+        + 15.0 * measure.punct_ok
         + 10.0 * line_score;
 
-    let verdict = if !outlines {
+    let verdict = if !measure.outlines {
         "no-outlines"
-    } else if coverage < 0.30 {
+    } else if measure.coverage < 0.30 {
         "no-cjk"
-    } else if coverage < 0.95 {
+    } else if measure.coverage < 0.95 {
         "low-coverage"
-    } else if uniformity < 0.95 {
+    } else if measure.uniform < 0.95 {
         "proportional-han"
-    } else if punctuation < 0.90 {
+    } else if measure.punct_ok < 0.90 {
         "bad-punctuation"
     } else {
         "usable"
     };
 
-    Some(AuditRow {
-        path: String::new(),
-        face: index,
-        outlines,
-        glyphs,
-        coverage,
-        uniform: uniformity,
-        punctuation,
-        ink_range,
-        ink_mean,
-        ink_std,
-        line_ratio,
+    AuditRow {
+        path,
+        face,
+        outlines: measure.outlines,
+        glyphs: measure.glyphs,
+        coverage: measure.coverage,
+        uniform: measure.uniform,
+        punctuation: measure.punct_ok,
+        ink_range: measure.ink_range,
+        ink_mean: measure.ink_mean,
+        ink_std: measure.ink_std,
+        line_ratio: measure.line_ratio,
         score,
         verdict,
-    })
+    }
 }
 
 fn ratio(hit: usize, total: usize) -> f64 {
@@ -667,11 +752,207 @@ fn ratio(hit: usize, total: usize) -> f64 {
     }
 }
 
+/// Nine axes, every one 0..1. Chosen so an unrecognised face still lands
+/// somewhere sensible: coverage and uniformity say what script it serves,
+/// the ink axes say how its marks are drawn, and the Latin axes say whether
+/// it was designed for text or for code.
+fn fingerprint(measure: &Measure) -> ([f64; 9], bool) {
+    let values = [
+        measure.coverage,
+        measure.uniform,
+        (measure.punct_em / 1.2).clamp(0.0, 1.0),
+        measure.ink_mean.clamp(0.0, 1.0),
+        (measure.ink_std / 0.5).clamp(0.0, 1.0),
+        ((measure.ink_left_mean - measure.ink_mean) + 1.0) / 2.0,
+        measure.latin_spread,
+        measure.digit_uniform,
+        ((measure.line_ratio - 0.8) / 0.6).clamp(0.0, 1.0),
+    ];
+    // Without outlines the three ink axes carry no information. Comparing
+    // them would make every CFF face look like a face with no ink.
+    (values, measure.ink_mean > 0.0)
+}
+
+/// Coverage and uniformity decide whether a face can set a paragraph at all,
+/// so they weigh more than the style axes.
+const FINGERPRINT_WEIGHTS: [f64; 9] = [3.0, 2.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 0.5];
+
+fn fingerprint_distance(left: &[f64; 9], left_ink: bool, right: &[f64; 9], right_ink: bool) -> f64 {
+    let compare_ink = left_ink && right_ink;
+    let mut total = 0.0;
+    let mut weight_sum = 0.0;
+    for (index, weight) in FINGERPRINT_WEIGHTS.iter().enumerate() {
+        if (3..=5).contains(&index) && !compare_ink {
+            continue;
+        }
+        total += weight * (left[index] - right[index]).powi(2);
+        weight_sum += weight;
+    }
+    if weight_sum == 0.0 {
+        return 0.0;
+    }
+    (total / weight_sum).sqrt()
+}
+
+/// A human-readable classification derived only from measurements. Style
+/// (Song vs Hei vs Kai) is a design decision and is deliberately not guessed.
+fn profile(measure: &Measure) -> String {
+    let script = if measure.coverage >= 0.90 {
+        "cjk"
+    } else if measure.coverage >= 0.20 {
+        "cjk-partial"
+    } else {
+        "latin"
+    };
+    let width = if measure.uniform >= 0.95 && measure.digit_uniform >= 0.95 {
+        "monospaced"
+    } else {
+        "proportional"
+    };
+    let punct = if measure.punct_em >= 0.95 {
+        "full-width"
+    } else if measure.punct_em >= 0.70 {
+        "mixed"
+    } else {
+        "half-width"
+    };
+    format!("{script}/{width}/{punct}/w{}", measure.weight_class)
+}
+
+fn write_fingerprints(rows: &[(String, usize, Measure)], out: &str) -> Result<(), String> {
+    let mut text = String::from("path,face,glyphs,profile,ink,f0,f1,f2,f3,f4,f5,f6,f7,f8\n");
+    for (path, face, measure) in rows {
+        let (values, has_ink) = fingerprint(measure);
+        let _ = writeln!(
+            text,
+            "{},{},{},{},{},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}",
+            path,
+            face,
+            measure.glyphs,
+            profile(measure),
+            has_ink as u8,
+            values[0],
+            values[1],
+            values[2],
+            values[3],
+            values[4],
+            values[5],
+            values[6],
+            values[7],
+            values[8]
+        );
+    }
+    fs::write(out, text).map_err(|error| format!("{out}: {error}"))?;
+    eprintln!("wrote {out}");
+    Ok(())
+}
+
+fn identify(spec: &FaceSpec, library: &str) -> Result<(), String> {
+    let data = fs::read(&spec.path).map_err(|error| format!("{}: {error}", spec.path))?;
+    let measure = measure(&data, spec.index)
+        .ok_or_else(|| format!("{}#{}: cannot measure", spec.path, spec.index))?;
+    let (probe, probe_ink) = fingerprint(&measure);
+    println!("profile: {}", profile(&measure));
+
+    let text = fs::read_to_string(library).map_err(|error| format!("{library}: {error}"))?;
+    let mut hits: Vec<(f64, String, usize, String)> = Vec::new();
+    for line in text.lines().skip(1) {
+        let columns: Vec<&str> = line.split(',').collect();
+        if columns.len() < 14 {
+            continue;
+        }
+        let mut reference = [0.0f64; 9];
+        for (index, slot) in reference.iter_mut().enumerate() {
+            *slot = columns
+                .get(5 + index)
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.0);
+        }
+        let reference_ink = columns[4] == "1";
+        hits.push((
+            fingerprint_distance(&probe, probe_ink, &reference, reference_ink),
+            columns[0].to_string(),
+            columns[1].parse().unwrap_or(0),
+            columns[3].to_string(),
+        ));
+    }
+    if hits.is_empty() {
+        return Err(format!("{library}: no fingerprint rows"));
+    }
+    hits.sort_by(|left, right| left.0.total_cmp(&right.0));
+    println!("distance,path,face,profile");
+    // One row per family: eight weights of one design are one answer, not
+    // eight. The closest weight represents it.
+    let mut seen = std::collections::BTreeSet::new();
+    let mut printed = 0;
+    for (distance, path, face, profile) in &hits {
+        if !seen.insert(family_key(path)) {
+            continue;
+        }
+        println!("{distance:.4},{path},{face},{profile}");
+        printed += 1;
+        if printed == 5 {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// The family part of a file stem: `MiSans-Normal` and `MiSans-Bold` are one
+/// family, `IBMPlexSansSC_Regular` keeps its prefix.
+fn family_key(path: &str) -> String {
+    const WEIGHTS: &[&str] = &[
+        "Thin",
+        "ExtraLight",
+        "Light",
+        "Regular",
+        "Normal",
+        "Book",
+        "Text",
+        "Medium",
+        "DemiLight",
+        "DemiBold",
+        "SemiBold",
+        "Bold",
+        "ExtraBold",
+        "Black",
+        "Heavy",
+        "Italic",
+    ];
+    let stem = path
+        .rsplit('/')
+        .next()
+        .unwrap_or(path)
+        .split('.')
+        .next()
+        .unwrap_or(path);
+    let (head, tail) = match stem.rsplit_once(['-', '_']) {
+        Some((head, tail)) => (head, tail),
+        None => (stem, ""),
+    };
+    if WEIGHTS.contains(&tail) {
+        head.to_string()
+    } else {
+        stem.to_string()
+    }
+}
+
+fn ratio_f64(sum: f64, total: usize) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        sum / total as f64
+    }
+}
+
 fn run() -> Result<(), String> {
     let mut out = String::from("crates/soma-metrics/data/noto-cjk.smt");
     let mut specs = Vec::new();
     let mut audit_dirs: Vec<String> = Vec::new();
     let mut top = 40usize;
+    let mut fingerprints_out: Option<String> = None;
+    let mut identify_spec: Option<FaceSpec> = None;
+    let mut library: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -687,11 +968,24 @@ fn run() -> Result<(), String> {
                     .parse()
                     .map_err(|_| "--top needs a number".to_string())?
             }
+            "--fingerprints" => {
+                fingerprints_out = Some(args.next().ok_or("--fingerprints needs a file")?)
+            }
+            "--identify" => {
+                identify_spec = Some(FaceSpec::parse(
+                    &args.next().ok_or("--identify needs a font")?,
+                )?)
+            }
+            "--library" => library = Some(args.next().ok_or("--library needs a file")?),
             other => return Err(format!("unknown argument {other}")),
         }
     }
+    if let Some(spec) = identify_spec {
+        let library = library.ok_or("--identify needs --library <fingerprints.csv>")?;
+        return identify(&spec, &library);
+    }
     if !audit_dirs.is_empty() {
-        return audit(&audit_dirs, top);
+        return audit(&audit_dirs, top, fingerprints_out.as_deref());
     }
     if specs.is_empty() {
         return Err("at least one --face is required".into());

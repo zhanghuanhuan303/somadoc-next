@@ -47,6 +47,12 @@ if [ -z "$pdf_metrics" ] && [ -n "$pdf_font" ] && [ -f "$pdf_font" ]; then
     cargo run --quiet --manifest-path tools/metrics-gen/Cargo.toml -- "$@"
 fi
 
+# Without a TrueType font the PDF is skipped, but the other formats can still
+# reproduce the committed layout: measure with the OFL baseline table.
+if [ -z "$pdf_metrics" ] && [ -f "examples/book/metrics-lxgw.smt" ]; then
+    pdf_metrics="examples/book/metrics-lxgw.smt"
+fi
+
 metrics_opt=""
 if [ -n "$pdf_metrics" ] && [ -f "$pdf_metrics" ]; then
     metrics_opt="--metrics $pdf_metrics"
