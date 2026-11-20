@@ -307,6 +307,28 @@ impl<'a> Font<'a> {
         Ok(out)
     }
 
+    /// Is this a CID-keyed CFF face? The PDF backend embeds that flavour and
+    /// only that flavour (ADR-0039), and it can be recognised without a
+    /// charstring interpreter: a CID-keyed Top DICT carries `ROS` (12 30).
+    fn cid_keyed_cff(&self) -> bool {
+        let Some((cff, _)) = self.table(b"CFF ") else {
+            return false;
+        };
+        let Some(header) = self.data.get(cff).copied() else {
+            return false;
+        };
+        let Some(name) = index_range(self.data, cff + header as usize) else {
+            return false;
+        };
+        let Some(top) = index_range(self.data, name.1) else {
+            return false;
+        };
+        let Some(dict) = self.data.get(top.0..top.1) else {
+            return false;
+        };
+        dict.windows(2).any(|pair| pair == [12, 30])
+    }
+
     /// Horizontal extent of a glyph's outline in font units. `None` for an
     /// empty glyph (a space), for a composite that points at nothing, or for a
     /// font whose outlines are CFF rather than `glyf`.
@@ -568,6 +590,8 @@ fn face_count(data: &[u8]) -> usize {
 struct Measure {
     glyphs: usize,
     outlines: bool,
+    /// A CID-keyed CFF face: no `glyf` ink, but embeddable (ADR-0039).
+    cid_cff: bool,
     coverage: f64,
     uniform: f64,
     punct_em: f64,
@@ -595,6 +619,7 @@ fn measure(data: &[u8], index: usize) -> Option<Measure> {
     let advances = font.advances().ok()?;
     let (ascent, descent, _) = font.line_metrics().ok()?;
     let outlines = font.table(b"glyf").is_some() && font.table(b"loca").is_some();
+    let cid_cff = font.cid_keyed_cff();
 
     let glyphs = map.len();
     if glyphs == 0 {
@@ -765,6 +790,7 @@ fn measure(data: &[u8], index: usize) -> Option<Measure> {
     Some(Measure {
         glyphs,
         outlines,
+        cid_cff,
         coverage,
         uniform: ratio(uniform, uniform_total),
         punct_em: ratio_f64(punct_em_sum, punctuation_total),
@@ -947,6 +973,34 @@ fn write_fingerprints(rows: &[(String, usize, Measure)], out: &str) -> Result<()
 /// Every non-whitespace character a document actually uses. Reading the source
 /// rather than the IR is deliberate: coverage is a property of the text, and
 /// this runs before any parsing.
+/// Data range of a CFF INDEX: from its first item to the end of the last.
+fn index_range(data: &[u8], offset: usize) -> Option<(usize, usize)> {
+    let count = u16::from_be_bytes([*data.get(offset)?, *data.get(offset + 1)?]) as usize;
+    if count == 0 {
+        return Some((offset + 2, offset + 2));
+    }
+    let size = *data.get(offset + 2)? as usize;
+    if !(1..=4).contains(&size) {
+        return None;
+    }
+    let table = offset + 3;
+    let base = table + (count + 1) * size - 1;
+    let first = index_offset(data, table, size)?;
+    let last = index_offset(data, table + count * size, size)?;
+    if first == 0 || first > last || base + last > data.len() {
+        return None;
+    }
+    Some((base + first, base + last))
+}
+
+fn index_offset(data: &[u8], at: usize, size: usize) -> Option<usize> {
+    let mut value = 0usize;
+    for byte in 0..size {
+        value = (value << 8) | *data.get(at + byte)? as usize;
+    }
+    Some(value)
+}
+
 fn read_char_set(path: &str) -> Result<Vec<char>, String> {
     let text = fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))?;
     let mut set: BTreeSet<u32> = BTreeSet::new();
@@ -1065,8 +1119,8 @@ fn fallback(spec: &FaceSpec, text_path: &str, directories: &[String]) -> Result<
                 continue;
             };
             // A rescue face has to be drawable by the backend, not just
-            // measurable: CFF outlines cannot be embedded.
-            if !measure.outlines {
+            // measurable: `glyf` or a CID-keyed CFF (ADR-0039).
+            if !measure.outlines && !measure.cid_cff {
                 continue;
             }
             let Ok(candidate) = Font::open(&candidate_data, face) else {
