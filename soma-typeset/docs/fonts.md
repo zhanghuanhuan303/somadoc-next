@@ -30,7 +30,7 @@ A face is rejected before scoring when any of these fails:
 
 | Gate | Why |
 | --- | --- |
-| `glyf` + `loca` present | the audit reads `glyf` to measure marks; a CID-keyed CFF face is embeddable (ADR-0039) but its ink is unknown here, so it is reported as `no-outlines` |
+| `glyf` + `loca` present | the audit reads `glyf` to measure marks; a CFF face (CID-keyed or name-keyed, ADR-0039/0040) is embeddable but its ink is unknown here, so it is reported as `no-outlines` |
 | CJK coverage ≥ 95% | missing Han characters fall back mid-paragraph |
 | Han advance is 1em for ≥ 95% of the sample | a proportional Han face breaks justify and the baseline grid (`proportional-han`) |
 | Full-width marks are 1em wide for ≥ 90% | the line-width accounting assumes it (`bad-punctuation`) |
@@ -88,8 +88,8 @@ optimal.
 Noto Sans/Serif CJK (`.ttc`, 65,535 glyphs) is the one surprising `no-outlines`
 row: it has the best coverage here, but the distributed collection is
 CFF-outlined, so this tool cannot measure its marks. That is a limit of the
-*audit*, not of the backend: a CID-keyed CFF face is embedded as
-`/CIDFontType0` (ADR-0039) and can be a body or rescue face. The committed
+*audit*, not of the backend: a CFF face is embedded as `/CIDFontType0`
+(ADR-0039, ADR-0040) and can be a body or rescue face. The committed
 `noto-cjk.smt` is built from those faces and therefore has no ink section, which
 means line-end trim falls back to the class constants (ADR-0037).
 

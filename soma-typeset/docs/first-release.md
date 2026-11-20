@@ -82,8 +82,8 @@ scripts/book.sh
 示例书用 MiSans（约 510 KB，只含用到的字形），11 页、10 个书签；
 `scripts/book.sh` 先用 `tools/metrics-gen` 从 MiSans 生成度量表，再以
 `--metrics` 交给 PDF 渲染，断行与 PDF 画出的字宽来自同一张脸。
-name-keyed CFF 字体、图片嵌入与流压缩不在这一版（D82、D85）；CID-keyed
-CFF（Noto/Source Han）已可嵌入。
+图片嵌入与流压缩不在这一版（D82）；CFF 字体（Noto/Source Han 的 CID-keyed
+与多数西文 OTF 的 name-keyed）已可嵌入。
 
 ## 仍然明显的缺口
 
@@ -96,7 +96,7 @@ CFF（Noto/Source Han）已可嵌入。
 | 3 | **章首页只有「无页眉」** | 模板能做到，但没有扉页/章前空白页的概念 | 章页留白全靠 `space-before` |
 | 4 | **表格没有行高控制、没有单元格内边距** | 单元贴线，行距就是行高 | 密排表格显得挤 |
 | 5 | **脚注只支持整块移页** | 脚注不能跨页拆 | 超长脚注会把整块推到下一页 |
-| 6 | **PDF 只支持 `glyf` 与 CID-keyed CFF** | name-keyed CFF 被拒绝；图片是占位框；无 tagged PDF | 扫描版与无障碍交付需另做（D82、D85） |
+| 6 | **PDF 只支持 `glyf` 与 CFF** | 图片是占位框；无 tagged PDF；无流压缩 | 扫描版与无障碍交付需另做（D82） |
 
 这六条都记在 `docs/debt.md`，没有一条阻塞「用现在的引擎排一本书」。
 
