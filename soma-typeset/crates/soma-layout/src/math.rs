@@ -215,6 +215,10 @@ impl Metrics for ObjectMetrics<'_> {
         }
     }
 
+    fn ink_right(&self, text: &str, style: StyleId) -> Option<Width> {
+        self.base.ink_right(text, style)
+    }
+
     fn object_metrics(&self, text: &str, style: StyleId) -> GlyphMetrics {
         match self.objects.find(text) {
             Some(object) => GlyphMetrics {

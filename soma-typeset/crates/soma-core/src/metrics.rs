@@ -86,6 +86,16 @@ pub trait Metrics: Sync {
         Width::ZERO
     }
 
+    /// Gap between the glyph outline and the right edge of its advance, in
+    /// 1/4096 em. `None` when the source has no outline data; the layout then
+    /// falls back to the rule table's class constant (`compress_right`).
+    ///
+    /// Only closing punctuation is asked for, and only for the last atom of a
+    /// justified line (ADR-0037).
+    fn ink_right(&self, _text: &str, _style: StyleId) -> Option<Width> {
+        None
+    }
+
     /// Advance of one math symbol at the style's size.
     ///
     /// Hosts with a dedicated math face override this so formula symbols come

@@ -4,7 +4,7 @@
 //! committed as bytes. Nothing here opens a font, parses outlines, or performs
 //! text shaping: lookups are integer-only and identical on every target.
 //!
-//! The blob is `soma.metrics/1`:
+//! The blob is `soma.metrics/2`:
 //!
 //! ```text
 //! u32 magic ("SMT1") | u16 version | u16 unit | u16 face_count | u16 reserved
@@ -15,7 +15,14 @@
 //!   per block: u32 start | u32 end | i32 advance
 //!   u32 entry_count
 //!   per entry: u32 codepoint | i32 advance
+//!   u32 ink_count
+//!   per ink: u32 codepoint | i16 ink_left | i16 ink_right
 //! ```
+//!
+//! `ink_left`/`ink_right` are the gaps between the glyph outline and its
+//! advance box (ADR-0037). They are recorded for punctuation only: that is
+//! where the line-end alignment needs the real outline instead of a class
+//! average. A version 1 blob parses too and reports no ink at all.
 //!
 //! All lengths are in `unit`ths of an em (4096). The blob's hash is part of the
 //! canonical page result, so a table change is visible in `metricsHash`.
@@ -29,7 +36,9 @@ use alloc::vec::Vec;
 use core::fmt;
 
 pub const MAGIC: u32 = 0x534d_5431;
-pub const VERSION: u16 = 1;
+pub const VERSION: u16 = 2;
+/// Oldest blob layout this parser still reads.
+pub const VERSION_MIN: u16 = 1;
 pub const UNIT: i32 = 4096;
 
 /// Face family codes in the blob.
@@ -61,6 +70,9 @@ pub struct Face {
     pub default_advance: i32,
     blocks: Vec<FaceBlock>,
     entries: Vec<(u32, i32)>,
+    /// `(codepoint, ink_left, ink_right)` sorted by codepoint. Empty in a
+    /// version 1 blob.
+    ink: Vec<(u32, i32, i32)>,
 }
 
 impl Face {
@@ -91,6 +103,26 @@ impl Face {
         self.entries.len()
     }
 
+    /// Gaps between a glyph outline and its advance box, in 1/4096 em:
+    /// `(left, right)`. `None` when the table has no outline data for the
+    /// codepoint (including every face in a version 1 blob).
+    pub fn ink(&self, codepoint: u32) -> Option<(i32, i32)> {
+        self.ink
+            .binary_search_by_key(&codepoint, |(cp, _, _)| *cp)
+            .ok()
+            .map(|index| (self.ink[index].1, self.ink[index].2))
+    }
+
+    /// Gap between the glyph outline and the right edge of its advance.
+    pub fn ink_right(&self, codepoint: u32) -> Option<i32> {
+        self.ink(codepoint).map(|(_, right)| right)
+    }
+
+    /// Number of glyphs with recorded ink (diagnostics).
+    pub fn ink_count(&self) -> usize {
+        self.ink.len()
+    }
+
     /// Number of uniform blocks (diagnostics).
     pub fn block_count(&self) -> usize {
         self.blocks.len()
@@ -119,7 +151,7 @@ impl MetricsTable {
             return Err(MetricsError::new("bad magic"));
         }
         let version = cursor.u16()?;
-        if version != VERSION {
+        if !(VERSION_MIN..=VERSION).contains(&version) {
             return Err(MetricsError::new("unsupported metrics version"));
         }
         let unit = cursor.u16()? as i32;
@@ -168,6 +200,22 @@ impl MetricsTable {
                 previous = codepoint;
                 entries.push((codepoint, advance));
             }
+            let mut ink = Vec::new();
+            if version >= 2 {
+                let ink_count = cursor.u32()? as usize;
+                ink.reserve(ink_count.min(1 << 16));
+                let mut previous = 0u32;
+                for index in 0..ink_count {
+                    let codepoint = cursor.u32()?;
+                    let left = cursor.i16()? as i32;
+                    let right = cursor.i16()? as i32;
+                    if index > 0 && codepoint <= previous {
+                        return Err(MetricsError::new("ink entries are not sorted"));
+                    }
+                    previous = codepoint;
+                    ink.push((codepoint, left, right));
+                }
+            }
             faces.push(Face {
                 family,
                 weight,
@@ -179,6 +227,7 @@ impl MetricsTable {
                 default_advance,
                 blocks,
                 entries,
+                ink,
             });
         }
         if cursor.remaining() != 0 {
@@ -279,6 +328,10 @@ impl<'a> Cursor<'a> {
     fn u16(&mut self) -> Result<u16, MetricsError> {
         let bytes = self.take(2)?;
         Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
+    }
+
+    fn i16(&mut self) -> Result<i16, MetricsError> {
+        Ok(self.u16()? as i16)
     }
 
     fn u32(&mut self) -> Result<u32, MetricsError> {
@@ -390,6 +443,86 @@ mod tests {
         for face in table.faces() {
             assert_eq!(face.space, face.advance_at(' ' as u32));
         }
+    }
+
+    #[test]
+    fn a_version_two_blob_carries_punctuation_ink() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&(UNIT as u16).to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&[FAMILY_SERIF, 0, 0, 0]);
+        for value in [UNIT * 4 / 5, UNIT / 5, 0, UNIT / 4, UNIT] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        for (cp, left, right) in [(0x3002u32, 128i16, 3072i16), (0xFF0C, 200, 2900)] {
+            bytes.extend_from_slice(&cp.to_le_bytes());
+            bytes.extend_from_slice(&left.to_le_bytes());
+            bytes.extend_from_slice(&right.to_le_bytes());
+        }
+
+        let table = MetricsTable::parse(&bytes).expect("v2 blob parses");
+        assert_eq!(table.face_count(), 1);
+        let face = table.face(0).expect("face");
+        assert_eq!(face.ink_count(), 2);
+        assert_eq!(face.ink(0x3002), Some((128, 3072)));
+        assert_eq!(face.ink_right(0xFF0C), Some(2900));
+        assert_eq!(face.ink(0x4E2D), None, "Han characters carry no ink entry");
+    }
+
+    #[test]
+    fn a_version_one_blob_reports_no_ink() {
+        let bytes = [
+            0x31, 0x54, 0x4d, 0x53, // "SMT1"
+            0x01, 0x00, // version 1
+            0x00, 0x10, // unit 4096
+            0x01, 0x00, // one face
+            0x00, 0x00, // reserved
+            0x00, 0x00, 0x00, 0x00, // family/weight/slant/reserved
+        ];
+        // Extend with the five i32 metrics and an empty block/entry section.
+        let mut bytes = bytes.to_vec();
+        for value in [UNIT * 4 / 5, UNIT / 5, 0, UNIT / 4, UNIT] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+
+        let table = MetricsTable::parse(&bytes).expect("v1 blob still parses");
+        let face = table.face(0).expect("face");
+        assert_eq!(face.ink_count(), 0);
+        assert_eq!(face.ink_right(0x3002), None);
+    }
+
+    #[test]
+    fn unsorted_ink_is_rejected() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&(UNIT as u16).to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&[FAMILY_SERIF, 0, 0, 0]);
+        for value in [UNIT * 4 / 5, UNIT / 5, 0, UNIT / 4, UNIT] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        for (cp, left, right) in [(0xFF0Cu32, 200i16, 2900i16), (0x3002, 128, 3072)] {
+            bytes.extend_from_slice(&cp.to_le_bytes());
+            bytes.extend_from_slice(&left.to_le_bytes());
+            bytes.extend_from_slice(&right.to_le_bytes());
+        }
+        assert!(MetricsTable::parse(&bytes).is_err());
     }
 
     #[test]

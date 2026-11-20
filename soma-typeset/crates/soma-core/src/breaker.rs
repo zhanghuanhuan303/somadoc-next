@@ -762,12 +762,16 @@ impl<'a> Shaped<'a> {
         // overrun, which keeps its punctuation inside the block.
         let justified = end_kind == LineEnd::Justified;
         if config.params().features.edge_trim && (justified || natural > target) {
-            // Never spend more than half of the mark's own em box, even if a
-            // rule table and a metrics table disagree about its side bearing.
+            // Never trim more than the mark's own advance, even if a rule table
+            // and a metrics table disagree about its side bearing. A real
+            // outline can give up more than half an em (a comma's ink sits in
+            // the left third), and that is exactly what lands it on the edge.
             let mark_width = self.atom_width(end - 1);
             let right_cap =
-                (self.paragraph.atoms[end - 1].compress_right.0.max(0) as i64).min(mark_width / 2);
-            let left_cap = self.paragraph.atoms[start].compress_left.0.max(0) as i64;
+                (self.paragraph.atoms[end - 1].compress_right.0.max(0) as i64).min(mark_width);
+            let start_width = self.atom_width(start);
+            let left_cap =
+                (self.paragraph.atoms[start].compress_left.0.max(0) as i64).min(start_width);
 
             // The em box, not the ink, is what native Chinese punctuation draws
             // with. Trimming here (rather than at the renderer) keeps badness,

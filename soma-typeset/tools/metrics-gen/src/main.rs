@@ -1,7 +1,8 @@
-//! Extract numeric font metrics into the `soma.metrics/1` blob.
+//! Extract numeric font metrics into the `soma.metrics/2` blob.
 //!
 //! The tool reads a TrueType/OpenType font (or a collection index) and writes
-//! advances, line metrics, and per-codepoint widths. It never extracts outlines
+//! advances, line metrics, per-codepoint widths, and — when the font has
+//! `glyf` outlines — the ink gap of punctuation. It never extracts outlines
 //! and never ships a font: the output is a table of integers.
 //!
 //! Usage:
@@ -20,7 +21,7 @@ use std::process::ExitCode;
 
 const UNIT: i32 = 4096;
 const MAGIC: u32 = 0x534d_5431; // "SMT1"
-const VERSION: u16 = 1;
+const VERSION: u16 = 2;
 
 /// Codepoint blocks whose advance is expected to be uniform (CJK).
 const UNIFORM_BLOCKS: &[(u32, u32)] = &[
@@ -38,6 +39,19 @@ const ENUMERATED_RANGES: &[(u32, u32)] = &[
     (0x0020, 0x2fff),
     // Mathematical alphanumeric symbols: italic/bold/script Latin and Greek.
     (0x1d400, 0x1d7ff),
+];
+
+/// Codepoints whose outline matters for line-edge alignment. Punctuation only:
+/// recording ink for every Han glyph would triple the table for no gain.
+const INK_RANGES: &[(u32, u32)] = &[
+    (0x0021, 0x002f), // ! " # $ % & ' ( ) * + , - . /
+    (0x003a, 0x0040), // : ; < = > ? @
+    (0x005b, 0x0060), // [ \ ] ^ _ `
+    (0x007b, 0x007e), // { | } ~
+    (0x2000, 0x206f), // general punctuation: quotes, dashes, ellipsis
+    (0x3000, 0x303f), // CJK symbols and punctuation
+    (0xfe30, 0xfe4f), // CJK compatibility forms
+    (0xff00, 0xffef), // halfwidth and fullwidth forms
 ];
 
 struct FaceSpec {
@@ -238,6 +252,42 @@ impl<'a> Font<'a> {
         }
         Ok(out)
     }
+
+    /// Horizontal extent of a glyph's outline in font units. `None` for an
+    /// empty glyph (a space), for a composite that points at nothing, or for a
+    /// font whose outlines are CFF rather than `glyf`.
+    fn ink_bounds(&self, gid: u16) -> Result<Option<(i32, i32)>, String> {
+        let Some((head, _)) = self.table(b"head") else {
+            return Ok(None);
+        };
+        let (Some((loca, _)), Some((glyf, _))) = (self.table(b"loca"), self.table(b"glyf")) else {
+            return Ok(None);
+        };
+        let long_offsets = read_i16(self.data, head + 50)? != 0;
+        let index = gid as usize;
+        let (start, end) = if long_offsets {
+            (
+                read_u32(self.data, loca + index * 4)? as usize,
+                read_u32(self.data, loca + index * 4 + 4)? as usize,
+            )
+        } else {
+            (
+                read_u16(self.data, loca + index * 2)? as usize * 2,
+                read_u16(self.data, loca + index * 2 + 2)? as usize * 2,
+            )
+        };
+        if start >= end {
+            return Ok(None);
+        }
+        let offset = glyf + start;
+        let contours = read_i16(self.data, offset)?;
+        if contours == 0 {
+            return Ok(None);
+        }
+        let x_min = read_i16(self.data, offset + 2)? as i32;
+        let x_max = read_i16(self.data, offset + 6)? as i32;
+        Ok(Some((x_min, x_max)))
+    }
 }
 
 impl FaceSpec {
@@ -323,6 +373,7 @@ struct OutFace {
     default_advance: i32,
     blocks: Vec<(u32, u32, i32)>,
     entries: Vec<(u32, i32)>,
+    ink: Vec<(u32, i32, i32)>,
 }
 
 fn main() -> ExitCode {
@@ -413,6 +464,28 @@ fn run() -> Result<(), String> {
         entries.dedup_by_key(|(cp, _)| *cp);
         blocks.sort_unstable();
 
+        // Ink is recorded for punctuation only, and only when the font has
+        // `glyf` outlines. The gaps say where the mark's ink ends inside its
+        // advance box, which is what a justified line pays for (ADR-0037).
+        let mut ink: Vec<(u32, i32, i32)> = Vec::new();
+        for &(start, end) in INK_RANGES {
+            for cp in start..=end {
+                let Some(&gid) = map.get(&cp) else { continue };
+                let Some(&advance) = advances.get(gid as usize) else {
+                    continue;
+                };
+                let Some((x_min, x_max)) = font.ink_bounds(gid)? else {
+                    continue;
+                };
+                let left = scale(x_min, upem).clamp(i16::MIN as i32, i16::MAX as i32);
+                let right =
+                    scale(advance as i32 - x_max, upem).clamp(i16::MIN as i32, i16::MAX as i32);
+                ink.push((cp, left, right));
+            }
+        }
+        ink.sort_unstable_by_key(|(cp, _, _)| *cp);
+        ink.dedup_by_key(|(cp, _, _)| *cp);
+
         let default_advance = blocks
             .iter()
             .find(|(start, _, _)| *start == 0x4e00)
@@ -420,13 +493,14 @@ fn run() -> Result<(), String> {
             .unwrap_or(UNIT);
 
         println!(
-            "face {}/{}: upem={} ascii-entries={} blocks={} entries={}",
+            "face {}/{}: upem={} ascii-entries={} blocks={} entries={} ink={}",
             spec.family,
             spec.weight,
             upem,
             entries.len(),
             blocks.len(),
-            entries.len()
+            entries.len(),
+            ink.len()
         );
 
         faces.push(OutFace {
@@ -439,6 +513,7 @@ fn run() -> Result<(), String> {
             default_advance,
             blocks,
             entries,
+            ink,
         });
     }
 
@@ -473,6 +548,12 @@ fn run() -> Result<(), String> {
         for (cp, advance) in &face.entries {
             bytes.extend_from_slice(&cp.to_le_bytes());
             bytes.extend_from_slice(&advance.to_le_bytes());
+        }
+        bytes.extend_from_slice(&(face.ink.len() as u32).to_le_bytes());
+        for (cp, left, right) in &face.ink {
+            bytes.extend_from_slice(&cp.to_le_bytes());
+            bytes.extend_from_slice(&(*left as i16).to_le_bytes());
+            bytes.extend_from_slice(&(*right as i16).to_le_bytes());
         }
     }
 

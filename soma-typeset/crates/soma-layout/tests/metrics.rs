@@ -179,3 +179,89 @@ styles:
         scale(regular.advance("Wide"), size)
     );
 }
+
+/// A minimal `soma.metrics/2` blob: one face, two uniform blocks, and one
+/// punctuation mark whose ink sits in the left third of its advance.
+fn ink_table() -> MetricsTable {
+    let unit: i32 = 4096;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&soma_metrics::MAGIC.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&(unit as u16).to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+    bytes.extend_from_slice(&[0, 0, 0, 0]);
+    for value in [unit * 4 / 5, unit / 5, 0, unit / 4, unit] {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+    for (start, end) in [(0x4E00u32, 0x9FFFu32), (0xFF00, 0xFFEF)] {
+        bytes.extend_from_slice(&start.to_le_bytes());
+        bytes.extend_from_slice(&end.to_le_bytes());
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&0xFF0Cu32.to_le_bytes());
+    bytes.extend_from_slice(&700i16.to_le_bytes());
+    bytes.extend_from_slice(&2900i16.to_le_bytes());
+    MetricsTable::parse(&bytes).expect("fixture blob")
+}
+
+#[test]
+fn ink_right_comes_from_the_outline_and_scales_with_the_size() {
+    let table = ink_table();
+    let doc = document(vec![paragraph("中，")]);
+    let styled = styled(&doc, BOOK);
+    let metrics = StyledMetrics::new(&table, &styled);
+    let flat = TableMetrics::new(&table, 0, soma_core::Width::EM);
+
+    assert_eq!(flat.ink_right("，", StyleId(0)).map(|w| w.0), Some(2900));
+    assert_eq!(flat.ink_right("中", StyleId(0)), None, "no ink for a Han");
+    assert_eq!(flat.ink_right("，，", StyleId(0)), None, "one glyph only");
+
+    // The body style is 1em, which is exactly the table's unit.
+    let body = styled
+        .table()
+        .styles()
+        .iter()
+        .position(|style| style.font_size.0 == 4096)
+        .expect("a body style");
+    assert_eq!(
+        metrics.ink_right("，", StyleId(body as u16)).map(|w| w.0),
+        Some(2900)
+    );
+}
+
+#[test]
+fn a_layout_with_outline_data_trims_by_the_real_bearing() {
+    let doc = document(vec![paragraph("中，".repeat(40).as_str())]);
+    let styled = styled(&doc, BOOK);
+    let table = ink_table();
+    let result = layout(
+        &doc,
+        &styled,
+        &TableMetrics::new(&table, 0, soma_core::Width::EM),
+        &engine(),
+    )
+    .expect("layout");
+
+    let mut trimmed = 0;
+    for block in &result.pages[0].blocks {
+        for placed in &block.lines {
+            let line = &placed.line;
+            if placed.y.0 == 0 && line.trim_right.0 == 0 {
+                continue;
+            }
+            if line.trim_right.0 != 0 {
+                assert_eq!(
+                    line.trim_right.0, 2900,
+                    "the trailing mark trims by its outline, not the class constant"
+                );
+                trimmed += 1;
+            }
+        }
+    }
+    assert!(trimmed > 0, "some justified line must end in the mark");
+}

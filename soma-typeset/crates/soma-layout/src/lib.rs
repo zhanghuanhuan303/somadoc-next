@@ -1811,7 +1811,9 @@ impl Builder<'_> {
             Err(RuleError::EmptyText) => return Ok(None),
         };
         let mut paragraph = paragraph;
-        scale_trim(&mut paragraph, |style| self.computed(style).font_size.0);
+        scale_trim(&mut paragraph, self.metrics, |style| {
+            self.computed(style).font_size.0
+        });
 
         let object_metrics = math::ObjectMetrics::new(self.metrics, &objects);
         let mut result = break_paragraph(&paragraph, &object_metrics, self.engine)
@@ -3107,14 +3109,21 @@ fn align_lines(lines: &mut [Line], align: Align) {
     }
 }
 
-fn scale_trim(paragraph: &mut Paragraph, size_of: impl Fn(StyleId) -> i32) {
+fn scale_trim(paragraph: &mut Paragraph, metrics: &dyn Metrics, size_of: impl Fn(StyleId) -> i32) {
     for atom in &mut paragraph.atoms {
         let size = size_of(atom.style);
-        if size <= 0 || size == 4096 {
-            continue;
+        if size > 0 && size != 4096 {
+            atom.compress_left = Width(scale_units(atom.compress_left.0, size));
+            atom.compress_right = Width(scale_units(atom.compress_right.0, size));
         }
-        atom.compress_left = Width(scale_units(atom.compress_left.0, size));
-        atom.compress_right = Width(scale_units(atom.compress_right.0, size));
+        // A real outline knows where the ink ends. Marks use it so a comma
+        // lands on the ink the way a period does; a table without outline data
+        // keeps the rule table's class constant (ADR-0037).
+        if atom.class != PunctClass::None {
+            if let Some(ink) = metrics.ink_right(&atom.text, atom.style) {
+                atom.compress_right = ink;
+            }
+        }
     }
 }
 
@@ -3249,6 +3258,7 @@ fn cover_lines(
 #[cfg(test)]
 mod unit {
     use super::*;
+    use soma_core::SyntheticMetrics;
     use soma_rules::justified_style;
 
     #[test]
@@ -3259,7 +3269,7 @@ mod unit {
         let close = paragraph.atoms[2].compress_right.0;
         assert!(open > 0 && close > 0);
 
-        scale_trim(&mut paragraph, |_| 8192);
+        scale_trim(&mut paragraph, &SyntheticMetrics::default(), |_| 8192);
         assert_eq!(paragraph.atoms[0].compress_left.0, open * 2);
         assert_eq!(paragraph.atoms[2].compress_right.0, close * 2);
     }
@@ -3269,7 +3279,7 @@ mod unit {
         let style = justified_style(Width::from_em(20));
         let mut paragraph = paragraph_from_text("（字）。", style, StyleId(1)).expect("paragraph");
         let before = paragraph.atoms.clone();
-        scale_trim(&mut paragraph, |_| 4096);
+        scale_trim(&mut paragraph, &SyntheticMetrics::default(), |_| 4096);
         for (atom, old) in paragraph.atoms.iter().zip(before.iter()) {
             assert_eq!(atom.compress_left, old.compress_left);
             assert_eq!(atom.compress_right, old.compress_right);
