@@ -35,10 +35,13 @@ use soma_core::{
     FallbackStage, Line, Metrics, Paragraph, ParagraphStyle, PunctClass, StyleId, Width,
 };
 use soma_doc::{Block, Document, Inline, NodeId};
-use soma_rules::{paragraph_from_spans, paragraph_from_text, InlineSpan, RuleError, SpanKind};
+use soma_rules::{
+    paragraph_from_code_line, paragraph_from_spans, paragraph_from_text, InlineSpan, RuleError,
+    SpanKind,
+};
 use soma_template::{ComputedStyle, ResolvedPage, StyledDoc};
 
-pub const SCHEMA: &str = "soma.pages/9";
+pub const SCHEMA: &str = "soma.pages/10";
 
 /// Break one paragraph with the layout's space rule applied.
 ///
@@ -786,6 +789,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
         numbering: styled.numbering().clone(),
         heading_counts: [0; 3],
         figure_count: 0,
+        equation_count: 0,
         table_count: 0,
         front_matter_items: 0,
         pending_index: Vec::new(),
@@ -1337,6 +1341,7 @@ struct Builder<'a> {
     /// Committed heading counters for levels 1..=3.
     heading_counts: [u32; 3],
     figure_count: u32,
+    equation_count: u32,
     table_count: u32,
     /// Generated items at the head of the flow (cover + contents). Pages that
     /// only hold these are front matter.
@@ -2383,7 +2388,7 @@ impl Builder<'_> {
         };
 
         for source_line in value.lines() {
-            let paragraph = match paragraph_from_text(source_line, wide, style_id) {
+            let paragraph = match paragraph_from_code_line(source_line, wide, style_id) {
                 Ok(paragraph) => paragraph,
                 Err(RuleError::EmptyText) => {
                     lines.push(empty_line(computed.line_height, y));
@@ -2391,6 +2396,10 @@ impl Builder<'_> {
                     continue;
                 }
             };
+            // Each source line is broken on its own, so its atoms start at
+            // zero; shift them onto the block's atom table so the renderers
+            // can look a box up by `(node, atom)`.
+            let base = atoms.len() as u32;
             atoms.extend(paragraph.atoms.iter().map(|atom| TextEntry {
                 text: atom.text.clone(),
                 style: atom.style,
@@ -2403,12 +2412,18 @@ impl Builder<'_> {
                 stage = result.fallback_stage;
             }
             for line in &result.lines {
-                lines.push(PlacedLine {
-                    y,
-                    hang: 0,
-                    line: line.clone(),
-                });
+                let mut line = line.clone();
+                line.start += base;
+                line.end += base;
+                for placed in &mut line.boxes {
+                    placed.atom += base;
+                }
                 y = y + line.height;
+                lines.push(PlacedLine {
+                    y: y - line.height,
+                    hang: 0,
+                    line,
+                });
             }
         }
 
@@ -3073,10 +3088,43 @@ impl Builder<'_> {
     /// back to a text placeholder.
     fn math_item(&mut self, node: NodeId, source: &str, style_id: StyleId) -> Option<FlowItem> {
         let computed = self.computed(style_id);
-        let layout = math::display(source, &computed, self.metrics, style_id)?;
-        let box_width = layout.width;
+        let mut layout = math::display(source, &computed, self.metrics, style_id)?;
+        let pattern = self
+            .numbering
+            .equations
+            .clone()
+            .filter(|_| is_numbered_environment(source));
+        let numbered = pattern.is_some();
+        let box_width = if numbered {
+            self.content_width
+        } else {
+            layout.width
+        };
         let height = layout.total_height();
-        let x = Width((self.content_width.0 - box_width.0).max(0) / 2);
+        let x = Width((self.content_width.0 - layout.width.0).max(0) / 2);
+        if let Some(pattern) = pattern {
+            // One number per aligned row, right-aligned in the content box.
+            let baselines: Vec<i32> = if layout.rows.is_empty() {
+                alloc::vec![layout.height.0]
+            } else {
+                layout.rows.iter().map(|row| row.0).collect()
+            };
+            for baseline in baselines {
+                self.equation_count += 1;
+                let number = pattern.replace("{n}", &self.equation_count.to_string());
+                let advance = self.metrics.advance(&number, style_id).0;
+                layout.items.push(soma_math::MathItem {
+                    text: number,
+                    // Items are relative to the box origin `x`, so undo the
+                    // centering offset to land on the right margin.
+                    x: Width(self.content_width.0 - advance - x.0),
+                    y: Width(baseline),
+                    size: computed.font_size,
+                    stretch: 1000,
+                    color: None,
+                });
+            }
+        }
         Some(FlowItem {
             height,
             before: self.before_glue(&computed),
@@ -3599,6 +3647,14 @@ fn cover_lines(
             .map(|date| format!("{}-{:02}-{:02}", date.year, date.month, date.day)),
     };
     (title, subtitle, authors, date)
+}
+
+/// Environments that take an equation number. `aligned`/`split` are inner
+/// blocks and never numbered; the `*` variants opt out at the source.
+fn is_numbered_environment(source: &str) -> bool {
+    ["align", "equation", "gather", "multline"]
+        .iter()
+        .any(|name| source.contains(&format!("\\begin{{{name}}}")))
 }
 
 #[cfg(test)]

@@ -147,7 +147,7 @@ fn canonical_json_carries_the_formula() {
     let layout = math_layout("\\frac{a}{b}");
     let json = layout.canonical_json();
 
-    assert!(json.contains("\"schema\":\"soma.pages/9\""));
+    assert!(json.contains("\"schema\":\"soma.pages/10\""));
     assert!(json.contains("\"math\":{\"width\":"));
     assert!(json.contains("\"inlineMath\":[]"));
     assert!(json.contains("\"baseline\":"));

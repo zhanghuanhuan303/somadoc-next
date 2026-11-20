@@ -31,6 +31,29 @@ fn code_block_keeps_source_lines() {
 }
 
 #[test]
+fn a_code_block_keeps_each_line_on_its_own_atoms() {
+    let doc = document(vec![Block::CodeBlock(CodeBlock::new(
+        NodeMeta::synthesized(),
+        None,
+        "alpha\n  beta\n",
+    ))]);
+    let styled = styled(&doc, TIGHT);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+
+    assert_eq!(block.lines.len(), 2);
+    let mut second = String::new();
+    for placed in &block.lines[1].line.boxes {
+        second.push_str(layout.text.atom_text(block.node, placed.atom));
+    }
+    assert_eq!(second, "  beta", "the second line keeps its own text");
+    assert!(
+        block.lines[0].line.end <= block.lines[1].line.start,
+        "the lines do not share atoms"
+    );
+}
+
+#[test]
 fn math_block_becomes_a_display_box() {
     let doc = document(vec![Block::MathBlock(MathBlock::new(
         NodeMeta::synthesized(),
@@ -59,6 +82,75 @@ fn math_block_becomes_a_display_box() {
     );
     assert!(block.x.0 > 0, "a narrow formula is centred: {}", block.x.0);
     assert!(block.height.0 > 0);
+}
+
+#[test]
+fn a_numbered_equation_gets_a_right_aligned_label() {
+    let source = format!("{TIGHT}\nnumbering:\n  equations: \"({{n}})\"\n");
+    let doc = document(vec![Block::MathBlock(MathBlock::new(
+        NodeMeta::synthesized(),
+        "\\begin{equation}E = mc^2\\end{equation}",
+    ))]);
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+    let math = block.math.as_ref().expect("display math box");
+
+    let number = math
+        .items
+        .iter()
+        .find(|item| item.text == "(1)")
+        .expect("the formula is numbered");
+    assert_eq!(block.width, math.width, "a numbered line spans the measure");
+    assert!(
+        block.x.0 + number.x.0 > math.width.0 / 2,
+        "the label sits at the right margin: {} + {}",
+        block.x.0,
+        number.x.0
+    );
+}
+
+#[test]
+fn each_aligned_row_takes_its_own_number() {
+    let source = format!("{TIGHT}\nnumbering:\n  equations: \"({{n}})\"\n");
+    let doc = document(vec![Block::MathBlock(MathBlock::new(
+        NodeMeta::synthesized(),
+        "\\begin{align}a &= 1 \\\\ b &= 2 \\\\ c &= 3\\end{align}",
+    ))]);
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let math = layout.pages[0].blocks[0]
+        .math
+        .as_ref()
+        .expect("display math box");
+    let numbers: Vec<&str> = math
+        .items
+        .iter()
+        .filter(|item| item.text.starts_with('('))
+        .map(|item| item.text.as_str())
+        .collect();
+
+    assert_eq!(numbers, ["(1)", "(2)", "(3)"]);
+}
+
+#[test]
+fn a_plain_formula_is_not_numbered() {
+    let source = format!("{TIGHT}\nnumbering:\n  equations: \"({{n}})\"\n");
+    let doc = document(vec![Block::MathBlock(MathBlock::new(
+        NodeMeta::synthesized(),
+        "a^2 + b^2 = c^2",
+    ))]);
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let math = layout.pages[0].blocks[0]
+        .math
+        .as_ref()
+        .expect("display math box");
+
+    assert!(
+        math.items.iter().all(|item| !item.text.starts_with('(')),
+        "a bare formula carries no label"
+    );
 }
 
 #[test]

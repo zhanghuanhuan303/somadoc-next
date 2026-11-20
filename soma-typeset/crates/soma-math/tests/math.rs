@@ -16,6 +16,60 @@ impl MathMetrics for TestMetrics {
     fn descent(&self, size: Width) -> Width {
         Width(size.0 / 4)
     }
+    fn has(&self, character: char) -> bool {
+        // This face has no Mathematical Italic block, so variables stay
+        // upright and the assertions below can name the letters they wrote.
+        (character as u32) < 0x1_0000
+    }
+}
+
+/// A face that carries the Mathematical Italic block, like a real math font.
+struct ItalicMetrics;
+
+impl MathMetrics for ItalicMetrics {
+    fn has(&self, _character: char) -> bool {
+        true
+    }
+    fn advance(&self, text: &str, size: Width) -> Width {
+        Width(text.chars().count() as i32 * size.0 / 2)
+    }
+    fn ascent(&self, size: Width) -> Width {
+        Width(size.0 * 3 / 4)
+    }
+    fn descent(&self, size: Width) -> Width {
+        Width(size.0 / 4)
+    }
+}
+
+#[test]
+fn a_variable_is_set_italic_when_the_face_has_the_glyph() {
+    let upright = layout("x", &MathStyle::default(), &TestMetrics).expect("layout");
+    let italic = layout("x", &MathStyle::default(), &ItalicMetrics).expect("layout");
+    assert_eq!(upright.items[0].text, "x");
+    assert_eq!(
+        italic.items[0].text, "\u{1d465}",
+        "a variable becomes U+1D465 MATHEMATICAL ITALIC SMALL X"
+    );
+}
+
+#[test]
+fn function_names_and_text_stay_upright() {
+    let result = layout(
+        "\\sin x + \\text{if}",
+        &MathStyle::default(),
+        &ItalicMetrics,
+    )
+    .expect("layout");
+    let texts: Vec<&str> = result.items.iter().map(|item| item.text.as_str()).collect();
+    assert!(
+        texts.contains(&"sin"),
+        "a function name is a word: {texts:?}"
+    );
+    assert!(texts.contains(&"if"), "\\text stays upright: {texts:?}");
+    assert!(
+        texts.contains(&"\u{1d465}"),
+        "the variable is italic: {texts:?}"
+    );
 }
 
 fn formula(source: &str) -> soma_math::MathLayout {
@@ -552,4 +606,126 @@ fn a_radical_inside_a_fraction_keeps_its_own_baseline() {
         two.y.0,
         fraction.y.0
     );
+}
+
+#[test]
+fn array_takes_its_column_alignment_from_the_format() {
+    // Column 0 is `l`, column 2 is `r`; the test face is half an em per
+    // character, so `ddd` makes each column wider than its short cell.
+    let result = formula("\\begin{array}{lcr}a&b&c\\\\ddd&e&fff\\end{array}");
+    let at = |text: &str, nth: usize| {
+        result
+            .items
+            .iter()
+            .filter(|item| item.text == text)
+            .nth(nth)
+            .map(|item| item.x.0)
+            .expect(text)
+    };
+    assert_eq!(
+        at("a", 0),
+        at("d", 0),
+        "a left-aligned cell starts at the column edge in both rows"
+    );
+    let cell = result.items[0].size.0 / 2;
+    assert_eq!(
+        at("c", 0),
+        at("f", 0) + cell * 2,
+        "a right-aligned cell ends at the column edge"
+    );
+}
+
+#[test]
+fn substack_stacks_its_lines() {
+    let result = formula("\\sum_{\\substack{i=1\\\\j=2}} a");
+    let first = result
+        .items
+        .iter()
+        .find(|item| item.text == "i")
+        .expect("first line");
+    let second = result
+        .items
+        .iter()
+        .find(|item| item.text == "j")
+        .expect("second line");
+    assert!(second.y.0 > first.y.0, "the second line sits lower");
+    assert!(
+        (first.x.0 - second.x.0).abs() <= first.size.0,
+        "the lines are centred on each other"
+    );
+}
+
+#[test]
+fn overbrace_stretches_over_its_body() {
+    let result = formula("\\overbrace{abc}");
+    let brace = result
+        .items
+        .iter()
+        .find(|item| item.text == "\u{23de}")
+        .expect("the brace glyph");
+    assert!(brace.stretch > 1000, "the brace spans the body");
+    // The glyph carries its ink well above its own baseline, so the baseline
+    // is no longer a useful reference: check where the ink lands.
+    let (_, ink_bottom) = soma_math::brace_ink(&brace.text).expect("ink band");
+    let bottom = brace.y.0 - ink_bottom * brace.size.0 / 1000;
+    assert!(
+        bottom < 0,
+        "its ink sits above the body's baseline: {bottom}"
+    );
+    for item in &result.items {
+        if item.text != "\u{23de}" {
+            assert!(item.y.0 > bottom, "the body sits below the brace");
+        }
+    }
+}
+
+#[test]
+fn an_overbrace_label_sits_centered_above_the_brace() {
+    let result = formula("\\overbrace{abc}^{n}");
+    let brace = result
+        .items
+        .iter()
+        .find(|item| item.text == "\u{23de}")
+        .expect("the brace glyph");
+    let label = result
+        .items
+        .iter()
+        .find(|item| item.text == "n")
+        .expect("the label");
+
+    let (ink_top, _) = soma_math::brace_ink("\u{23de}").expect("ink band");
+    let top = brace.y.0 - ink_top * brace.size.0 / 1000;
+    assert!(label.y.0 < top, "the label clears the brace's ink");
+
+    let width = brace.size.0 * i32::from(brace.stretch) / 1000;
+    assert!(
+        label.x.0 > brace.x.0 && label.x.0 < brace.x.0 + width,
+        "the label is centred on the brace"
+    );
+}
+
+#[test]
+fn color_applies_to_the_rest_of_its_group() {
+    let result = formula("{\\color{red} a+b}+c");
+    let red = result
+        .items
+        .iter()
+        .filter(|item| item.color == Some(0xcc0000))
+        .map(|item| item.text.as_str())
+        .collect::<Vec<_>>();
+    let plain = result
+        .items
+        .iter()
+        .filter(|item| item.color.is_none())
+        .map(|item| item.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(red, vec!["a", "+", "b"], "the group's content is red");
+    assert_eq!(plain, vec!["+", "c"], "outside the group stays unset");
+}
+
+#[test]
+fn an_unknown_colour_is_refused() {
+    let error =
+        layout("\\color{chartreuse} x", &MathStyle::default(), &TestMetrics).expect_err("rejected");
+    assert!(format!("{error:?}").contains("chartreuse"), "{error:?}");
 }

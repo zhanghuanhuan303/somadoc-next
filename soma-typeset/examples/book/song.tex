@@ -75,7 +75,7 @@
 
 \section{表格与公式}
 
-表格是这个引擎里最“结构化”的部分：列宽先按列数平分版心，再做行内断行，最后取行高的最大值。跨列单元格在计算占位时按列宽之和处理，跨行单元格则让它所在的行带变高，后续行依次顺延。
+表格\index{表格}是这个引擎里最“结构化”的部分：列宽先按列数平分版心，再做行内断行，最后取行高的最大值。跨列单元格在计算占位时按列宽之和处理，跨行单元格则让它所在的行带变高，后续行依次顺延。
 
 \begin{table}
 \caption{字族、字重与用途}
@@ -109,6 +109,49 @@ E = mc^2
 \]
 
 这些几何都由公式盒子自己算好，页面只负责把它放在基线上。
+
+\subsection{公式子集}
+
+变量按数学习惯排成斜体，函数名与文字模式里的字保持正体：$ax+b=0$，$\sin x+\text{const}$。
+
+array 环境的列格式参数控制每列的对齐，l、c、r 分别是左、中、右：
+
+\[
+\begin{array}{lcr}
+\text{left} & \text{mid} & \text{right} \\
+1 & 22 & 333
+\end{array}
+\]
+
+\substack 在一行里堆叠多行，常用来把求和号的两个下标排成两行：
+
+\[
+\sum_{\substack{i=1\\j=1}}^{n} a_{ij}
+\]
+
+\overbrace 先等比放大字形再水平拉伸，钩子不会被压成波浪：
+
+\[
+\overbrace{a+b+\cdots+z}^{26}
+\]
+
+\color 作用于本组剩余内容，颜色可以写名字或 #rrggbb：
+
+\[
+\color{red} a + \color{blue} b + c
+\]
+
+需要编号的公式用 equation 环境；多行的 align 按 \& 对齐，每行各自编号：
+
+\begin{equation}
+E = mc^2
+\end{equation}
+
+\begin{align}
+a &= b + c \\
+d &= e - f \\
+g &= h
+\end{align}
 
 \section{脚注与索引}
 

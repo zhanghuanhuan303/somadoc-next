@@ -285,6 +285,10 @@ pub struct NumberingSpec {
     pub figures: Option<String>,
     /// Table caption pattern with `{n}`.
     pub tables: Option<String>,
+    /// Equation pattern with `{n}`, e.g. `({n})`. `None` = formulas are not
+    /// numbered. Only `align`/`equation`/`gather`/`multline` environments are
+    /// numbered, and an `align` row gets its own number.
+    pub equations: Option<String>,
 }
 
 impl Default for NumberingSpec {
@@ -294,6 +298,7 @@ impl Default for NumberingSpec {
             depth: 3,
             figures: None,
             tables: None,
+            equations: None,
         }
     }
 }
@@ -846,7 +851,7 @@ fn parse_page(value: &Value, path: &str) -> Result<PageSpec, TemplateError> {
 
 fn parse_numbering(value: &Value, path: &str) -> Result<NumberingSpec, TemplateError> {
     let fields = Fields::new(value, path)?;
-    fields.reject_unknown(&["headings", "depth", "figures", "tables"])?;
+    fields.reject_unknown(&["headings", "depth", "figures", "tables", "equations"])?;
 
     let headings = match fields.optional_str("headings")?.as_deref() {
         None | Some("none") => HeadingNumbering::None,
@@ -889,6 +894,7 @@ fn parse_numbering(value: &Value, path: &str) -> Result<NumberingSpec, TemplateE
         depth,
         figures: label("figures")?,
         tables: label("tables")?,
+        equations: label("equations")?,
     })
 }
 

@@ -35,17 +35,22 @@ metrics through `MathMetrics`, implemented by `MathAdapter` over the same
 
 - Everything is `i32` in 1/4096 em (`Width`).
 - `MathItem.y` is measured from the **formula baseline**; negative is above.
+- `MathItem.stretch` is permille of the natural advance (`1000` = as is); only
+  the stretchy braces go above it today. `MathItem.color` is `None` for the
+  surrounding text colour, or `0xRRGGBB`.
 - `MathRule.y` is the top edge of the rule, also baseline-relative; a fraction
   bar is above the baseline, a radical bar covers the body.
 - `MathBox.baseline` is the distance from the block top to the formula baseline.
   `MathBox.height` is `ascent + depth` (`MathLayout::total_height`).
-- Placement: `x = (content_width - width) / 2`, `y = 0` inside the block.
+- Placement: `x = (content_width - width) / 2`, `y = 0` inside the block. An
+  equation number is appended to `items` with `x` already relative to the box
+  origin, so the centring offset is subtracted from it.
 
 ## Syntax
 
 | Form | Result |
 |---|---|
-| `x`, `中`, `\alpha` | one `MathItem`; ASCII letters are italic in print, this subset leaves posture to the renderer |
+| `x`, `中`, `\alpha` | one `MathItem`; a bare ASCII letter becomes `Node::Letter` and is set in the Mathematical Italic block when the face has it |
 | `{...}` | group (inherits the enclosing size) |
 | `x^2`, `x_1`, `x_i^2` | script to the right; superscript above, subscript below |
 | `\frac{a}{b}` | numerator/denominator at `script_scale`, one `MathRule` at `axis_height` |
@@ -60,6 +65,11 @@ metrics through `MathMetrics`, implemented by `MathAdapter` over the same
 | `\begin{matrix}` / `pmatrix` / `bmatrix` / `vmatrix` | grid of cells; centred columns, fenced as named |
 | `\begin{cases}` | one left brace, left-aligned columns |
 | `\begin{aligned}` (`align`, `split`) | columns alternate right/left around `&`, no fences |
+| `\begin{array}{lcr}` | like `matrix`, but each cell follows the column's `l`/`c`/`r` |
+| `\substack{a\\b}` | lines stacked centred on each other, `frac_gap` apart |
+| `\overbrace{x}`, `\underbrace{x}` | one stretchy brace glyph (U+23DE/U+23DF), grown up to 2.2× then stretched; placed by its ink band |
+| `\overbrace{x}^{n}` | the label is centred over the brace, not set after it |
+| `\color{red} …`, `\color{#c00} …` | colours the rest of the group |
 
 Also mapped: Greek letters (lower and upper), `\le \ge \ne \equiv \approx \sim
 \propto`, arrows (`\to`, `\leftarrow`, `\Leftrightarrow`, …), set operators
@@ -68,7 +78,18 @@ Also mapped: Greek letters (lower and upper), `\le \ge \ne \equiv \approx \sim
 
 Unsupported commands are a hard error: `MathError::UnsupportedCommand`. Layout
 catches it and keeps the text placeholder, so a formula outside the subset is
-visible in output instead of silently wrong.
+visible in output instead of silently wrong. An unknown `\color` name is also
+an error rather than a silent black.
+
+## Numbering
+
+`numbering.equations: "({n})"` in the template numbers display formulas whose
+source is an `equation`, `align`, `gather` or `multline` environment. The `*`
+variants and the inner `aligned`/`split` are never numbered. The counter runs
+per document; one number is added per aligned row, right-aligned in the content
+box, at that row's baseline. `MathLayout::rows` reports the row baselines for
+this purpose; the numbers themselves are appended by `soma-layout`, so
+`soma-math` stays unaware of page geometry.
 
 ## Inline math
 
@@ -147,11 +168,25 @@ splits. If it does not fit on an empty page the page is marked `overflow` like
 any other tall box. An inline formula is an indivisible *atom*: it moves to the
 next line with the rest of the line and never splits mid-formula.
 
+## Ink, not the em box
+
+A glyph's font-wide ascent is 1.05 em; a line of lowercase letters tops out
+near 0.7 em. Anything that has to *touch* the text — a brace, a stacked limit —
+must be placed against the ink, or it floats. `Context::measure_ink` measures a
+node with a cap-height estimate (`min(ascent, 0.72 em)`) and a short descender
+(`min(descent, 0.22 em)`) instead of the font extents.
+
+The stretchy braces need one more fact: their ink is a narrow band far from
+their own baseline. `brace_ink` holds the measured band (`U+23DE` 0.656…0.893 em
+above the baseline, `U+23DF` 0.075…0.310 em below it), and both the placement
+and the box measurement use it. The table is public so a renderer — or a test
+— can ask where the ink actually is.
+
 ## Tests
 
 | File | What it locks |
 |---|---|
-| `soma-math/tests/math.rs` | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, names, spacing, errors |
+| `soma-math/tests/math.rs` | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, names, spacing, errors, italic variables, `array` formats, `\substack`, brace ink and labels, `\color` |
 | `soma-layout/tests/e11_math.rs` | centring, baseline inside the box, line flow, canonical JSON |
 | `soma-layout/tests/e12_inline_math.rs` | marker atoms, line-box growth, text-style limits, placeholder, canonical `inlineMath` |
 | `soma-render-svg/tests/math.rs` | exact `<text>`/`<rect>` coordinates |

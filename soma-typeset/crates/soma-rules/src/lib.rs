@@ -192,6 +192,40 @@ pub fn paragraph_from_text(
     builder.finish(style)
 }
 
+/// Compile one source line of a code block.
+///
+/// Whitespace becomes real atoms here: a command copied out of the page has to
+/// keep its indentation and its argument spacing, so runs of spaces are not
+/// collapsed and a leading run is not dropped.
+pub fn paragraph_from_code_line(
+    text: &str,
+    style: ParagraphStyle,
+    style_id: StyleId,
+) -> Result<Paragraph, RuleError> {
+    let mut builder = Builder::new();
+    let mut run = String::new();
+    for character in text.chars() {
+        if character.is_whitespace() {
+            if !run.is_empty() {
+                builder.push_text(&run, style_id);
+                run.clear();
+            }
+            builder.push_atom(
+                String::from(" "),
+                AtomKind::Other,
+                PunctClass::None,
+                style_id,
+            );
+        } else {
+            run.push(character);
+        }
+    }
+    if !run.is_empty() {
+        builder.push_text(&run, style_id);
+    }
+    builder.finish(style)
+}
+
 /// What one inline span represents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SpanKind {
@@ -769,6 +803,19 @@ mod tests {
         assert_eq!(paragraph.atoms.len(), 2);
         assert_eq!(paragraph.boundaries[0].kind, BoundaryKind::Space);
         assert_eq!(paragraph.boundaries[0].breakable, Breakability::Forbidden);
+    }
+
+    #[test]
+    fn a_code_line_keeps_its_spaces() {
+        let paragraph =
+            paragraph_from_code_line("  a b", justified_style(Width::from_em(10)), StyleId(0))
+                .expect("a code line");
+        let texts: Vec<&str> = paragraph
+            .atoms
+            .iter()
+            .map(|atom| atom.text.as_str())
+            .collect();
+        assert_eq!(texts, [" ", " ", "a", " ", "b"]);
     }
 
     #[test]

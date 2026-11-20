@@ -281,12 +281,28 @@ fn paint_math(
     for item in &math.items {
         let x = left + item.x.0;
         let y = baseline + item.y.0 - ascent_proxy(item.size);
+        let paint = match item.color {
+            Some(value) => format!("#{value:06x}"),
+            None => paint.clone(),
+        };
+        // A stretched glyph (an over/underbrace) is scaled on x only; the
+        // transform origin keeps its left edge where the layout put it.
+        let transform = if item.stretch == 1000 {
+            String::new()
+        } else {
+            format!(
+                "transform:scaleX({}.{:03});transform-origin:left bottom;",
+                item.stretch / 1000,
+                item.stretch % 1000
+            )
+        };
         html.push_str(&format!(
-            "<span class=\"math\" style=\"left:{};top:{};font-size:{};color:{};\">{}</span>\n",
+            "<span class=\"math\" style=\"left:{};top:{};font-size:{};color:{};{}\">{}</span>\n",
             em(Width(x)),
             em(Width(y)),
             em(item.size),
             paint,
+            transform,
             escape(&item.text)
         ));
     }

@@ -32,6 +32,7 @@ numbering:
   depth: 2
   figures: "图 {n}"
   tables: "表 {n}"
+  equations: "({n})"
 
 masters:
   - name: cover

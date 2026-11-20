@@ -86,16 +86,22 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   `soma-eval corpus` measures them and `soma-eval calibrate` sweeps tolerance ×
   badness scale on a proxy objective; see
   [`docs/corpus-calibration.md`](docs/corpus-calibration.md).
-- Display math (`soma-math`, ADR-0026): a TeX subset (symbols, scripts,
-  fractions, radicals, `\sum`/`\int` with limits, function names,
-  `\left…\right`) laid out into integer glyphs and rules. `soma-layout`
-  centres one `MathBox` per `MathBlock`; both renderers paint it; a malformed
-  formula falls back to text instead of failing the page. Inline formulas are
+- Display math (`soma-math`, ADR-0026/ADR-0054): a TeX subset (symbols, italic
+  variables, scripts, fractions, radicals, `\sum`/`\int` with limits, function
+  names, `\left…\right`, `array` column formats, `\substack`,
+  `\overbrace`/`\underbrace`, `\color`) laid out into integer glyphs and
+  rules. `soma-layout` centres one `MathBox` per `MathBlock`; both renderers
+  paint it; a malformed formula falls back to text instead of failing the page.
+  `numbering.equations` numbers `equation`/`align`/`gather`/`multline` blocks
+  per row, right-aligned in the margin. Inline formulas are
   object atoms measured by their own box (ADR-0027), so they break and raise the
   line box like any other inline object. Fences stretch to their body, and
   `matrix`/`pmatrix`/`bmatrix`/`vmatrix`/`cases`/`aligned` are supported; symbols
   come from a dedicated math face in the metrics table (ADR-0030). See
   [`docs/math.md`](docs/math.md).
+- Code blocks (`ADR-0055`): each source line keeps its own spaces and is laid
+  out on the block's atom table — indentation survives, nothing reflows, and a
+  line that is too long overflows instead of wrapping.
 - Engine configuration: `soma-engine` parses `soma.engine/1` (preset, window,
   atom window, fallback switches, vertical cost model) into the same
   `BreakConfig`/`VerticalParams` the hand-built path uses. See

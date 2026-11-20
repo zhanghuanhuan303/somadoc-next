@@ -55,6 +55,10 @@ impl MathMetrics for MathAdapter<'_> {
         let line = self.metrics.math_metrics(self.style);
         rescale(line.descent, size, self.base)
     }
+
+    fn has(&self, character: char) -> bool {
+        self.metrics.has_glyph(character, self.style)
+    }
 }
 
 /// Layout constants for a display formula at the style's font size.

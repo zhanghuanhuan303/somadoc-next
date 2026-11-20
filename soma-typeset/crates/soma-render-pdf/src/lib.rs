@@ -987,6 +987,27 @@ impl Painter {
         self.emit(&line);
     }
 
+    /// Show a run, optionally stretched horizontally (a brace spanning a
+    /// body). `stretch` is permille, 1000 meaning "as is".
+    fn show_stretched(&mut self, x: i64, y: i64, stretch: u16, glyphs: &[u16]) {
+        if stretch == 1000 {
+            self.show(x, y, glyphs);
+            return;
+        }
+        let mut hex = String::with_capacity(glyphs.len() * 4);
+        for gid in glyphs {
+            let _ = write!(hex, "{:04X}", gid);
+        }
+        let line = format!(
+            "{} 0 0 1 {} {} Tm <{}> Tj\n",
+            number(i64::from(stretch)),
+            number(x),
+            number(y),
+            hex
+        );
+        self.emit(&line);
+    }
+
     fn show(&mut self, x: i64, y: i64, glyphs: &[u16]) {
         let mut hex = String::with_capacity(glyphs.len() * 4);
         for gid in glyphs {
@@ -1351,7 +1372,7 @@ fn paint_math(
         let x = left + item.x.0;
         let y = layout.page.height.0 - (baseline + item.y.0);
         let size = painter.scale.milli(item.size.0);
-        painter.set_fill(paint);
+        painter.set_fill(item.color.unwrap_or(paint));
         painter.start_text();
         painter.set_font(role, size);
         let glyphs: Vec<u16> = item
@@ -1359,7 +1380,12 @@ fn paint_math(
             .chars()
             .map(|character| font.glyph(character as u32))
             .collect();
-        painter.show(painter.scale.milli(x), painter.scale.milli(y), &glyphs);
+        painter.show_stretched(
+            painter.scale.milli(x),
+            painter.scale.milli(y),
+            item.stretch,
+            &glyphs,
+        );
     }
     for rule in &math.rules {
         let x = left + rule.x.0;

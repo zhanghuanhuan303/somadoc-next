@@ -180,7 +180,7 @@ mod tests {
         assert!(first.contains("\"schema\":\"soma.layout/6\""));
         assert!(first.contains("\"forcedEnd\":true"));
         assert!(first.contains("\"footnoteDef\""));
-        assert!(first.contains("\"schema\":\"soma.pages/9\""));
+        assert!(first.contains("\"schema\":\"soma.pages/10\""));
         assert!(first.contains("\"metricsHash\":"));
     }
 }

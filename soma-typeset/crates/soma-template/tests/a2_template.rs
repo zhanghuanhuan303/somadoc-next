@@ -471,6 +471,7 @@ numbering:
   depth: 2
   figures: "图 {n}"
   tables: "表 {n}"
+  equations: "({n})"
 styles:
   - selector:
       element: document
@@ -485,11 +486,12 @@ styles:
     );
     assert_eq!(template.numbering.depth, 2);
     assert_eq!(template.numbering.figures.as_deref(), Some("图 {n}"));
+    assert_eq!(template.numbering.equations.as_deref(), Some("({n})"));
     assert_eq!(template.page.front_matter, FrontMatterNumbering::Roman);
     let json = template.canonical_json();
     assert!(
         json.contains(
-            "\"numbering\":{\"headings\":\"chinese-chapter\",\"depth\":2,\"figures\":\"图 {n}\",\"tables\":\"表 {n}\"}"
+            "\"numbering\":{\"headings\":\"chinese-chapter\",\"depth\":2,\"figures\":\"图 {n}\",\"tables\":\"表 {n}\",\"equations\":\"({n})\"}"
         ),
         "{json}"
     );

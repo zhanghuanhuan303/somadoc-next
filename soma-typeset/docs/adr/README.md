@@ -6,7 +6,9 @@ architecture v2 left open; ADR-0012…0031 extend the implemented system
 (table metrics, line-level pagination, typography, page masters, engine
 configuration, table continuation, table rules and context selectors,
 frontends, display and inline math, contents pages, the CLI, math fences and
-matrices, alignment, generated covers)
+matrices, alignment, generated covers, images and tagged PDF, table structure,
+trim caps, family-aware faces, baseline propagation, the rest of the math
+subset, and code-block atoms)
 without changing the layer contract.
 
 These ADRs record the decisions that shape the next phase. They are aligned
@@ -69,6 +71,8 @@ only).
 | [0051](0051-trim-caps-are-a-budget.md) | A trim cap is a budget, not a measurement | Accepted |
 | [0052](0052-family-aware-faces.md) | A style picks its face by family, not by slot | Accepted |
 | [0053](0053-math-baseline-propagation.md) | Every math node places itself at the baseline it is given | Accepted |
+| [0054](0054-math-subset-completion.md) | Italic variables, `array` formats, `\substack`, braces by ink, `\color`, equation numbers | Accepted |
+| [0055](0055-code-block-atoms.md) | One atom table per code block; a code line keeps its spaces | Accepted |
 
 ## Rules
 

@@ -34,6 +34,66 @@ pub trait MathMetrics {
     fn ascent(&self, size: Width) -> Width;
     /// Descent of the font at `size` (below the baseline).
     fn descent(&self, size: Width) -> Width;
+
+    /// Whether the face has a glyph for `character`. Used to decide whether a
+    /// variable may be set in the Mathematical Italic block (U+1D434…): a face
+    /// without those glyphs keeps the upright letter rather than drawing
+    /// `.notdef`, so the default is "no".
+    fn has(&self, _character: char) -> bool {
+        false
+    }
+}
+
+/// Ink band of the stretchy brace glyphs, in permille of the glyph's own
+/// size, as distances *above* its baseline (negative means below). Measured
+/// from Noto Sans Math: `U+23DE` (over-brace) occupies 0.656…0.893 em above
+/// the baseline, `U+23DF` (under-brace) 0.075…0.310 em below it. The glyph's
+/// font-wide ascent is more than twice its ink, so placing by ascent floats
+/// the brace a full em above the body.
+const OVER_BRACE_INK: (i32, i32) = (893, 656);
+const UNDER_BRACE_INK: (i32, i32) = (-75, -310);
+
+/// `(ink_top, ink_bottom)` above the baseline for the two stretchy braces.
+/// Public because both the layout and the renderers need to know where the
+/// glyph's ink actually sits: its baseline is not a useful reference.
+pub fn brace_ink(text: &str) -> Option<(i32, i32)> {
+    match text.chars().next()? {
+        '\u{23de}' => Some(OVER_BRACE_INK),
+        '\u{23df}' => Some(UNDER_BRACE_INK),
+        _ => None,
+    }
+}
+
+fn per_mille(size: Width, permille: i32) -> i32 {
+    (size.0 as i64 * i64::from(permille) / 1000) as i32
+}
+
+/// Named colours accepted by `\color{...}`, plus `#rrggbb`.
+fn named_color(name: &str) -> Option<u32> {
+    let value = match name.trim() {
+        "red" => 0xcc0000,
+        "green" => 0x007700,
+        "blue" => 0x0000cc,
+        "black" => 0x000000,
+        "white" => 0xffffff,
+        "gray" | "grey" => 0x808080,
+        "orange" => 0xd35400,
+        other => u32::from_str_radix(other.strip_prefix('#')?, 16).ok()?,
+    };
+    (value <= 0xff_ffff).then_some(value)
+}
+
+/// The Mathematical Italic code point for an ASCII letter.
+///
+/// TeX sets variables in italic; the Unicode math alphabets carry those
+/// shapes as separate characters, so no synthetic slant is involved.
+fn italic_letter(character: char) -> Option<char> {
+    let code = match character {
+        'A'..='Z' => 0x1d434 + (character as u32 - 'A' as u32),
+        'a'..='z' => 0x1d44e + (character as u32 - 'a' as u32),
+        _ => return None,
+    };
+    char::from_u32(code)
 }
 
 /// Math layout constants. Scales are permille of the base size.
@@ -121,6 +181,11 @@ pub struct MathItem {
     pub x: Width,
     pub y: Width,
     pub size: Width,
+    /// Horizontal scale in permille, for a glyph that has to span a body:
+    /// an `\overbrace` is one brace glyph stretched sideways (1000 = as is).
+    pub stretch: u16,
+    /// Explicit colour, from `\color{...}`. `None` means "the style's colour".
+    pub color: Option<u32>,
 }
 
 /// One rule (a fraction bar) in the math box.
@@ -142,6 +207,10 @@ pub struct MathLayout {
     pub depth: Width,
     pub items: Vec<MathItem>,
     pub rules: Vec<MathRule>,
+    /// Baselines of the rows of a top-level `aligned`/`align` block, relative
+    /// to the formula baseline. Empty for a formula with no such block, which
+    /// callers read as "one row at the baseline".
+    pub rows: Vec<Width>,
 }
 
 impl MathLayout {
@@ -194,6 +263,9 @@ pub enum Node {
         text: String,
         class: Class,
     },
+    /// A bare ASCII letter: a variable. Laid out italic when the face has the
+    /// Mathematical Italic glyph for it, upright otherwise.
+    Letter(char),
     Group(Vec<Node>),
     Fraction {
         numerator: Box<Node>,
@@ -229,11 +301,35 @@ pub enum Node {
         kind: MatrixKind,
         /// `rows[row][column]`; every row is padded to the widest row.
         rows: Vec<Vec<Vec<Node>>>,
+        /// Per-column alignment from `\begin{array}{lcr}`. Empty means "use the
+        /// matrix kind's rule", which every other environment does.
+        aligns: Vec<ColumnAlign>,
+    },
+    /// `\substack{a\\b}`: a stack of lines, used inside a limit.
+    Substack(Vec<Vec<Node>>),
+    /// `\overbrace{...}` / `\underbrace{...}`: one brace glyph stretched over
+    /// the body.
+    Brace {
+        body: Box<Node>,
+        over: bool,
+    },
+    /// Everything after `\color{...}`, until the end of its group.
+    Color {
+        color: u32,
+        body: Vec<Node>,
     },
     Space(u16),
 }
 
 /// How a matrix is fenced and aligned.
+/// Column alignment in an `array`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColumnAlign {
+    Left,
+    Center,
+    Right,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MatrixKind {
     /// No fence, centres every column.
@@ -260,6 +356,10 @@ impl Node {
             Self::Delimited { .. } => Class::Ord,
             Self::Matrix { .. } => Class::Ord,
             Self::Space(_) => Class::Ord,
+            Self::Letter(_) => Class::Ord,
+            Self::Substack(_) => Class::Ord,
+            Self::Brace { .. } => Class::Ord,
+            Self::Color { .. } => Class::Ord,
         }
     }
 }
@@ -401,13 +501,29 @@ impl Parser {
                         }
                         "begin" => {
                             let name = self.read_raw_group()?;
+                            // `array` takes a column format before its body.
+                            let mut aligns = Vec::new();
+                            if name == "array" {
+                                let format = self.read_raw_group()?;
+                                for spec in format.chars() {
+                                    aligns.push(match spec {
+                                        'l' => ColumnAlign::Left,
+                                        'r' => ColumnAlign::Right,
+                                        _ => ColumnAlign::Center,
+                                    });
+                                }
+                            }
                             let kind = match name.as_str() {
                                 "matrix" => MatrixKind::Plain,
                                 "pmatrix" => MatrixKind::Paren,
                                 "bmatrix" => MatrixKind::Bracket,
                                 "vmatrix" => MatrixKind::Vert,
                                 "cases" => MatrixKind::Cases,
-                                "aligned" | "align" | "split" => MatrixKind::Aligned,
+                                "aligned" | "align" | "align*" | "split" | "equation"
+                                | "equation*" | "gather" | "gather*" | "multline" | "multline*" => {
+                                    MatrixKind::Aligned
+                                }
+                                "array" => MatrixKind::Plain,
                                 other => {
                                     return Err(MathError::UnsupportedCommand(format!(
                                         "begin{{{other}}}"
@@ -415,7 +531,7 @@ impl Parser {
                                 }
                             };
                             let rows = self.read_environment(&name)?;
-                            nodes.push(Node::Matrix { kind, rows });
+                            nodes.push(Node::Matrix { kind, rows, aligns });
                         }
                         "end" => {
                             let name = self.read_raw_group()?;
@@ -449,6 +565,32 @@ impl Parser {
                         "!" => nodes.push(Node::Space(0)),
                         "quad" => nodes.push(Node::Space(1000)),
                         "qquad" => nodes.push(Node::Space(2000)),
+                        "overbrace" | "underbrace" => {
+                            let body = self.parse_group()?;
+                            nodes.push(Node::Brace {
+                                body: Box::new(body),
+                                over: command == "overbrace",
+                            });
+                        }
+                        "color" => {
+                            // TeX applies `\color` to the rest of its group;
+                            // so does this: parse the remainder and wrap it.
+                            let name = self.read_raw_group()?;
+                            let color = named_color(&name).ok_or_else(|| {
+                                MathError::UnsupportedCommand(format!("color{{{name}}}"))
+                            })?;
+                            let body = self.parse_list(in_group)?;
+                            nodes.push(Node::Color { color, body });
+                            return Ok(nodes);
+                        }
+                        "substack" => {
+                            let raw = self.read_raw_group()?;
+                            let mut rows = Vec::new();
+                            for line in raw.split("\\\\") {
+                                rows.push(parse_body(line)?);
+                            }
+                            nodes.push(Node::Substack(rows));
+                        }
                         "text" => {
                             let text = self.read_raw_group()?;
                             if !text.is_empty() {
@@ -476,11 +618,16 @@ impl Parser {
                 }
                 Some(character) => {
                     self.pos += 1;
-                    let text = character.to_string();
-                    nodes.push(Node::Symbol {
-                        class: class_of(&text),
-                        text,
-                    });
+                    // A bare letter is a variable; everything else is a symbol.
+                    if character.is_ascii_alphabetic() {
+                        nodes.push(Node::Letter(character));
+                    } else {
+                        let text = character.to_string();
+                        nodes.push(Node::Symbol {
+                            class: class_of(&text),
+                            text,
+                        });
+                    }
                 }
             }
         }
@@ -502,11 +649,15 @@ impl Parser {
                 Some(']') => break,
                 Some('{') => nodes.push(self.parse_group()?),
                 Some(character) => {
-                    let text = character.to_string();
-                    nodes.push(Node::Symbol {
-                        class: class_of(&text),
-                        text,
-                    });
+                    if character.is_ascii_alphabetic() {
+                        nodes.push(Node::Letter(character));
+                    } else {
+                        let text = character.to_string();
+                        nodes.push(Node::Symbol {
+                            class: class_of(&text),
+                            text,
+                        });
+                    }
                 }
             }
         }
@@ -892,6 +1043,7 @@ pub fn lay_out(
         metrics,
         items: Vec::new(),
         rules: Vec::new(),
+        rows: Vec::new(),
         cursor: 0,
     };
     let mut previous: Option<Class> = None;
@@ -921,6 +1073,7 @@ pub fn lay_out(
         depth: Width(depth.max(0)),
         items,
         rules,
+        rows: context.rows,
     }
 }
 
@@ -929,6 +1082,8 @@ struct Context<'a> {
     metrics: &'a dyn MathMetrics,
     items: Vec<MathItem>,
     rules: Vec<MathRule>,
+    /// Aligned row baselines, filled by `matrix`.
+    rows: Vec<Width>,
     cursor: i32,
 }
 
@@ -941,8 +1096,28 @@ impl Context<'_> {
                     x: Width(self.cursor),
                     y: Width(baseline),
                     size,
+                    stretch: 1000,
+                    color: None,
                 });
                 self.cursor += self.metrics.advance(text, size).0;
+            }
+            Node::Letter(character) => {
+                // A variable is italic when the face carries the italic letter;
+                // otherwise it stays upright, which is ugly but honest — the
+                // alternative is `.notdef` in the middle of a formula.
+                let text = italic_letter(*character)
+                    .filter(|italic| self.metrics.has(*italic))
+                    .unwrap_or(*character)
+                    .to_string();
+                self.items.push(MathItem {
+                    text: text.clone(),
+                    x: Width(self.cursor),
+                    y: Width(baseline),
+                    size,
+                    stretch: 1000,
+                    color: None,
+                });
+                self.cursor += self.metrics.advance(&text, size).0;
             }
             Node::Group(nodes) => {
                 let mut previous: Option<Class> = None;
@@ -1021,6 +1196,8 @@ impl Context<'_> {
                     // formula's, so its hook meets the bottom of the body.
                     y: Width(baseline + thickness),
                     size: radical_size,
+                    stretch: 1000,
+                    color: None,
                 });
                 self.node_with_x(body, size, baseline, body_x);
                 self.rules.push(MathRule {
@@ -1044,8 +1221,8 @@ impl Context<'_> {
                 let script = script_size(size, self.style);
                 let gap = scale(size, self.style.frac_gap).max(1);
 
-                let sup_box = sup.as_ref().map(|node| self.measure(node, script));
-                let sub_box = sub.as_ref().map(|node| self.measure(node, script));
+                let sup_box = sup.as_ref().map(|node| self.measure_ink(node, script));
+                let sub_box = sub.as_ref().map(|node| self.measure_ink(node, script));
 
                 if *stacked && self.style.display {
                     let width = advance
@@ -1058,6 +1235,8 @@ impl Context<'_> {
                         x: Width(operator_x),
                         y: Width::ZERO,
                         size: big,
+                        stretch: 1000,
+                        color: None,
                     });
                     if let (Some(node), Some(box_)) = (sup.as_ref(), sup_box) {
                         let baseline = -(ascent + gap + box_.2);
@@ -1074,6 +1253,8 @@ impl Context<'_> {
                         x: Width(self.cursor),
                         y: Width::ZERO,
                         size: big,
+                        stretch: 1000,
+                        color: None,
                     });
                     self.cursor += advance;
                     let base_end = self.cursor;
@@ -1098,8 +1279,57 @@ impl Context<'_> {
                 self.cursor = body_x + body_box.0;
                 self.delimiter(right, delim_size, baseline + baseline_off);
             }
-            Node::Matrix { kind, rows } => self.matrix(*kind, rows, size, baseline),
+            Node::Matrix { kind, rows, aligns } => self.matrix(*kind, rows, aligns, size, baseline),
+            Node::Substack(rows) => self.substack(rows, size, baseline),
+            Node::Brace { body, over } => {
+                self.brace(body, *over, size, baseline);
+            }
+            Node::Color { color, body } => {
+                // `\color{...}` colours the rest of its group; painting the
+                // items it produced is simpler than threading a colour through
+                // every branch.
+                let first = self.items.len();
+                let mut previous: Option<Class> = None;
+                for child in body {
+                    let class = child.class();
+                    if let Some(left) = previous {
+                        self.cursor += gap(left, class, self.style, size);
+                    }
+                    self.node(child, size, baseline);
+                    previous = Some(class);
+                }
+                for item in &mut self.items[first..] {
+                    if item.color.is_none() {
+                        item.color = Some(*color);
+                    }
+                }
+            }
             Node::Script { base, sup, sub } => {
+                // A brace takes its label centred over (or under) the ink band
+                // rather than after it: `\overbrace{a+b}^{n}` means the `n`
+                // sits on top of the brace, not to its right.
+                if let Node::Brace { body, over } = &**base {
+                    let geo = self.brace(body, *over, size, baseline);
+                    let script = script_size(size, self.style);
+                    let gap = scale(size, 80).max(1);
+                    if *over {
+                        if let Some(sup) = sup {
+                            let measured = self.measure(sup, script);
+                            let depth = measured.2.min(scale(script, 150));
+                            let y = geo.ink_top - gap - depth;
+                            let x = geo.left + (geo.width - measured.0).max(0) / 2;
+                            self.node_with_x(sup, script, y, x);
+                        }
+                    } else if let Some(sub) = sub {
+                        let measured = self.measure(sub, script);
+                        let height = measured.1.min(scale(script, 720));
+                        let y = geo.ink_bottom + gap + height;
+                        let x = geo.left + (geo.width - measured.0).max(0) / 2;
+                        self.node_with_x(sub, script, y, x);
+                    }
+                    self.cursor = self.cursor.max(geo.left + geo.width);
+                    return;
+                }
                 self.node(base, size, baseline);
                 let base_end = self.cursor;
                 let script = script_size(size, self.style);
@@ -1139,11 +1369,32 @@ impl Context<'_> {
 
     /// Lay out a node list temporarily to measure width/height/depth.
     fn measure_nodes(&mut self, nodes: &[Node], size: Width) -> (i32, i32, i32) {
+        self.measure_impl(nodes, size, false)
+    }
+
+    /// Measure the *ink* box of a node: words count for a cap height and a
+    /// short descender rather than the font's full ascent and descent.
+    ///
+    /// Constructs that stack tight — the stretchy braces and the limits of a
+    /// display operator — need this. A brace is placed against the body's
+    /// edge, and the font-wide ascent (1.05 em) would leave a visible hole
+    /// above a line of lowercase letters, whose ink tops out near 0.7 em; the
+    /// same overshoot doubles the leading of a `\substack`.
+    fn measure_ink(&mut self, node: &Node, size: Width) -> (i32, i32, i32) {
+        self.measure_impl(core::slice::from_ref(node), size, true)
+    }
+
+    fn measure_nodes_ink(&mut self, nodes: &[Node], size: Width) -> (i32, i32, i32) {
+        self.measure_impl(nodes, size, true)
+    }
+
+    fn measure_impl(&mut self, nodes: &[Node], size: Width, ink: bool) -> (i32, i32, i32) {
         if nodes.is_empty() {
             return (0, 0, 0);
         }
         let saved_items = self.items.len();
         let saved_rules = self.rules.len();
+        let saved_rows = self.rows.len();
         let saved_cursor = self.cursor;
         self.cursor = 0;
         let mut previous: Option<Class> = None;
@@ -1159,8 +1410,26 @@ impl Context<'_> {
         let mut height = 0i32;
         let mut depth = 0i32;
         for item in &self.items[saved_items..] {
-            height = height.max(-item.y.0 + self.metrics.ascent(item.size).0);
-            depth = depth.max(item.y.0 + self.metrics.descent(item.size).0);
+            // Stretchy braces carry their ink in a narrow band far from the
+            // em box: the font-wide ascent would inflate the measured height
+            // by roughly an em, leaving a visible hole above the formula.
+            let (above, below) = match brace_ink(&item.text) {
+                Some((top, bottom)) => (per_mille(item.size, top), per_mille(item.size, bottom)),
+                None => {
+                    let above = self.metrics.ascent(item.size).0;
+                    let below = self.metrics.descent(item.size).0;
+                    if ink {
+                        (
+                            above.min(per_mille(item.size, 720)),
+                            below.min(per_mille(item.size, 220)),
+                        )
+                    } else {
+                        (above, below)
+                    }
+                }
+            };
+            height = height.max(-item.y.0 + above);
+            depth = depth.max(item.y.0 + below);
         }
         for rule in &self.rules[saved_rules..] {
             height = height.max(-rule.y.0);
@@ -1168,6 +1437,7 @@ impl Context<'_> {
         }
         self.items.truncate(saved_items);
         self.rules.truncate(saved_rules);
+        self.rows.truncate(saved_rows);
         self.cursor = saved_cursor;
         (width, height, depth)
     }
@@ -1231,11 +1501,20 @@ impl Context<'_> {
             x: Width(self.cursor),
             y: Width(baseline),
             size,
+            stretch: 1000,
+            color: None,
         });
         self.cursor += advance;
     }
 
-    fn matrix(&mut self, kind: MatrixKind, rows: &[Vec<Vec<Node>>], size: Width, baseline: i32) {
+    fn matrix(
+        &mut self,
+        kind: MatrixKind,
+        rows: &[Vec<Vec<Node>>],
+        aligns: &[ColumnAlign],
+        size: Width,
+        baseline: i32,
+    ) {
         let cols = rows.iter().map(|row| row.len()).max().unwrap_or(0);
         if cols == 0 || rows.is_empty() {
             return;
@@ -1294,18 +1573,116 @@ impl Context<'_> {
         for r in 0..rows.len() {
             for c in 0..cols {
                 let width = cells[r][c].0;
-                let cell_x = match kind {
-                    MatrixKind::Aligned if c % 2 == 0 => col_x[c] + widths[c] - width,
-                    MatrixKind::Aligned => col_x[c],
-                    MatrixKind::Cases => col_x[c],
-                    _ => col_x[c] + (widths[c] - width) / 2,
+                let cell_x = match aligns.get(c) {
+                    Some(ColumnAlign::Left) => col_x[c],
+                    Some(ColumnAlign::Right) => col_x[c] + widths[c] - width,
+                    Some(ColumnAlign::Center) => col_x[c] + (widths[c] - width) / 2,
+                    None => match kind {
+                        MatrixKind::Aligned if c % 2 == 0 => col_x[c] + widths[c] - width,
+                        MatrixKind::Aligned | MatrixKind::Cases => col_x[c],
+                        _ => col_x[c] + (widths[c] - width) / 2,
+                    },
                 };
                 self.place_nodes(&rows[r][c], size, baseline + baselines[r], origin + cell_x);
+            }
+        }
+        if kind == MatrixKind::Aligned {
+            for row_baseline in &baselines {
+                self.rows.push(Width(baseline + *row_baseline));
             }
         }
         self.cursor = origin + total;
         self.delimiter(right, delim_size, baseline + baseline_off);
     }
+
+    /// Stack lines centred on each other, as `\substack` does inside a limit.
+    fn substack(&mut self, rows: &[Vec<Node>], size: Width, baseline: i32) {
+        if rows.is_empty() {
+            return;
+        }
+        let gap = scale(size, self.style.frac_gap).max(1);
+        let mut widths = Vec::with_capacity(rows.len());
+        let mut heights = Vec::with_capacity(rows.len());
+        let mut depths = Vec::with_capacity(rows.len());
+        for row in rows {
+            let (width, height, depth) = self.measure_nodes_ink(row, size);
+            widths.push(width);
+            heights.push(height);
+            depths.push(depth);
+        }
+        let width = widths.iter().copied().max().unwrap_or(0);
+        let left = self.cursor;
+        let mut line_baseline = baseline;
+        for (index, row) in rows.iter().enumerate() {
+            if index > 0 {
+                // Clear the previous line's descender by `gap` and this line's
+                // ascender by its own height.
+                line_baseline += depths[index - 1] + gap + heights[index];
+            }
+            let x = left + (width - widths[index]) / 2;
+            self.place_nodes(row, size, line_baseline, x);
+        }
+        self.cursor = left + width;
+    }
+
+    /// Draw the stretchy brace over/under `body` and report its geometry.
+    ///
+    /// One glyph is an approximation: TeX assembles a brace from hooks and
+    /// extensible pieces, which needs horizontal pieces this font does not
+    /// carry. Placing it by its ink band (not by the font's ascent) keeps it
+    /// close to the body.
+    fn brace(&mut self, body: &Node, over: bool, size: Width, baseline: i32) -> BraceGeo {
+        let glyph = if over { "\u{23de}" } else { "\u{23df}" };
+        let (width, height, depth) = self.measure_ink(body, size);
+        let left = self.cursor;
+        self.node_with_x(body, size, baseline, left);
+        let gap = scale(size, self.style.frac_gap).max(1);
+        let natural = self.metrics.advance(glyph, size).0.max(1);
+        // Grow the glyph first, then stretch what is left: a brace that is
+        // scaled uniformly keeps its hooks, while a purely horizontal stretch
+        // flattens them into a wave.
+        let target = width.max(1) as i64;
+        let grown = (target * 1000 / natural as i64).clamp(1000, 2200) as u16;
+        let grown_size = Width((size.0 as i64 * i64::from(grown) / 1000).max(1) as i32);
+        let grown_advance = self.metrics.advance(glyph, grown_size).0.max(1);
+        let stretch = ((target * 1000) / grown_advance as i64).clamp(1000, 60000) as u16;
+        let (ink_top, ink_bottom) = brace_ink(glyph).expect("both braces have an ink band");
+        let ink_top = per_mille(grown_size, ink_top);
+        let ink_bottom = per_mille(grown_size, ink_bottom);
+        // `y` is the glyph's baseline; the ink band sits at a fixed distance
+        // from it. Over: put the band's bottom `gap` above the body's top.
+        // Under: put its top `gap` below the body's depth.
+        let y = if over {
+            -(height + gap) + ink_bottom
+        } else {
+            depth + gap + ink_top
+        };
+        if self.metrics.has(glyph.chars().next().unwrap_or('\u{23de}')) {
+            self.items.push(MathItem {
+                text: String::from(glyph),
+                x: Width(left),
+                y: Width(y),
+                size: grown_size,
+                stretch,
+                color: None,
+            });
+        }
+        self.cursor = left + width;
+        BraceGeo {
+            left,
+            width,
+            ink_top: y - ink_top,
+            ink_bottom: y - ink_bottom,
+        }
+    }
+}
+/// Where a stretchy brace landed: its horizontal span and the ink band,
+/// both relative to the math baseline (negative is up).
+struct BraceGeo {
+    left: i32,
+    width: i32,
+    ink_top: i32,
+    ink_bottom: i32,
 }
 
 /// Fences for a matrix kind.

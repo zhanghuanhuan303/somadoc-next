@@ -739,17 +739,23 @@ impl<'a> Parser<'a> {
                 }
                 vec![Block::Figure(figure)]
             }
-            "equation" | "equation*" | "displaymath" | "math" => {
-                let rest = &self.input[self.pos..];
-                let marker = alloc::format!("\\end{{{env}}}");
-                let (value, end) = match rest.find(&marker) {
-                    Some(offset) => (&rest[..offset], self.pos + offset + marker.len()),
-                    None => (rest, self.input.len()),
-                };
-                self.pos = end;
+            // Environments that own their display: the block keeps the
+            // `\begin{...}` wrapper so the math parser sees the rows and the
+            // layout can number the formula.
+            "equation" | "equation*" | "align" | "align*" | "gather" | "gather*" | "multline"
+            | "multline*" => {
+                let body = self.environment_body(&env);
+                let source = alloc::format!("\\begin{{{env}}}{}\\end{{{env}}}", body.trim());
                 vec![Block::MathBlock(MathBlock::new(
                     NodeMeta::synthesized(),
-                    value.trim().to_string(),
+                    source,
+                ))]
+            }
+            "displaymath" | "math" => {
+                let body = self.environment_body(&env);
+                vec![Block::MathBlock(MathBlock::new(
+                    NodeMeta::synthesized(),
+                    body.trim().to_string(),
                 ))]
             }
             _ => {

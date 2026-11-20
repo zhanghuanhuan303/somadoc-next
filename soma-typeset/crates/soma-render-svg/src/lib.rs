@@ -257,15 +257,32 @@ fn paint_math(
     math: &MathBox,
 ) {
     for item in &math.items {
-        out.push_str(&format!(
-            "<text data-page=\"{page}\" data-node=\"{node}\" data-math=\"{}\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>\n",
-            escape(&item.text),
-            units(Width(left + item.x.0)),
-            units(Width(baseline + item.y.0)),
-            units(item.size),
-            paint,
-            escape(&item.text)
-        ));
+        let fill = match item.color {
+            Some(value) => color(Some(value)),
+            None => paint.clone(),
+        };
+        if item.stretch == 1000 {
+            out.push_str(&format!(
+                "<text data-page=\"{page}\" data-node=\"{node}\" data-math=\"{}\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{fill}\">{}</text>\n",
+                escape(&item.text),
+                units(Width(left + item.x.0)),
+                units(Width(baseline + item.y.0)),
+                units(item.size),
+                escape(&item.text)
+            ));
+        } else {
+            // A stretched glyph keeps its baseline: translate first, then
+            // scale on x only.
+            let ratio = ratio(item.stretch);
+            out.push_str(&format!(
+                "<text data-page=\"{page}\" data-node=\"{node}\" data-math=\"{}\" x=\"0\" y=\"0\" font-size=\"{}\" fill=\"{fill}\" transform=\"translate({} {}) scale({ratio} 1)\">{}</text>\n",
+                escape(&item.text),
+                units(item.size),
+                units(Width(left + item.x.0)),
+                units(Width(baseline + item.y.0)),
+                escape(&item.text)
+            ));
+        }
     }
     for rule in &math.rules {
         out.push_str(&format!(
@@ -291,6 +308,11 @@ pub fn units(width: Width) -> String {
 /// The root viewport size in pixels, at one em = 16 px.
 fn px(width: Width) -> i64 {
     width.0 as i64 * PX_PER_EM / UNITS_PER_EM as i64
+}
+
+/// A permille scale as an SVG number, without floating point.
+fn ratio(permille: u16) -> String {
+    format!("{}.{:03}", permille / 1000, permille % 1000)
 }
 
 fn color(value: Option<u32>) -> String {

@@ -203,6 +203,19 @@ impl Metrics for StyledMetrics<'_> {
         }
     }
 
+    fn has_glyph(&self, character: char, style: StyleId) -> bool {
+        // A formula draws from the math face, whose coverage differs from the
+        // body face's; "can this document draw the character" is the union.
+        let computed = self.computed(style);
+        let math = self
+            .table
+            .math_face()
+            .is_some_and(|face| face.has(character as u32));
+        math || self
+            .face_of(&computed)
+            .is_some_and(|face| face.has(character as u32))
+    }
+
     fn math_advance(&self, text: &str, style: StyleId) -> Width {
         let computed = self.computed(style);
         match self.table.math_face() {

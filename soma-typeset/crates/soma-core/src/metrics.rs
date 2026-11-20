@@ -81,6 +81,16 @@ pub trait Metrics: Sync {
         }
     }
 
+    /// Whether the face that draws `style` has a glyph for `character`.
+    ///
+    /// The math layout asks before setting a variable in the Mathematical
+    /// Italic block: a face without those glyphs would draw `.notdef`. A host
+    /// that cannot answer says no, which keeps the letter upright — a formula
+    /// set in roman is a smaller disappointment than a formula full of boxes.
+    fn has_glyph(&self, _character: char, _style: StyleId) -> bool {
+        false
+    }
+
     /// Optional kerning hook. MVP implementations return zero.
     fn kerning(&self, _left: &str, _right: &str, _style: StyleId) -> Width {
         Width::ZERO

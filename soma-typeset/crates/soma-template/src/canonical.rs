@@ -231,6 +231,8 @@ fn write_numbering(out: &mut impl Write, spec: &crate::template::NumberingSpec) 
     write_opt_string(out, spec.figures.as_deref())?;
     out.write_str(",\"tables\":")?;
     write_opt_string(out, spec.tables.as_deref())?;
+    out.write_str(",\"equations\":")?;
+    write_opt_string(out, spec.equations.as_deref())?;
     out.write_char('}')
 }
 
