@@ -8,7 +8,7 @@ configuration, table continuation, table rules and context selectors,
 frontends, display and inline math, contents pages, the CLI, math fences and
 matrices, alignment, generated covers, images and tagged PDF, table structure,
 trim caps, family-aware faces, baseline propagation, the rest of the math
-subset, and code-block atoms)
+subset, code-block atoms, equation tags and assembled braces)
 without changing the layer contract.
 
 These ADRs record the decisions that shape the next phase. They are aligned
@@ -73,6 +73,7 @@ only).
 | [0053](0053-math-baseline-propagation.md) | Every math node places itself at the baseline it is given | Accepted |
 | [0054](0054-math-subset-completion.md) | Italic variables, `array` formats, `\substack`, braces by ink, `\color`, equation numbers | Accepted |
 | [0055](0055-code-block-atoms.md) | One atom table per code block; a code line keeps its spaces | Accepted |
+| [0056](0056-tags-text-math-and-braces.md) | `\tag`/`\notag`, maths inside `\text`, braces assembled from rules when wide | Accepted |
 
 ## Rules
 

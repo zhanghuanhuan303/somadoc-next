@@ -1,6 +1,8 @@
 # ADR-0054: the math subset closes its gaps — italic variables, arrays, braces, colour, numbering
 
 - Status: Accepted
+- Superseded in part by: ADR-0056 §4 (a wide brace is now assembled from
+  rules instead of one stretched glyph)
 - Date: 2026-11-20
 - Closes: D71 (with the residuals listed at the end)
 - Related: ADR-0026 (math box model), ADR-0030 (math completion),

@@ -58,7 +58,7 @@ metrics through `MathMetrics`, implemented by `MathAdapter` over the same
 | `\sum_{i=1}^{n}`, `\prod`, `\lim`, `\sup`, `\inf` | big operator at `big_scale`; limits stack above and below |
 | `\int_0^1`, `\oint` | big operator; limits stay to the right |
 | `\log \ln \exp \sin \cos \tan \max \min` | upright name |
-| `\text{...}` | raw text at the current size, no math spacing |
+| `\text{...}` | raw text at the current size, no math spacing; `$...$` inside it is maths again (`\$` is a literal dollar) |
 | `\,` `\;` `\!` `\quad` `\qquad` | fixed spaces (167/278/-167/1000/2000 permille) |
 | `\left( ... \right)` | fences stretched to the body, centred on it; `()[]\{\}\|`, `\langle`, `\lfloor`, `\lceil` |
 | `\left.`, `\right.` | null delimiter, draws nothing |
@@ -67,8 +67,10 @@ metrics through `MathMetrics`, implemented by `MathAdapter` over the same
 | `\begin{aligned}` (`align`, `split`) | columns alternate right/left around `&`, no fences |
 | `\begin{array}{lcr}` | like `matrix`, but each cell follows the column's `l`/`c`/`r` |
 | `\substack{a\\b}` | lines stacked centred on each other, `frac_gap` apart |
-| `\overbrace{x}`, `\underbrace{x}` | one stretchy brace glyph (U+23DE/U+23DF), grown up to 2.2× then stretched; placed by its ink band |
+| `\overbrace{x}`, `\underbrace{x}` | the font's brace glyph while the sideways stretch stays within 2000‰; wider bodies are assembled from rules (flat run, two hooks, a cusp) so the hooks never flatten |
 | `\overbrace{x}^{n}` | the label is centred over the brace, not set after it |
+| `\tag{A}`, `\tag*{A}` | this row's own label, in place of the automatic number (`\tag*` drops the parentheses); `$...$` inside the tag is maths |
+| `\notag`, `\nonumber` | this row takes no number, and does not use one up |
 | `\color{red} …`, `\color{#c00} …` | colours the rest of the group |
 
 Also mapped: Greek letters (lower and upper), `\le \ge \ne \equiv \approx \sim
@@ -87,9 +89,21 @@ an error rather than a silent black.
 source is an `equation`, `align`, `gather` or `multline` environment. The `*`
 variants and the inner `aligned`/`split` are never numbered. The counter runs
 per document; one number is added per aligned row, right-aligned in the content
-box, at that row's baseline. `MathLayout::rows` reports the row baselines for
-this purpose; the numbers themselves are appended by `soma-layout`, so
-`soma-math` stays unaware of page geometry.
+box, at that row's baseline. `MathLayout::rows` reports the row baselines and
+what each row does about its number (`Auto`, `Suppressed`, `Tag { text, bare }`);
+the labels themselves are appended by `soma-layout`, so `soma-math` stays
+unaware of page geometry.
+
+Two rules keep numbering predictable:
+
+- **Only the outermost block owns rows.** An `aligned` inside an `equation`, or
+a `cases` inside an `aligned`, lays out normally and contributes no rows, so a
+formula with a nested block still gets exactly one number per real row.
+- **A tag costs no number.** `\tag` and `\notag` leave the counter alone, so
+adding a tag to one row does not renumber the rest.
+
+A tag is laid out as `\text{...}`, which is why `\tag{A}` prints upright and
+`\tag{$\alpha$}` prints `(α)` rather than the macro name.
 
 ## Inline math
 
@@ -160,6 +174,12 @@ that face at the style's font size, so `∑`, `∫`, `√`, Greek and relations 
 their real advances and extents. Adapters without a math face keep the body
 font (the trait defaults), and their output is byte-identical to before.
 
+A character the math face does not carry — Han inside `\text{...}` is the common
+case — is measured and drawn with the style's own face, then the rescue face.
+`StyledMetrics::math_advance` walks the characters and sums the advance of the
+face that will draw each one; `soma-render-pdf` splits an item into runs the
+same way, so width and paint agree.
+
 ## Pagination
 
 A display formula is one indivisible flow item: it has glue before/after from
@@ -176,17 +196,24 @@ must be placed against the ink, or it floats. `Context::measure_ink` measures a
 node with a cap-height estimate (`min(ascent, 0.72 em)`) and a short descender
 (`min(descent, 0.22 em)`) instead of the font extents.
 
-The stretchy braces need one more fact: their ink is a narrow band far from
-their own baseline. `brace_ink` holds the measured band (`U+23DE` 0.656…0.893 em
-above the baseline, `U+23DF` 0.075…0.310 em below it), and both the placement
-and the box measurement use it. The table is public so a renderer — or a test
-— can ask where the ink actually is.
+The narrow brace path needs one more fact: the glyph's ink is a narrow band far
+from its own baseline. `brace_ink` holds the measured band (`U+23DE`
+0.656…0.893 em above the baseline, `U+23DF` 0.075…0.310 em below it), and both
+the placement and the box measurement use it. The table is public so a renderer
+— or a test — can ask where the ink actually is.
+
+The wide brace path does not need the table at all: it draws the brace itself,
+so its extents are the rules' extents. `BRACE_GLYPH_STRETCH` (2000‰) is where the
+layout stops stretching the glyph and starts assembling: a flat run, two
+quarter-circle hooks and a straight-sided cusp, one rule per slice, each slice
+covering the level range of both its ends so the stroke stays continuous where
+the curve is steep.
 
 ## Tests
 
 | File | What it locks |
 |---|---|
-| `soma-math/tests/math.rs` | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, names, spacing, errors, italic variables, `array` formats, `\substack`, brace ink and labels, `\color` |
+| `soma-math/tests/math.rs` | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, names, spacing, errors, italic variables, `array` formats, `\substack`, brace ink and labels, assembled braces, `\color`, text-mode maths, tags |
 | `soma-layout/tests/e11_math.rs` | centring, baseline inside the box, line flow, canonical JSON |
 | `soma-layout/tests/e12_inline_math.rs` | marker atoms, line-box growth, text-style limits, placeholder, canonical `inlineMath` |
 | `soma-render-svg/tests/math.rs` | exact `<text>`/`<rect>` coordinates |

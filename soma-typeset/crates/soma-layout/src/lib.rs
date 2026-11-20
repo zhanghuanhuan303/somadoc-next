@@ -3094,7 +3094,51 @@ impl Builder<'_> {
             .equations
             .clone()
             .filter(|_| is_numbered_environment(source));
-        let numbered = pattern.is_some();
+        // Each row says what it does about its number: take one, take none, or
+        // print the tag the author wrote.
+        let lines: Vec<(i32, soma_math::RowNumber)> = if layout.rows.is_empty() {
+            alloc::vec![(layout.height.0, layout.number.clone())]
+        } else {
+            layout
+                .rows
+                .iter()
+                .map(|row| (row.baseline.0, row.number.clone()))
+                .collect()
+        };
+        // A tag is text with `$...$` allowed, which is exactly what `\text{}`
+        // does, so it is laid out through the same path. An automatic number is
+        // a plain run: digits and parentheses in the math face.
+        enum Label {
+            Text(String),
+            Tag(soma_math::MathLayout),
+        }
+        let mut labels: Vec<Option<Label>> = Vec::with_capacity(lines.len());
+        for (_, number) in &lines {
+            let label = match number {
+                soma_math::RowNumber::Suppressed => None,
+                soma_math::RowNumber::Tag { text, bare } => {
+                    let tag = if *bare {
+                        alloc::format!("\\text{{{text}}}")
+                    } else {
+                        alloc::format!("\\text{{({text})}}")
+                    };
+                    Some(
+                        match math::display_inline(&tag, &computed, self.metrics, style_id) {
+                            Some(tag) => Label::Tag(tag),
+                            None => Label::Text(text.clone()),
+                        },
+                    )
+                }
+                soma_math::RowNumber::Auto => pattern.as_ref().map(|pattern| {
+                    self.equation_count += 1;
+                    Label::Text(pattern.replace("{n}", &self.equation_count.to_string()))
+                }),
+            };
+            labels.push(label);
+        }
+        // A numbered formula spans the measure so its label can sit on the
+        // right margin; an unnumbered one shrinks to the formula.
+        let numbered = labels.iter().any(|label| label.is_some());
         let box_width = if numbered {
             self.content_width
         } else {
@@ -3102,27 +3146,35 @@ impl Builder<'_> {
         };
         let height = layout.total_height();
         let x = Width((self.content_width.0 - layout.width.0).max(0) / 2);
-        if let Some(pattern) = pattern {
-            // One number per aligned row, right-aligned in the content box.
-            let baselines: Vec<i32> = if layout.rows.is_empty() {
-                alloc::vec![layout.height.0]
-            } else {
-                layout.rows.iter().map(|row| row.0).collect()
-            };
-            for baseline in baselines {
-                self.equation_count += 1;
-                let number = pattern.replace("{n}", &self.equation_count.to_string());
-                let advance = self.metrics.advance(&number, style_id).0;
-                layout.items.push(soma_math::MathItem {
-                    text: number,
-                    // Items are relative to the box origin `x`, so undo the
-                    // centering offset to land on the right margin.
-                    x: Width(self.content_width.0 - advance - x.0),
-                    y: Width(baseline),
-                    size: computed.font_size,
-                    stretch: 1000,
-                    color: None,
-                });
+        for ((baseline, _), label) in lines.iter().zip(labels) {
+            let Some(label) = label else { continue };
+            match label {
+                Label::Text(text) => {
+                    let advance = self.metrics.advance(&text, style_id).0;
+                    layout.items.push(soma_math::MathItem {
+                        text,
+                        // Items are relative to the box origin `x`, so undo the
+                        // centering offset to land on the right margin.
+                        x: Width(self.content_width.0 - advance - x.0),
+                        y: Width(*baseline),
+                        size: computed.font_size,
+                        stretch: 1000,
+                        color: None,
+                    });
+                }
+                Label::Tag(tag) => {
+                    let dx = self.content_width.0 - tag.width.0 - x.0;
+                    for mut item in tag.items {
+                        item.x = Width(item.x.0 + dx);
+                        item.y = Width(item.y.0 + *baseline);
+                        layout.items.push(item);
+                    }
+                    for mut rule in tag.rules {
+                        rule.x = Width(rule.x.0 + dx);
+                        rule.y = Width(rule.y.0 + *baseline);
+                        layout.rules.push(rule);
+                    }
+                }
             }
         }
         Some(FlowItem {

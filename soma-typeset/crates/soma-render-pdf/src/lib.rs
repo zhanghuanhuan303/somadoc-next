@@ -551,10 +551,15 @@ fn collect_blocks(
     used: &mut Used,
 ) {
     for block in blocks {
+        let block_style = styles
+            .style(block.style)
+            .cloned()
+            .unwrap_or_else(ComputedStyle::base);
+        let block_role = fonts.role_for(&block_style, false);
         for placed in &block.lines {
             for atom in &placed.line.boxes {
                 if let Some(inline) = block.inline_math.iter().find(|math| math.atom == atom.atom) {
-                    collect_math(&inline.math, fonts, used);
+                    collect_math(&inline.math, fonts, used, block_role);
                     continue;
                 }
                 let style_id = text
@@ -571,15 +576,34 @@ fn collect_blocks(
             }
         }
         if let Some(math) = &block.math {
-            collect_math(math, fonts, used);
+            collect_math(math, fonts, used, block_role);
         }
     }
 }
 
-fn collect_math(math: &MathBox, fonts: &PdfFonts<'_>, used: &mut Used) {
-    let role = fonts.math_role();
+/// The face that draws `character` inside a formula: the math face when it has
+/// the glyph, else the text face (a `\text{...}` run in Han, say), else the
+/// rescue face.
+fn math_face(fonts: &PdfFonts<'_>, character: char, text_role: Role) -> Role {
+    let math = fonts.math_role();
+    if math == text_role {
+        return text_role;
+    }
+    if fonts.font(math).glyph(character as u32) != 0 {
+        return math;
+    }
+    if let Some(fallback) = fonts.fallback {
+        if fallback.glyph(character as u32) != 0 {
+            return Role::Fallback;
+        }
+    }
+    text_role
+}
+
+fn collect_math(math: &MathBox, fonts: &PdfFonts<'_>, used: &mut Used, text_role: Role) {
     for item in &math.items {
         for character in item.text.chars() {
+            let role = math_face(fonts, character, text_role);
             used.add(role, fonts.font(role), character);
         }
     }
@@ -1188,6 +1212,7 @@ fn paint_block(
                 left,
                 top + math.baseline.0,
                 style.color.unwrap_or(0),
+                fonts.role_for(&style, false),
             );
             if mcid.is_some() {
                 painter.end_marked();
@@ -1228,6 +1253,7 @@ fn paint_block(
                     left,
                     baseline,
                     style.color.unwrap_or(0),
+                    fonts.role_for(&style, false),
                 );
                 continue;
             }
@@ -1357,6 +1383,7 @@ fn block_tag(scene: &Scene<'_>, block: &PlacedBlock) -> Option<&'static str> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_math(
     painter: &mut Painter,
     layout: &PagedLayout,
@@ -1365,27 +1392,55 @@ fn paint_math(
     left: i32,
     baseline: i32,
     paint: u32,
+    text_role: Role,
 ) {
-    let role = fonts.math_role();
-    let font = fonts.font(role);
+    let math_role = fonts.math_role();
     for item in &math.items {
         let x = left + item.x.0;
         let y = layout.page.height.0 - (baseline + item.y.0);
         let size = painter.scale.milli(item.size.0);
         painter.set_fill(item.color.unwrap_or(paint));
         painter.start_text();
-        painter.set_font(role, size);
-        let glyphs: Vec<u16> = item
-            .text
-            .chars()
-            .map(|character| font.glyph(character as u32))
-            .collect();
-        painter.show_stretched(
-            painter.scale.milli(x),
-            painter.scale.milli(y),
-            item.stretch,
-            &glyphs,
-        );
+        if item.stretch != 1000 {
+            // Only braces stretch, and they are single glyphs: one face.
+            let font = fonts.font(math_role);
+            painter.set_font(math_role, size);
+            let glyphs: Vec<u16> = item
+                .text
+                .chars()
+                .map(|character| font.glyph(character as u32))
+                .collect();
+            painter.show_stretched(
+                painter.scale.milli(x),
+                painter.scale.milli(y),
+                item.stretch,
+                &glyphs,
+            );
+            continue;
+        }
+        // A formula's text is mostly math-face glyphs, but a `\text{...}` run
+        // may hold characters only the text face carries. Draw contiguous
+        // runs of one face, advancing by each glyph's own width so the run
+        // starts where the layout put it.
+        let mut runs: Vec<(Role, i64, Vec<u16>)> = Vec::new();
+        let mut offset: i64 = 0;
+        for character in item.text.chars() {
+            let role = math_face(fonts, character, text_role);
+            let glyph = fonts.font(role).glyph(character as u32);
+            match runs.last_mut() {
+                Some((last, _, glyphs)) if *last == role => glyphs.push(glyph),
+                _ => runs.push((role, offset, vec![glyph])),
+            }
+            offset += i64::from(fonts.font(role).width_1000(glyph)) * size / 1000;
+        }
+        for (role, advance, glyphs) in runs {
+            painter.set_font(role, size);
+            painter.show(
+                painter.scale.milli(x) + advance,
+                painter.scale.milli(y),
+                &glyphs,
+            );
+        }
     }
     for rule in &math.rules {
         let x = left + rule.x.0;

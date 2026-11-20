@@ -129,7 +129,9 @@ array 环境的列格式参数控制每列的对齐，l、c、r 分别是左、�
 \sum_{\substack{i=1\\j=1}}^{n} a_{ij}
 \]
 
-\overbrace 先等比放大字形再水平拉伸，钩子不会被压成波浪：
+文字模式里还能嵌公式，汉字走正文字面：$\text{当 }x>0\text{ 时 }y=x$。
+
+\overbrace 窄时用字体里的括弧字形，宽到字形会拉平时改成用线段拼：横杆、两个钩和一个尖，和 TeX 拼括弧是同一套零件：
 
 \[
 \overbrace{a+b+\cdots+z}^{26}
@@ -141,7 +143,7 @@ array 环境的列格式参数控制每列的对齐，l、c、r 分别是左、�
 \color{red} a + \color{blue} b + c
 \]
 
-需要编号的公式用 equation 环境；多行的 align 按 \& 对齐，每行各自编号：
+需要编号的公式用 equation 环境；多行的 align 按 \& 对齐，每行各自编号。\tag 换成自己的号，\notag 让这一行不占号——两者都不会消耗自动编号：
 
 \begin{equation}
 E = mc^2
@@ -149,8 +151,8 @@ E = mc^2
 
 \begin{align}
 a &= b + c \\
-d &= e - f \\
-g &= h
+d &= e - f \notag \\
+g &= h \tag{A}
 \end{align}
 
 \section{脚注与索引}

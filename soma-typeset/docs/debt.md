@@ -79,7 +79,7 @@
 | D66 | 引擎只支持 `paragraph` 窗口 | `window: page`/`chapter` 在配置层被拒绝；内核本来也报 `UnsupportedWindow` | 页级/章级搜索未实现 | 未排期（需要页级 DP 上下文） | 否 |
 | D67 | 语料规模仍有限 | `corpus/zh` 现有 12 个文档/1211 行：长篇（30 页）、脚注密集、访谈、科普、colspan/rowspan 表格、表头重复、三线表、真实行间公式已覆盖；仍缺目录/章节页与质量标注 | 代理标定的外推能力有限 | 持续补充 | 否 |
 | D70 | LaTeX 子集有边界 | `soma-latex` 不做宏/计数器/参考文献/真实公式排版；表格单元只当纯文本；无 `\item[label]`、`description`；无源位置。`figure`/`table` 环境、`\includegraphics`、`\caption`（ADR-0032）与 `\index`（ADR-0033）已支持 | 复杂 LaTeX 会降级 | 有真实需求时扩 | 否 |
-| D71 | 数学子集有边界 | **已关闭（ADR-0054）**：斜体变量（面里有 U+1D434… 才启用）、`array` 列格式、`\substack`、`\overbrace`/`\underbrace`（按墨迹带定位，标注居中压在brace上）、`\color`、多行公式编号都已实现。仍缺：`\\text{}` 内嵌行内数学、`\tag`/`\notag`、`cases` 内编号；brace 是单字形放大+横向拉伸（宽体时钩子会变浅），不是 TeX 式拼接；墨迹带常量取自 Noto Sans Math | 极少数构造降级，但不再回退成文本占位 | — | ✅ 已关闭 |
+| D71 | ~~数学子集有边界~~ | **已关闭（ADR-0054 / ADR-0056）**：斜体变量（面里有 U+1D434… 才启用）、`array` 列格式、`\substack`、`\overbrace`/`\underbrace`（窄时用字形，宽时用线段拼，标注居中）、`\color`、多行公式编号、`\tag`/`\tag*`/`\notag`、`\text{}` 内嵌 `$…$`、嵌套 `aligned` 不再重复编号。仍缺：`\intertext`、`alignat`/`flalign`、`\tag` 对齐到独立列（每行标签都在版心右边界）；拼出的括弧比例固定，不读字体 MATH 表 | — | ✅ 已关闭 |
 | D72 | 行内数学复用显示常量 | **已关闭（ADR-0030）**：`text_frac_scale`/`text_frac_gap`/`text_big_scale` 三组常量；显示分式改为全尺寸分子分母；行内上下限不堆叠 | 无 | ✅ 已关闭 | 否 |
 | D73 | ~~目录能力有边界~~ | **已关闭（ADR-0032）**：`toc.leaders`（默认开）生成引导点；`toc.figures`/`toc.tables` 生成图目录/表目录；目录条目带自动编号。仍无索引与 PDF 书签（并入 D79） | — | ✅ 已关闭 | 否 |
 | D74 | CLI 只做单文件 | 无目录批量、无 `--stdin`、无 watch、无模板外的元数据覆盖；格式只有 html/svg/json | 批量流程要自己写脚本 | 有自动化需求时补 | 否 |

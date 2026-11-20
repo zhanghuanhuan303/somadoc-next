@@ -53,6 +53,11 @@ pub trait MathMetrics {
 const OVER_BRACE_INK: (i32, i32) = (893, 656);
 const UNDER_BRACE_INK: (i32, i32) = (-75, -310);
 
+/// Above this sideways stretch the font's brace glyph stops looking like a
+/// brace: its hooks become ramps. Wider bodies get a brace assembled from
+/// rules instead (ADR-0056).
+const BRACE_GLYPH_STRETCH: u16 = 2000;
+
 /// `(ink_top, ink_bottom)` above the baseline for the two stretchy braces.
 /// Public because both the layout and the renderers need to know where the
 /// glyph's ink actually sits: its baseline is not a useful reference.
@@ -66,6 +71,21 @@ pub fn brace_ink(text: &str) -> Option<(i32, i32)> {
 
 fn per_mille(size: Width, permille: i32) -> i32 {
     (size.0 as i64 * i64::from(permille) / 1000) as i32
+}
+
+/// Integer square root by Newton's method: no float, same answer everywhere.
+fn isqrt(value: i32) -> i32 {
+    if value <= 0 {
+        return 0;
+    }
+    let value = i64::from(value);
+    let mut x = value;
+    let mut y = (x + 1) / 2;
+    while y < x {
+        x = y;
+        y = (x + value / x) / 2;
+    }
+    x as i32
 }
 
 /// Named colours accepted by `\color{...}`, plus `#rrggbb`.
@@ -198,7 +218,7 @@ pub struct MathRule {
 }
 
 /// A laid-out formula.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MathLayout {
     pub width: Width,
     /// Extent above the baseline.
@@ -207,10 +227,23 @@ pub struct MathLayout {
     pub depth: Width,
     pub items: Vec<MathItem>,
     pub rules: Vec<MathRule>,
-    /// Baselines of the rows of a top-level `aligned`/`align` block, relative
-    /// to the formula baseline. Empty for a formula with no such block, which
-    /// callers read as "one row at the baseline".
-    pub rows: Vec<Width>,
+    /// Rows of a top-level `aligned`/`align` block, relative to the formula
+    /// baseline. Empty for a formula with no such block, which callers read as
+    /// "one row at the baseline". Nested matrices — an `aligned` inside an
+    /// `equation`, a `cases` inside an `aligned` — never add rows: only the
+    /// outermost block owns them.
+    pub rows: Vec<MathRow>,
+    /// The formula's own number when it has no rows, from a `\tag` written
+    /// directly in the body.
+    pub number: RowNumber,
+}
+
+/// One numbered row of a display formula.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MathRow {
+    /// Baseline, relative to the formula baseline.
+    pub baseline: Width,
+    pub number: RowNumber,
 }
 
 impl MathLayout {
@@ -318,7 +351,26 @@ pub enum Node {
         color: u32,
         body: Vec<Node>,
     },
+    /// `\tag{...}` / `\tag*{...}`: a hand-written label for this row.
+    Tag {
+        text: String,
+        bare: bool,
+    },
+    /// `\notag` / `\nonumber`: this row takes no number.
+    NoTag,
     Space(u16),
+}
+
+/// What a formula row does about its number.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub enum RowNumber {
+    /// Take the template's equation number, if numbering is on.
+    #[default]
+    Auto,
+    /// `\notag` / `\nonumber`.
+    Suppressed,
+    /// `\tag{...}`: print this text. `bare` (`\tag*`) drops the parentheses.
+    Tag { text: String, bare: bool },
 }
 
 /// How a matrix is fenced and aligned.
@@ -360,6 +412,7 @@ impl Node {
             Self::Substack(_) => Class::Ord,
             Self::Brace { .. } => Class::Ord,
             Self::Color { .. } => Class::Ord,
+            Self::Tag { .. } | Self::NoTag => Class::Ord,
         }
     }
 }
@@ -592,14 +645,32 @@ impl Parser {
                             nodes.push(Node::Substack(rows));
                         }
                         "text" => {
-                            let text = self.read_raw_group()?;
-                            if !text.is_empty() {
-                                nodes.push(Node::Symbol {
-                                    text,
-                                    class: Class::Ord,
-                                });
-                            }
+                            // Text mode still recognises `$...$`: a phrase like
+                            // `\text{if $x>0$}` mixes upright words with
+                            // variables set the way math sets them.
+                            let raw = self.read_raw_group()?;
+                            nodes.extend(text_mode(&raw)?);
                         }
+                        "tag" => {
+                            // `\tag*{...}` drops the parentheses; the star is a
+                            // character, not part of the command name.
+                            self.skip_spaces();
+                            let bare = if self.peek() == Some('*') {
+                                self.pos += 1;
+                                true
+                            } else {
+                                false
+                            };
+                            let text = self.read_raw_group()?;
+                            if text.trim().is_empty() {
+                                return Err(MathError::MissingArgument);
+                            }
+                            nodes.push(Node::Tag {
+                                text: text.trim().to_string(),
+                                bare,
+                            });
+                        }
+                        "notag" | "nonumber" => nodes.push(Node::NoTag),
                         _ => {
                             if let Some(text) = symbol(&command) {
                                 nodes.push(Node::Symbol {
@@ -870,6 +941,48 @@ fn parse_body(source: &str) -> Result<Vec<Node>, MathError> {
     parser.parse_list(false)
 }
 
+/// Compile the body of `\text{...}`: literal runs stay text, `$...$` splices in
+/// math nodes at the same size. `\$` is a literal dollar sign.
+fn text_mode(source: &str) -> Result<Vec<Node>, MathError> {
+    let mut nodes = Vec::new();
+    let mut run = String::new();
+    let mut chars = source.chars().peekable();
+    while let Some(character) = chars.next() {
+        match character {
+            '\\' if chars.peek() == Some(&'$') => {
+                chars.next();
+                run.push('$');
+            }
+            '$' => {
+                if !run.is_empty() {
+                    nodes.push(Node::Symbol {
+                        text: core::mem::take(&mut run),
+                        class: Class::Ord,
+                    });
+                }
+                let mut inner = String::new();
+                for character in chars.by_ref() {
+                    if character == '$' {
+                        break;
+                    }
+                    inner.push(character);
+                }
+                if !inner.trim().is_empty() {
+                    nodes.extend(parse_body(&inner)?);
+                }
+            }
+            other => run.push(other),
+        }
+    }
+    if !run.is_empty() {
+        nodes.push(Node::Symbol {
+            text: run,
+            class: Class::Ord,
+        });
+    }
+    Ok(nodes)
+}
+
 /// Split a matrix body into rows and cells on top-level `\\` and `&`.
 ///
 /// Nested environments and braces are respected, so a nested `matrix` or a
@@ -1044,6 +1157,8 @@ pub fn lay_out(
         items: Vec::new(),
         rules: Vec::new(),
         rows: Vec::new(),
+        number: RowNumber::Auto,
+        matrix_depth: 0,
         cursor: 0,
     };
     let mut previous: Option<Class> = None;
@@ -1074,6 +1189,7 @@ pub fn lay_out(
         items,
         rules,
         rows: context.rows,
+        number: context.number,
     }
 }
 
@@ -1082,8 +1198,14 @@ struct Context<'a> {
     metrics: &'a dyn MathMetrics,
     items: Vec<MathItem>,
     rules: Vec<MathRule>,
-    /// Aligned row baselines, filled by `matrix`.
-    rows: Vec<Width>,
+    /// Aligned row baselines, filled by the outermost `matrix`.
+    rows: Vec<MathRow>,
+    /// The formula's own number, set by a top-level `\tag`/`\notag`.
+    number: RowNumber,
+    /// How many `matrix` bodies enclose the node being laid out. Only the
+    /// outermost one contributes rows, so an `aligned` nested in an `equation`
+    /// does not turn one numbered formula into several.
+    matrix_depth: u32,
     cursor: i32,
 }
 
@@ -1283,6 +1405,21 @@ impl Context<'_> {
             Node::Substack(rows) => self.substack(rows, size, baseline),
             Node::Brace { body, over } => {
                 self.brace(body, *over, size, baseline);
+            }
+            Node::Tag { text, bare } => {
+                // A tag in the body of a formula (rather than in one of its
+                // rows) numbers the formula itself.
+                if self.matrix_depth == 0 {
+                    self.number = RowNumber::Tag {
+                        text: text.clone(),
+                        bare: *bare,
+                    };
+                }
+            }
+            Node::NoTag => {
+                if self.matrix_depth == 0 {
+                    self.number = RowNumber::Suppressed;
+                }
             }
             Node::Color { color, body } => {
                 // `\color{...}` colours the rest of its group; painting the
@@ -1519,6 +1656,12 @@ impl Context<'_> {
         if cols == 0 || rows.is_empty() {
             return;
         }
+        // Only the outermost block of a formula owns its rows: an `aligned`
+        // inside an `equation`, or a `cases` inside an `aligned`, must not add
+        // numbers of its own.
+        let outermost =
+            self.matrix_depth == 0 && kind == MatrixKind::Aligned && self.rows.is_empty();
+        self.matrix_depth += 1;
         let row_gap = scale(size, self.style.frac_gap).max(1);
         let col_gap = if kind == MatrixKind::Aligned {
             0
@@ -1586,11 +1729,15 @@ impl Context<'_> {
                 self.place_nodes(&rows[r][c], size, baseline + baselines[r], origin + cell_x);
             }
         }
-        if kind == MatrixKind::Aligned {
-            for row_baseline in &baselines {
-                self.rows.push(Width(baseline + *row_baseline));
+        if outermost {
+            for (r, row_baseline) in baselines.iter().enumerate() {
+                self.rows.push(MathRow {
+                    baseline: Width(baseline + *row_baseline),
+                    number: row_number(&rows[r]).unwrap_or_default(),
+                });
             }
         }
+        self.matrix_depth -= 1;
         self.cursor = origin + total;
         self.delimiter(right, delim_size, baseline + baseline_off);
     }
@@ -1627,10 +1774,13 @@ impl Context<'_> {
 
     /// Draw the stretchy brace over/under `body` and report its geometry.
     ///
-    /// One glyph is an approximation: TeX assembles a brace from hooks and
-    /// extensible pieces, which needs horizontal pieces this font does not
-    /// carry. Placing it by its ink band (not by the font's ascent) keeps it
-    /// close to the body.
+    /// Two shapes, one rule: a brace never gets flatter as it gets wider. A
+    /// narrow body keeps the font's brace glyph, grown uniformly (which keeps
+    /// its hooks) and then stretched sideways for the remainder. Past
+    /// [`BRACE_GLYPH_STRETCH`] that sideways stretch turns the hooks into
+    /// ramps, so the brace is assembled from rules instead — a flat run, two
+    /// hooks and a cusp, which is the same set of pieces TeX uses, drawn here
+    /// because the font carries the single-character brace only.
     fn brace(&mut self, body: &Node, over: bool, size: Width, baseline: i32) -> BraceGeo {
         let glyph = if over { "\u{23de}" } else { "\u{23df}" };
         let (width, height, depth) = self.measure_ink(body, size);
@@ -1638,41 +1788,133 @@ impl Context<'_> {
         self.node_with_x(body, size, baseline, left);
         let gap = scale(size, self.style.frac_gap).max(1);
         let natural = self.metrics.advance(glyph, size).0.max(1);
-        // Grow the glyph first, then stretch what is left: a brace that is
-        // scaled uniformly keeps its hooks, while a purely horizontal stretch
-        // flattens them into a wave.
         let target = width.max(1) as i64;
         let grown = (target * 1000 / natural as i64).clamp(1000, 2200) as u16;
         let grown_size = Width((size.0 as i64 * i64::from(grown) / 1000).max(1) as i32);
         let grown_advance = self.metrics.advance(glyph, grown_size).0.max(1);
         let stretch = ((target * 1000) / grown_advance as i64).clamp(1000, 60000) as u16;
-        let (ink_top, ink_bottom) = brace_ink(glyph).expect("both braces have an ink band");
-        let ink_top = per_mille(grown_size, ink_top);
-        let ink_bottom = per_mille(grown_size, ink_bottom);
-        // `y` is the glyph's baseline; the ink band sits at a fixed distance
-        // from it. Over: put the band's bottom `gap` above the body's top.
-        // Under: put its top `gap` below the body's depth.
-        let y = if over {
-            -(height + gap) + ink_bottom
+        let geo = if stretch <= BRACE_GLYPH_STRETCH {
+            let (ink_top, ink_bottom) = brace_ink(glyph).expect("both braces have an ink band");
+            let ink_top = per_mille(grown_size, ink_top);
+            let ink_bottom = per_mille(grown_size, ink_bottom);
+            // `y` is the glyph's baseline; the ink band sits a fixed distance
+            // from it. Over: put the band's bottom `gap` above the body's top.
+            // Under: put its top `gap` below the body's depth.
+            let y = if over {
+                baseline - (height + gap) + ink_bottom
+            } else {
+                baseline + depth + gap + ink_top
+            };
+            if self.metrics.has(glyph.chars().next().unwrap_or('\u{23de}')) {
+                self.items.push(MathItem {
+                    text: String::from(glyph),
+                    x: Width(left),
+                    y: Width(y),
+                    size: grown_size,
+                    stretch,
+                    color: None,
+                });
+            }
+            BraceGeo {
+                left,
+                width,
+                ink_top: y - ink_top,
+                ink_bottom: y - ink_bottom,
+            }
         } else {
-            depth + gap + ink_top
+            let tip = if over { height + gap } else { depth + gap };
+            self.assemble_brace(left, width, tip, over, size, baseline)
         };
-        if self.metrics.has(glyph.chars().next().unwrap_or('\u{23de}')) {
-            self.items.push(MathItem {
-                text: String::from(glyph),
-                x: Width(left),
-                y: Width(y),
-                size: grown_size,
-                stretch,
-                color: None,
-            });
-        }
         self.cursor = left + width;
+        geo
+    }
+
+    /// Draw a brace from rules: flat run, two hooks, one cusp.
+    ///
+    /// `tip` is the distance from the baseline to the ink nearest the body.
+    /// Every segment is one rule whose outer edge follows the curve; the step
+    /// is half a stroke width, which is finer than a pixel at any print size.
+    fn assemble_brace(
+        &mut self,
+        left: i32,
+        width: i32,
+        tip: i32,
+        over: bool,
+        size: Width,
+        baseline: i32,
+    ) -> BraceGeo {
+        // Stroke, hook and cusp are proportions of the formula size: at 10.5
+        // pt the stroke is 0.66 pt, the hook drops a quarter em, the cusp rises
+        // a fifth. The numbers are the ones a designed brace glyph carries,
+        // measured off the same Noto glyph the narrow path uses.
+        let thickness = (size.0 / 11).max(1);
+        let hook = (size.0 / 4).max(thickness * 3).min(width / 4).max(1);
+        let cusp = (size.0 / 5).max(thickness * 3).min(width / 4).max(1);
+        let half_cusp = hook;
+        let bar = tip + hook;
+        let peak = bar + cusp;
+        let step = (thickness / 2).max(1);
+        let middle = width / 2;
+
+        // Distance from the baseline to the stroke's outer edge at `x`.
+        let level_at = |x: i32| -> i32 {
+            if x < hook {
+                let dx = hook - x;
+                // Quarter circle: vertical tangent at the tip, flat at the bar.
+                bar - hook + isqrt((hook * hook - dx * dx).max(0))
+            } else if x < middle - half_cusp {
+                bar
+            } else if x < middle + half_cusp {
+                let d = (x - middle).abs();
+                bar + cusp * (half_cusp - d) / half_cusp
+            } else if x < width - hook {
+                bar
+            } else {
+                let dx = x - (width - hook);
+                bar - hook + isqrt((hook * hook - dx * dx).max(0))
+            }
+        };
+
+        // One rule per slice, spanning the whole level range the slice covers.
+        // A stroke drawn only as horizontal ribbons would break apart where the
+        // curve is steep (the tangent at a hook tip is vertical); covering both
+        // ends keeps the ink continuous.
+        let mut stroke = |x: i32, w: i32| {
+            if w <= 0 {
+                return;
+            }
+            let high = level_at(x).max(level_at(x + w));
+            let low = level_at(x).min(level_at(x + w));
+            let thickness = high - low + thickness;
+            let y = if over {
+                baseline - high
+            } else {
+                baseline + low - thickness
+            };
+            self.rules.push(MathRule {
+                x: Width(left + x),
+                y: Width(y),
+                width: Width(w),
+                thickness: Width(thickness),
+            });
+        };
+
+        let mut x = 0;
+        while x < width {
+            stroke(x, step.min(width - x));
+            x += step;
+        }
+
+        let (ink_top, ink_bottom) = if over {
+            (baseline - peak, baseline - (bar - hook))
+        } else {
+            (baseline + (bar - hook), baseline + peak)
+        };
         BraceGeo {
             left,
             width,
-            ink_top: y - ink_top,
-            ink_bottom: y - ink_bottom,
+            ink_top,
+            ink_bottom,
         }
     }
 }
@@ -1683,6 +1925,25 @@ struct BraceGeo {
     width: i32,
     ink_top: i32,
     ink_bottom: i32,
+}
+
+/// The number a matrix row asks for, if its cells say anything about it.
+fn row_number(row: &[Vec<Node>]) -> Option<RowNumber> {
+    for cell in row {
+        for node in cell {
+            match node {
+                Node::Tag { text, bare } => {
+                    return Some(RowNumber::Tag {
+                        text: text.clone(),
+                        bare: *bare,
+                    });
+                }
+                Node::NoTag => return Some(RowNumber::Suppressed),
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 /// Fences for a matrix kind.

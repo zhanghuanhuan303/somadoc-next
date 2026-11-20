@@ -86,14 +86,16 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   `soma-eval corpus` measures them and `soma-eval calibrate` sweeps tolerance ×
   badness scale on a proxy objective; see
   [`docs/corpus-calibration.md`](docs/corpus-calibration.md).
-- Display math (`soma-math`, ADR-0026/ADR-0054): a TeX subset (symbols, italic
-  variables, scripts, fractions, radicals, `\sum`/`\int` with limits, function
-  names, `\left…\right`, `array` column formats, `\substack`,
-  `\overbrace`/`\underbrace`, `\color`) laid out into integer glyphs and
-  rules. `soma-layout` centres one `MathBox` per `MathBlock`; both renderers
-  paint it; a malformed formula falls back to text instead of failing the page.
-  `numbering.equations` numbers `equation`/`align`/`gather`/`multline` blocks
-  per row, right-aligned in the margin. Inline formulas are
+- Display math (`soma-math`, ADR-0026/ADR-0054/ADR-0056): a TeX subset (symbols,
+  italic variables, scripts, fractions, radicals, `\sum`/`\int` with limits,
+  function names, `\left…\right`, `array` column formats, `\substack`,
+  `\overbrace`/`\underbrace` — glyph when narrow, assembled from rules when
+  wide — `\color`, tags) laid out into integer glyphs and rules. `soma-layout`
+  centres one `MathBox` per `MathBlock`; both renderers paint it; a malformed
+  formula falls back to text instead of failing the page. `numbering.equations`
+  numbers `equation`/`align`/`gather`/`multline` blocks per row, right-aligned in
+  the margin, with `\tag`/`\tag*`/`\notag` overriding a row; a nested `aligned`
+  never adds numbers. `\text{}` accepts `$…$` inside it. Inline formulas are
   object atoms measured by their own box (ADR-0027), so they break and raise the
   line box like any other inline object. Fences stretch to their body, and
   `matrix`/`pmatrix`/`bmatrix`/`vmatrix`/`cases`/`aligned` are supported; symbols

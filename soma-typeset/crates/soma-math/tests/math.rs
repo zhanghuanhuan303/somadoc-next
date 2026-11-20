@@ -724,6 +724,108 @@ fn color_applies_to_the_rest_of_its_group() {
 }
 
 #[test]
+fn text_mode_still_sets_the_math_inside_it() {
+    let result = layout(
+        "\\text{if $x>0$ then}",
+        &MathStyle::default(),
+        &ItalicMetrics,
+    )
+    .expect("layout");
+    let texts: Vec<&str> = result.items.iter().map(|item| item.text.as_str()).collect();
+    assert!(texts.contains(&"if "), "the words stay text: {texts:?}");
+    assert!(
+        texts.contains(&"\u{1d465}"),
+        "the variable inside the dollars is math: {texts:?}"
+    );
+    assert!(
+        texts.contains(&" then"),
+        "text resumes after the formula: {texts:?}"
+    );
+}
+
+#[test]
+fn a_tag_names_the_row_instead_of_numbering_it() {
+    let result = formula("\\begin{align}a&=1\\tag{A}\\\\b&=2\\notag\\end{align}");
+    assert_eq!(result.rows.len(), 2);
+    assert_eq!(
+        result.rows[0].number,
+        soma_math::RowNumber::Tag {
+            text: String::from("A"),
+            bare: false
+        }
+    );
+    assert_eq!(result.rows[1].number, soma_math::RowNumber::Suppressed);
+}
+
+#[test]
+fn a_starred_tag_drops_its_parentheses() {
+    let result = formula("\\begin{equation}x\\tag*{$\\ast$}\\end{equation}");
+    assert_eq!(
+        result.rows[0].number,
+        soma_math::RowNumber::Tag {
+            text: String::from("$\\ast$"),
+            bare: true
+        }
+    );
+}
+
+#[test]
+fn a_nested_aligned_block_adds_no_rows() {
+    // The `equation` owns the row; the `aligned` inside it is decoration and
+    // must not turn one numbered formula into two.
+    let result =
+        formula("\\begin{equation}\\begin{aligned}a&=1\\\\b&=2\\end{aligned}\\end{equation}");
+    assert_eq!(result.rows.len(), 1, "one row, one number");
+}
+
+#[test]
+fn a_brace_inside_a_fraction_rides_its_own_baseline() {
+    let brace_y = |layout: &soma_math::MathLayout| {
+        layout
+            .items
+            .iter()
+            .find(|item| item.text == "\u{23de}")
+            .map(|item| item.y.0)
+            .expect("the brace glyph")
+    };
+    let alone = brace_y(&formula("\\overbrace{ab}"));
+    let nested = brace_y(&formula("\\frac{\\overbrace{ab}}{2}"));
+    assert!(
+        nested < alone,
+        "inside a numerator the brace sits above the formula baseline: {nested} vs {alone}"
+    );
+}
+
+#[test]
+fn a_wide_brace_is_assembled_from_rules() {
+    let result = formula("\\overbrace{abcdefghij}");
+    assert!(
+        result.rules.len() > 8,
+        "hooks and cusp are drawn as rules: {}",
+        result.rules.len()
+    );
+    assert!(
+        result.items.iter().all(|item| item.text != "\u{23de}"),
+        "the glyph is not used when it would be flattened"
+    );
+    // The brace must clear the body: every segment sits above the baseline.
+    assert!(
+        result.rules.iter().all(|rule| rule.y.0 < 0),
+        "the brace is above the body"
+    );
+}
+
+#[test]
+fn a_narrow_brace_keeps_the_glyph() {
+    let result = formula("\\overbrace{ab}");
+    assert!(
+        result.items.iter().any(|item| item.text == "\u{23de}"),
+        "a narrow brace is the designed glyph"
+    );
+    assert!(result.rules.is_empty(), "and it needs no rules");
+}
+
+#[test]
 fn an_unknown_colour_is_refused() {
     let error =
         layout("\\color{chartreuse} x", &MathStyle::default(), &TestMetrics).expect_err("rejected");

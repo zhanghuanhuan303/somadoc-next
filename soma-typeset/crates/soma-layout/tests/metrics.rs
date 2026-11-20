@@ -41,6 +41,34 @@ fn advances_and_line_metrics_scale_with_the_resolved_font_size() {
 }
 
 #[test]
+fn han_inside_a_formula_measures_with_the_text_face() {
+    // A `\text{行宽}` run inside a formula is drawn from the text face: the
+    // math face has no Han glyphs. The layout must measure what will be drawn,
+    // or the formula's width and the drawn positions disagree.
+    let doc = document(vec![paragraph("中")]);
+    let styled = styled(&doc, BOOK);
+    let table = MetricsTable::embedded();
+    let metrics = StyledMetrics::new(&table, &styled);
+    let style = StyleId(0);
+    let size = styled.table().styles()[0].font_size.0;
+    let body = table.face(0).expect("body face");
+    let math = table.math_face().expect("math face");
+    assert!(!math.has('中' as u32), "the fixture's math face has no Han");
+    assert!(body.has('中' as u32), "the body face does");
+
+    assert_eq!(
+        metrics.math_advance("中", style).0,
+        scale(body.advance_at('中' as u32), size),
+        "Han inside a formula measures with the body face"
+    );
+    assert_eq!(
+        metrics.math_advance("∑", style).0,
+        scale(math.advance_at('∑' as u32), size),
+        "a math glyph still measures with the math face"
+    );
+}
+
+#[test]
 fn a_larger_style_is_proportionally_wider() {
     let doc = document(vec![
         Block::Heading(Heading::new(NodeMeta::synthesized(), 1, vec![text("标题")])),

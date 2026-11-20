@@ -218,10 +218,35 @@ impl Metrics for StyledMetrics<'_> {
 
     fn math_advance(&self, text: &str, style: StyleId) -> Width {
         let computed = self.computed(style);
-        match self.table.math_face() {
-            Some(face) => Width(scale(face.advance(text), computed.font_size.0)),
-            None => self.advance(text, style),
+        let Some(math) = self.table.math_face() else {
+            return self.advance(text, style);
+        };
+        // A `\text{...}` run inside a formula is drawn from the *text* face:
+        // the math face carries no Han glyphs, and the PDF writer picks the
+        // face per character. Measure the same way or the formula's width and
+        // the drawn positions disagree.
+        let body = self.face_of(&computed);
+        let rescue = self
+            .table
+            .faces()
+            .iter()
+            .find(|face| face.family == soma_metrics::FAMILY_FALLBACK);
+        let mut total: i64 = 0;
+        for character in text.chars() {
+            let codepoint = character as u32;
+            let face = if math.has(codepoint) {
+                math
+            } else if let Some(face) = body.filter(|face| face.has(codepoint)) {
+                face
+            } else if let Some(face) = rescue.filter(|face| face.has(codepoint)) {
+                face
+            } else {
+                math
+            };
+            total += i64::from(face.advance_at(codepoint));
         }
+        let total = total.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+        Width(scale(total, computed.font_size.0))
     }
 
     fn math_metrics(&self, style: StyleId) -> LineMetrics {

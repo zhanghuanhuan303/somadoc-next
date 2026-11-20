@@ -134,6 +134,81 @@ fn each_aligned_row_takes_its_own_number() {
 }
 
 #[test]
+fn tags_and_notags_do_not_consume_numbers() {
+    let source = format!("{TIGHT}\nnumbering:\n  equations: \"({{n}})\"\n");
+    let doc = document(vec![
+        Block::MathBlock(MathBlock::new(
+            NodeMeta::synthesized(),
+            "\\begin{align}a &= 1 \\tag{A} \\\\ b &= 2 \\notag \\\\ c &= 3\\end{align}",
+        )),
+        Block::MathBlock(MathBlock::new(
+            NodeMeta::synthesized(),
+            "\\begin{equation}d = 4\\end{equation}",
+        )),
+    ]);
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let labels: Vec<String> = layout
+        .pages
+        .iter()
+        .flat_map(|page| page.blocks.iter())
+        .filter_map(|block| block.math.as_ref())
+        .flat_map(|math| math.items.iter())
+        .filter(|item| item.text.starts_with('('))
+        .map(|item| item.text.clone())
+        .collect();
+
+    // `\tag` prints `(A)`, `\notag` prints nothing, and neither one uses up a
+    // number: the next automatic number is still (1), and the formula after it
+    // takes (2).
+    assert_eq!(labels, ["(A)", "(1)", "(2)"]);
+}
+
+#[test]
+fn a_tag_may_carry_math() {
+    let source = format!("{TIGHT}\nnumbering:\n  equations: \"({{n}})\"\n");
+    let doc = document(vec![Block::MathBlock(MathBlock::new(
+        NodeMeta::synthesized(),
+        "\\begin{equation}x \\tag{$\\alpha$}\\end{equation}",
+    ))]);
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let math = layout.pages[0].blocks[0].math.as_ref().expect("math box");
+    let texts: Vec<&str> = math.items.iter().map(|item| item.text.as_str()).collect();
+
+    assert!(
+        texts.contains(&"α"),
+        "the tag's math is set, not printed: {texts:?}"
+    );
+    assert!(
+        texts.contains(&"("),
+        "a plain `\\tag` keeps its parentheses: {texts:?}"
+    );
+}
+
+#[test]
+fn a_nested_aligned_block_keeps_one_number() {
+    let source = format!("{TIGHT}\nnumbering:\n  equations: \"({{n}})\"\n");
+    let doc = document(vec![Block::MathBlock(MathBlock::new(
+        NodeMeta::synthesized(),
+        "\\begin{equation}\\begin{aligned}a &= 1 \\\\ b &= 2\\end{aligned}\\end{equation}",
+    ))]);
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let labels: Vec<&str> = layout.pages[0].blocks[0]
+        .math
+        .as_ref()
+        .expect("math box")
+        .items
+        .iter()
+        .filter(|item| item.text.starts_with('('))
+        .map(|item| item.text.as_str())
+        .collect();
+
+    assert_eq!(labels, ["(1)"]);
+}
+
+#[test]
 fn a_plain_formula_is_not_numbered() {
     let source = format!("{TIGHT}\nnumbering:\n  equations: \"({{n}})\"\n");
     let doc = document(vec![Block::MathBlock(MathBlock::new(
