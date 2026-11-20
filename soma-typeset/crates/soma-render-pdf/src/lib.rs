@@ -11,6 +11,7 @@
 extern crate alloc;
 
 mod cff;
+mod deflate;
 mod font;
 mod standard_encoding;
 
@@ -111,10 +112,7 @@ pub fn render(
     for page in &layout.pages {
         let content = paint_page(layout, styles, text, fonts, scale, page);
         let content_id = pdf.reserve();
-        pdf.set(
-            content_id,
-            stream(format!("/Length {}", content.len()).as_bytes(), &content),
-        );
+        pdf.set(content_id, stream_flate(b"", &content));
 
         let mut font_resources = String::new();
         for (role, font) in &embedded {
@@ -359,7 +357,7 @@ fn embed_font(
         ProgramKind::TrueType => format!("/Length1 {}", program.len()),
         ProgramKind::CidCff => String::from("/Subtype /CIDFontType0C"),
     };
-    pdf.set(file, stream(stream_dict.as_bytes(), program));
+    pdf.set(file, stream_flate(stream_dict.as_bytes(), program));
 
     let unicode = pdf.reserve();
     pdf.set(unicode, to_unicode(entries));
@@ -442,10 +440,7 @@ fn to_unicode(entries: &[(u16, u32)]) -> Vec<u8> {
         body.push_str("endbfchar\n");
     }
     body.push_str("endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n");
-    stream(
-        format!("/Length {}", body.len()).as_bytes(),
-        body.as_bytes(),
-    )
+    stream_flate(b"", body.as_bytes())
 }
 
 // ---------------------------------------------------------------------------
@@ -796,6 +791,23 @@ impl Pdf {
             .as_bytes(),
         );
         out
+    }
+}
+
+/// A stream, deflated when that is smaller. The dictionary carries the filter
+/// so callers never have to remember it.
+fn stream_flate(dict: &[u8], data: &[u8]) -> Vec<u8> {
+    match deflate::zlib(data) {
+        Some(packed) => {
+            let mut full = Vec::with_capacity(dict.len() + 24);
+            full.extend_from_slice(dict);
+            if !dict.is_empty() {
+                full.push(b' ');
+            }
+            full.extend_from_slice(b"/Filter /FlateDecode");
+            stream(&full, &packed)
+        }
+        None => stream(dict, data),
     }
 }
 

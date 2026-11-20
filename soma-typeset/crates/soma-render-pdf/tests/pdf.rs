@@ -149,7 +149,10 @@ fn a_seac_composite_is_embedded_as_one_outline() {
     let pdf = render_pdf_with(&layout, &styled, &font);
     let text = String::from_utf8_lossy(&pdf);
     assert!(text.contains("/Subtype /CIDFontType0C"));
-    assert!(text.contains("beginbfchar"), "the composite keeps its text");
+    assert!(
+        text.contains("/ToUnicode"),
+        "the composite keeps a text mapping"
+    );
 }
 
 #[test]

@@ -41,12 +41,29 @@ p1 b1  ratios [328, 302,  981, 337, 302, 0]
 p1 b5  ratios [1024, 314, 314, 942, 0]
 ```
 
-Those lines are **forced**. Re-running the same documents with
-`badness_scale` raised from 100 to 300 and to 1000 — a tenfold steeper curve —
-leaves `classics`'s break sequence unchanged (`[367, 351, 1024, 328, 0]`). There
-is no legal alternative: every other break is overfull under ADR-0041 or
-leaves an even worse neighbour. A fitness demerit would add cost to a choice
-that has no competitor, so the line would stay exactly where it is.
+Those lines are the **cheapest distribution, not an infeasible one**, and the
+alternatives are much worse:
+
+| break | line ratios | line cost (badness) |
+| --- | --- | --- |
+| chosen | `367, 351, 1024, 328` | 4.9 + 4.3 + **107.4** + 3.5 = 120 |
+| one more character on line 3 | `367, 351, −352, 1719` | 4.9 + 4.3 + 4.4 + **508.0** = 522 |
+
+Line 3 is 0.736 em short, and one Han character is 1 em, so taking the
+character would leave line 4 needing 1.7 em of stretch — a very loose line
+twice as bad as the one being fixed. Taking a character *from* line 2 instead
+makes line 3 fits by 0.03 em over a 0.75 em shrink budget, i.e. overfull, which
+ADR-0041 forbids.
+
+That is why neither a steeper curve nor a different exponent moves the break:
+`badness_scale` 100 → 300 → 1000 and `badness_exponent` 3 → 2 all return
+`[367, 351, 1024, 328, 0]`. The choice is stable under every re-weighting of
+badness, and a fitness demerit would not remove the loose line — it would
+select the 1719 ‰ alternative and make the page worse.
+
+In Chinese the visible cost is small anyway: the stretch is spread over the
+1/32 em CJK gaps, so r = 1.0 widens the air between characters from 0.031 em to
+0.057 em. The `classics` render shows no line that stands out at reading size.
 
 ## Decision
 
@@ -81,3 +98,6 @@ Two things this does **not** say:
 - The `ratio_jitter_p95` rise that started this analysis (351 → 368) is
   explained: it is the airing-out that ADR-0041's overfull rule causes in
   `classics`, not a new rhythm defect.
+- The two loose lines stay. Fixing them would need a *different* place to put
+  the 0.75 em a paragraph cannot fit — narrower trim, a hyphenation dictionary,
+  or letter-spacing — not a fitness state.
