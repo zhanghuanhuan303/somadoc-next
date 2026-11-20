@@ -127,7 +127,7 @@ Cumulative public test files:
 | `engine.rs` | 15 | `soma.engine/1`: parse, reject, canonical hash, layout equivalence |
 | `corpus.rs` (eval) | 9 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
 | `a5_md.rs` | 15 | Markdown subset, inlines (including GFM `~~`), spans, index extension, front matter, validity |
-| `html.rs` (html) | 9 | HTML subset shapes, table grid, degradation, recovery, pipeline |
+| `html.rs` (html) | 10 | HTML subset shapes, table grid and caption, degradation, recovery, pipeline |
 | `latex.rs` (latex) | 16 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, inline command opening a block, recovery, pipeline |
 | `math.rs` (soma-math) | 43 | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, spacing, styles, errors, italic variables, `array` formats, `\substack`, brace ink and labels, assembled braces, `\color`, text-mode maths, tags |
 | `e11_math.rs` (layout) | 8 | centring, baseline inside the box, flow, canonical `math` field |
@@ -170,7 +170,7 @@ Cumulative public test files:
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 | render-pdf unit | 26 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing |
 
-Total: **633 tests**.
+Total: **634 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

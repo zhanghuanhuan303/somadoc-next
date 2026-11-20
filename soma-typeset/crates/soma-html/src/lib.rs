@@ -709,7 +709,18 @@ fn build_table(element: &Element, meta: NodeMeta) -> Option<Table> {
     let columns = (0..columns)
         .map(|_| Column::new(NodeMeta::synthesized(), soma_doc::CellAlign::Default))
         .collect();
-    Some(Table::new(meta, columns, rows))
+    let mut table = Table::new(meta, columns, rows);
+    // `<caption>` is the table's title, and it is inline content like any
+    // other caption (the rendered order is "caption above the table").
+    for child in &element.children {
+        if let Node::Element(candidate) = child {
+            if candidate.tag == "caption" {
+                table.caption = build_inlines(&candidate.children);
+                break;
+            }
+        }
+    }
+    Some(table)
 }
 
 fn collect_rows(element: &Element, in_thead: bool, out: &mut Vec<(Vec<Element>, bool)>) {

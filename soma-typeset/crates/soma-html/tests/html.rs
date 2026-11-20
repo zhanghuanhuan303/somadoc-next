@@ -139,6 +139,21 @@ fn a_table_becomes_a_full_grid() {
 }
 
 #[test]
+fn a_table_caption_becomes_the_table_title() {
+    let html = r#"<table>
+  <caption>支出<strong>明细</strong></caption>
+  <tr><th>项目</th><th>金额</th></tr>
+  <tr><td>甲</td><td>1</td></tr>
+</table>"#;
+    let document = parse_html(html);
+    let Block::Table(table) = &document.blocks[0] else {
+        panic!("expected a table");
+    };
+    assert!(!table.caption.is_empty(), "the caption is kept");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
 fn unknown_tags_keep_their_text_and_scripts_are_dropped() {
     let html = r#"<p>前 <custom>未知标签</custom> 后</p>
 <script>alert('x')</script>
