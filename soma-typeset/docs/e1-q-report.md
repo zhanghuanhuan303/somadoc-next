@@ -146,3 +146,70 @@ cargo run -p soma-eval --release -- score --paragraphs 40
 
 Gate Q 的真实盲测（D01）、Tier A 标定（D04/D05）、`soma.engine/1`（D29/D59）、
 HTML/LaTeX 前端、PDF、增量重排。见 `docs/debt.md`。
+
+---
+
+## 8. 复测（2026-11-20）
+
+E1–Q′ 之后又落了 ADR-0016…0043（模板、分页、PDF、SVG、度量表 v4、混排、CFF、
+空格与 overfull、PDF 流压缩）。上面的数字是交付时的快照，这一节是**同一台机器、
+同一份语料、当前构建**的复测，不覆盖历史读数。
+
+### 构建
+
+| 项 | 交付时 | 现在 |
+|---|---|---|
+| 测试 | 299 | **572** |
+| schema | `soma.metrics/1`、`soma.template/2`、`soma.styles/2`、`soma.pages/3` | `soma.metrics/4`、`soma.template/9`、`soma.styles/7`、`soma.pages/9`、`soma.doc/2`、`soma.engine/1` |
+| 模型版本 | `modelVersion 1` | `modelVersion 2`（ADR-0041） |
+
+### 记分卡（40 段合成语料）
+
+```text
+pages,18                  greedy_pages,18
+cost_kp,790336            cost_greedy,800192
+lines,494                 over_compress_lines,0
+emergency_lines,0         continuation_blocks,16
+widow_violations,0        orphan_violations,0
+page_free_p95,1048        page_free_max,1048
+ratio_jitter_p95,445      bdev_rel_error_p95,0
+```
+
+与交付时唯一不同的读数是 `ratio_jitter_p95`：**496 → 445**。ADR-0041 让 overfull 的
+齐行行不再当作正常断点，挤压行变少，行内调整量随之收敛。
+
+### 真实语料（`corpus/zh`）
+
+```text
+document,pages,paragraphs,lines,over_compress,emergency,continuation,widows,orphans,fitness_jumps,page_free_p95,page_free_max,jitter_p95,bdev_error_p95
+abstract,1,6,24,0,0,0,0,0,0,0,0,577,0
+classics,2,15,42,0,0,0,0,0,3,0,0,942,0
+editorial,2,7,30,0,0,1,0,0,0,423,423,905,0
+footnotes,2,6,22,0,0,1,0,0,0,1580,1580,455,9
+interview,2,15,38,0,0,0,0,0,0,0,0,608,0
+mixed,1,6,24,0,0,0,0,0,0,0,0,640,0
+notice,1,12,26,0,0,0,0,0,0,0,0,702,0
+science,2,8,35,0,0,1,0,0,0,0,0,328,0
+technical,2,8,32,0,0,0,0,0,0,0,0,591,0
+table-page,2,123,125,0,0,0,0,0,0,278,278,0,0
+math-page,1,3,5,0,0,0,0,0,0,0,0,452,0
+book,30,390,810,0,0,0,0,0,0,486,486,337,0
+ALL,48,599,1213,0,0,3,0,0,3,486,1580,368,9
+```
+
+- `over_compress` 0（ADR-0041 之前是 3）。
+- `fitness_jumps` 3，全部在 `classics`，来自两行非常松的行；ADR-0042 记录它们为何是
+  代价最优、而不是无解，以及为什么因此不引入 fitness DP 状态。
+- `bdev_rel_error_p95 = 9‰`：比例分配假设在 599 段的真实语料上误差小于 1%。
+
+### 产物大小（同一输入，ADR-0043 前后）
+
+| 样张 | 未压缩 | 现在 |
+|---|---|---|
+| `anthology.pdf`（49 页，MiSans + 霞鹜） | 1,686,314 B | **527,273 B** |
+| Noto Serif CJK 单字体（8 页，CFF） | 1,919,666 B | **1,627,922 B** |
+
+### 仍缺
+
+盲测与 Tier A 标定（D01/D04/D05）、图片嵌入与 tagged PDF（D82）、索引排序（D80）。
+`docs/debt.md` 是唯一权威列表。
