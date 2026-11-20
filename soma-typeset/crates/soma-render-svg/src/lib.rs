@@ -23,6 +23,11 @@ use soma_template::{ComputedStyle, StyleTable};
 
 const UNITS_PER_EM: i32 = 4096;
 
+/// One em is 16 CSS pixels in the preview. Layout units are 1/4096 em, so a
+/// page is `units / 256` pixels across, and the root viewport can be given an
+/// absolute size while every coordinate stays in layout units (ADR-0049).
+const PX_PER_EM: i64 = 16;
+
 /// Render every page as its own `<svg>` element, with no image assets: figures
 /// keep their placeholder box.
 pub fn render(layout: &PagedLayout, styles: &StyleTable, text: &dyn TextSource) -> String {
@@ -44,8 +49,8 @@ pub fn render_with(
         out.push_str(&format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" data-page=\"{}\" width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\">\n",
             page.number,
-            em(layout.page.width),
-            em(layout.page.height),
+            px(layout.page.width),
+            px(layout.page.height),
             layout.page.width.0,
             layout.page.height.0
         ));
@@ -107,10 +112,10 @@ fn render_block_at(
             out.push_str(&format!(
                 "<rect data-page=\"{page}\" data-node=\"{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>\n",
                 block.node.0,
-                em(Width(layout.page.margin_left.0 + block.x.0)),
-                em(Width(layout.page.margin_top.0 + block.y.0 + extra_y)),
-                em(block.width),
-                em(block.height),
+                units(Width(layout.page.margin_left.0 + block.x.0)),
+                units(Width(layout.page.margin_top.0 + block.y.0 + extra_y)),
+                units(block.width),
+                units(block.height),
                 paint
             ));
             return;
@@ -126,19 +131,19 @@ fn render_block_at(
                 Some(uri) => out.push_str(&format!(
                     "<image data-page=\"{page}\" data-node=\"{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\" href=\"{}\"/>\n",
                     block.node.0,
-                    em(x),
-                    em(y),
-                    em(block.width),
-                    em(block.height),
+                    units(x),
+                    units(y),
+                    units(block.width),
+                    units(block.height),
                     escape(&uri)
                 )),
                 None => out.push_str(&format!(
                     "<rect data-page=\"{page}\" data-node=\"{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#eee\" stroke=\"#ccc\"/>\n",
                     block.node.0,
-                    em(x),
-                    em(y),
-                    em(block.width),
-                    em(block.height)
+                    units(x),
+                    units(y),
+                    units(block.width),
+                    units(block.height)
                 )),
             }
             return;
@@ -204,9 +209,9 @@ fn render_block_at(
                 "<text data-page=\"{page}\" data-node=\"{}\" data-atom=\"{}\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\"{decoration}>{}</text>\n",
                 block.node.0,
                 atom.atom,
-                em(Width(x)),
-                em(Width(y)),
-                em(effective.font_size),
+                units(Width(x)),
+                units(Width(y)),
+                units(effective.font_size),
                 color(effective.color),
                 escape(&drawn)
             ));
@@ -255,9 +260,9 @@ fn paint_math(
         out.push_str(&format!(
             "<text data-page=\"{page}\" data-node=\"{node}\" data-math=\"{}\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>\n",
             escape(&item.text),
-            em(Width(left + item.x.0)),
-            em(Width(baseline + item.y.0)),
-            em(item.size),
+            units(Width(left + item.x.0)),
+            units(Width(baseline + item.y.0)),
+            units(item.size),
             paint,
             escape(&item.text)
         ));
@@ -265,25 +270,27 @@ fn paint_math(
     for rule in &math.rules {
         out.push_str(&format!(
             "<rect data-page=\"{page}\" data-node=\"{node}\" data-rule=\"1\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>\n",
-            em(Width(left + rule.x.0)),
-            em(Width(baseline + rule.y.0)),
-            em(rule.width),
-            em(rule.thickness),
+            units(Width(left + rule.x.0)),
+            units(Width(baseline + rule.y.0)),
+            units(rule.width),
+            units(rule.thickness),
             paint
         ));
     }
 }
 
-fn em(width: Width) -> String {
-    let units = width.0;
-    let sign = if units < 0 { "-" } else { "" };
-    let absolute = units.abs();
-    format!(
-        "{}{}.{:03}em",
-        sign,
-        absolute / UNITS_PER_EM,
-        (absolute % UNITS_PER_EM) * 1000 / UNITS_PER_EM
-    )
+/// A coordinate in the root coordinate system: layout units, unitless.
+///
+/// The `viewBox` is in the same units, so a coordinate needs no unit suffix.
+/// Writing `4.319em` here — as this renderer used to — made every position
+/// depend on the surrounding font size, which is not what the layout computed.
+pub fn units(width: Width) -> String {
+    format!("{}", width.0)
+}
+
+/// The root viewport size in pixels, at one em = 16 px.
+fn px(width: Width) -> i64 {
+    width.0 as i64 * PX_PER_EM / UNITS_PER_EM as i64
 }
 
 fn color(value: Option<u32>) -> String {

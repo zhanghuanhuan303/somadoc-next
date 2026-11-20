@@ -109,12 +109,5 @@ fn a_malformed_formula_keeps_its_source_text() {
 }
 
 fn em(value: i32) -> String {
-    let sign = if value < 0 { "-" } else { "" };
-    let absolute = value.abs();
-    format!(
-        "{}{}.{:03}em",
-        sign,
-        absolute / 4096,
-        (absolute % 4096) * 1000 / 4096
-    )
+    soma_render_svg::units(soma_core::Width(value))
 }

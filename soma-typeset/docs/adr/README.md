@@ -64,6 +64,7 @@ only).
 | [0046](0046-compact-cff-subset.md) | A CFF subset is compacted, and the charset carries the CIDs | Accepted |
 | [0047](0047-images-and-tagged-pdf.md) | Figures carry image XObjects; every page is tagged | Accepted |
 | [0048](0048-inline-images-in-html-and-svg.md) | HTML and SVG inline a figure as a `data:` URI | Accepted |
+| [0049](0049-svg-coordinate-units.md) | SVG coordinates are layout units; the root viewport is pixels | Accepted |
 
 ## Rules
 

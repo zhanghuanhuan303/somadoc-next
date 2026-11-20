@@ -87,15 +87,7 @@ fn text_elements(svg: &str) -> Vec<(&str, &str, &str, &str)> {
 }
 
 fn em(width: Width) -> String {
-    let units = width.0;
-    let sign = if units < 0 { "-" } else { "" };
-    let absolute = units.abs();
-    format!(
-        "{}{}.{:03}em",
-        sign,
-        absolute / 4096,
-        (absolute % 4096) * 1000 / 4096
-    )
+    soma_render_svg::units(width)
 }
 
 fn find_atom(
@@ -266,4 +258,9 @@ fn svg_bytes_are_a_visual_regression_lock() {
 /// 2026-11-20: a space shrinks by at most a third of its advance (D86), which
 /// moves the justified atoms inside their lines by at most 0.006 em. Line
 /// breaks are unchanged.
-const GOLDEN_SVG_HASH: u64 = 2215190967058887527;
+/// 2026-11-20: every coordinate is now a unitless layout unit instead of an
+/// `em` length. The old form made each position scale with the surrounding
+/// font size, so a page extracted on its own rendered wrong; the root
+/// viewport is in pixels at one em = 16 px, and the `viewBox` is unchanged.
+/// The layout, and therefore every coordinate's *value*, is identical (D87).
+const GOLDEN_SVG_HASH: u64 = 9092984200964852902;
