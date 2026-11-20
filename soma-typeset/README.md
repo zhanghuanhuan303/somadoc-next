@@ -297,6 +297,7 @@ docs/
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
   debt.md             # global not-done register (D01–D93, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
+  proposal-web-kp.md  # Web v1: the K-P slice in wasm (measurement, ABI, budgets)
   e1-q-report.md      # E1–Q′ delivery report
   engine.md           # soma.engine/1: shape, defaults, errors, usage
   corpus-calibration.md # real corpus: metrics and proxy calibration
