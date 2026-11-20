@@ -7,8 +7,8 @@
 //! them produces byte-identical results.
 
 use soma_core::{
-    break_paragraph, Atom, AtomKind, Boundary, BreakConfig, GlyphMetrics, LineMetrics, Metrics,
-    Paragraph, ParagraphStyle, PunctClass, StyleId, Width,
+    break_paragraph, Atom, AtomKind, Boundary, BreakConfig, Decorations, GlyphMetrics, LineMetrics,
+    Metrics, Paragraph, ParagraphStyle, PunctClass, StyleId, Width,
 };
 
 const STYLE: StyleId = StyleId(0);
@@ -56,6 +56,8 @@ fn atom(text: &str, kind: AtomKind) -> Atom {
         kind,
         class: PunctClass::None,
         style: STYLE,
+        decor: Decorations::NONE,
+        link: None,
         compress_left: Width::ZERO,
         compress_right: Width::ZERO,
     }

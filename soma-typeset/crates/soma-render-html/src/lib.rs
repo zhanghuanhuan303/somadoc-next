@@ -179,13 +179,25 @@ fn render_block(
                 }
                 _ => String::new(),
             };
+            let decorations = text.atom_decorations(block.node, atom.atom);
+            let decoration = if decorations.contains(soma_core::Decorations::UNDERLINE) {
+                "text-decoration:underline;"
+            } else if decorations.contains(soma_core::Decorations::STRIKETHROUGH) {
+                "text-decoration:line-through;"
+            } else {
+                ""
+            };
+            // Links stay inert here: the preview must not create external
+            // references (docs/capabilities.md). The PDF carries them as
+            // annotations, where a reader can act on them.
             html.push_str(&format!(
-                "<span class=\"atom\" data-node=\"{}\" data-atom=\"{}\" style=\"left:{};top:{};{}\">{}{}</span>\n",
+                "<span class=\"atom\" data-node=\"{}\" data-atom=\"{}\" style=\"left:{};top:{};{}{}\">{}{}</span>\n",
                 block.node.0,
                 atom.atom,
                 em(atom.x),
                 em(placed.y),
                 font,
+                decoration,
                 escape(&drawn),
                 ""
             ));

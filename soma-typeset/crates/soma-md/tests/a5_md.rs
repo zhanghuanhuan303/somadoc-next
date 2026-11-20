@@ -48,6 +48,22 @@ fn parses_emphasis_and_inline_code() {
 }
 
 #[test]
+fn parses_strikethrough() {
+    let document = parse_markdown("前 ~~删除~~ 后。\n");
+    let paragraph = match &document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        other => panic!("expected a paragraph, got {other:?}"),
+    };
+    assert!(
+        paragraph
+            .inlines
+            .iter()
+            .any(|inline| matches!(inline, Inline::Strikethrough(_))),
+        "GFM `~~` is a strikethrough, and the IR carries it"
+    );
+}
+
+#[test]
 fn parses_links_and_images() {
     let document = parse_markdown("见 [链接](https://example.com) 与 ![图](a.png)。\n");
     let paragraph = match &document.blocks[0] {

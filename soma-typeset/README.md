@@ -126,8 +126,10 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   generated from that same font (`tools/metrics-gen`); `scripts/book.sh` does
   this for the example. `glyf` and CFF outlines are embedded (`/FontFile2` and
   `/FontFile3`; a name-keyed CFF is promoted to CID-keyed and its `seac`
-  composites are drawn out). Streams are deflated by a deterministic
-  fixed-Huffman encoder. Figures are not (D82).
+  composites are drawn out). Streams are deflated by a deterministic encoder
+  that picks fixed or dynamic Huffman blocks per stream (ADR-0043/ADR-0045),
+  underlines and strikethroughs are drawn from the font's `post` table, and
+  links become `/Annots` rectangles (ADR-0044). Figures are not (D82).
 - First-release artifact (`examples/book`, ADR-0031/ADR-0032/ADR-0033): `scripts/book.sh`
   renders an eleven-page book from `examples/book/book.tex` + `book.yaml` — generated
   cover, roman-numbered front matter, contents with leaders plus figure/table
@@ -221,7 +223,7 @@ docs/
   fonts.md            # how a body font is scored and a metrics table is built
   mixed-font.md       # coverage, rescue faces, and the fallback plan
   font-preset.md      # proposal: ink-aware line width, one profile per font
-  adr/                # accepted decisions (ADR-0001 … 0043)
+  adr/                # accepted decisions (ADR-0001 … 0045)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
   debt.md             # global not-done register (D01–D77, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal

@@ -7,8 +7,8 @@
 
 use soma_core::{
     break_paragraph, Align, Atom, AtomKind, Boundary, BoundaryKind, BoundaryRole, BreakConfig,
-    BreakError, Breakability, FallbackStage, Glue, Paragraph, ParagraphStyle, ParamSet, PunctClass,
-    StyleId, SyntheticMetrics, Width,
+    BreakError, Breakability, Decorations, FallbackStage, Glue, Paragraph, ParagraphStyle,
+    ParamSet, PunctClass, StyleId, SyntheticMetrics, Width,
 };
 
 fn atom(text: &str) -> Atom {
@@ -17,6 +17,8 @@ fn atom(text: &str) -> Atom {
         kind: AtomKind::Cjk,
         class: PunctClass::None,
         style: StyleId(0),
+        decor: Decorations::NONE,
+        link: None,
         compress_left: Width::ZERO,
         compress_right: Width::ZERO,
     }
@@ -134,6 +136,8 @@ fn emergency_stage_reports_its_lines() {
             kind: AtomKind::LatinRun,
             class: PunctClass::None,
             style: StyleId(0),
+            decor: Decorations::NONE,
+            link: None,
             compress_left: Width::ZERO,
             compress_right: Width::ZERO,
         }],

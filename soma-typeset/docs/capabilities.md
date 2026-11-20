@@ -17,6 +17,7 @@
 | `hard_break_backslash` | supported | 行尾反斜杠 → `LineBreak::Hard` |
 | `emphasis` | supported | `*x*` / `_x_` → `Emphasis` |
 | `strong` | supported | `**x**` / `__x__` → `Strong` |
+| `strikethrough` | supported | `~~x~~` → `Strikethrough`，PDF 里画成横线（ADR-0044） |
 | `inline_code` | supported | `` `x` `` → `Code`，一个不可断 atom |
 | `link` | supported | `[text](url)` → `Link` |
 | `image` | supported | `![alt](src)` → `Image` |

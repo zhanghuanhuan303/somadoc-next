@@ -72,6 +72,11 @@ pub const CAPABILITIES: &[Capability] = &[
         note: "`**x**` and `__x__` become `Strong`",
     },
     Capability {
+        syntax: "strikethrough",
+        status: CapabilityStatus::Supported,
+        note: "`~~x~~` becomes `Strikethrough`, drawn as a rule in PDF (ADR-0044)",
+    },
+    Capability {
         syntax: "inline_code",
         status: CapabilityStatus::Supported,
         note: "`` `x` `` becomes `Code`, one unbreakable atom",

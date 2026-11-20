@@ -31,8 +31,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use soma_core::{
-    break_paragraph as break_paragraph_core, Align, BoundaryKind, BreakConfig, Cost, FallbackStage,
-    Line, Metrics, Paragraph, ParagraphStyle, PunctClass, StyleId, Width,
+    break_paragraph as break_paragraph_core, Align, BoundaryKind, BreakConfig, Cost, Decorations,
+    FallbackStage, Line, Metrics, Paragraph, ParagraphStyle, PunctClass, StyleId, Width,
 };
 use soma_doc::{Block, Document, Inline, NodeId};
 use soma_rules::{paragraph_from_spans, paragraph_from_text, InlineSpan, RuleError, SpanKind};
@@ -358,6 +358,16 @@ pub trait TextSource {
         None
     }
 
+    /// Underline and friends, as the source wrote them (ADR-0044).
+    fn atom_decorations(&self, _block: NodeId, _atom: u32) -> Decorations {
+        Decorations::NONE
+    }
+
+    /// Link target of one atom, when it came from one.
+    fn atom_link(&self, _block: NodeId, _atom: u32) -> Option<&str> {
+        None
+    }
+
     /// True when the atom is drawn by a rescue face rather than its style's
     /// own. Layout measured it with the same rule, so the renderer and the
     /// breaker agree (docs/mixed-font.md).
@@ -370,7 +380,7 @@ pub trait TextSource {
 /// does not recompile anything.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TextIndex {
-    entries: Vec<(NodeId, Vec<(String, StyleId)>)>,
+    entries: Vec<(NodeId, Vec<TextEntry>)>,
     /// Atoms drawn by a rescue face, `(node, atom)`, sorted at `finish`.
     fallbacks: Vec<(u32, u32)>,
     /// Highest node id inserted so far. Tracked explicitly: `entries` is only
@@ -380,11 +390,11 @@ pub struct TextIndex {
 }
 
 impl TextIndex {
-    pub fn blocks(&self) -> &[(NodeId, Vec<(String, StyleId)>)] {
+    pub fn blocks(&self) -> &[(NodeId, Vec<TextEntry>)] {
         &self.entries
     }
 
-    fn insert(&mut self, node: NodeId, atoms: Vec<(String, StyleId)>) {
+    fn insert(&mut self, node: NodeId, atoms: Vec<TextEntry>) {
         self.max = self.max.max(node.0);
         self.entries.push((node, atoms));
     }
@@ -415,25 +425,49 @@ impl TextSource for TextIndex {
             Ok(index) => self.entries[index]
                 .1
                 .get(atom as usize)
-                .map(|(text, _)| text.as_str())
+                .map(|entry| entry.text.as_str())
                 .unwrap_or(""),
             Err(_) => "",
         }
     }
 
     fn atom_style(&self, block: NodeId, atom: u32) -> Option<StyleId> {
-        match self.entries.binary_search_by_key(&block, |(node, _)| *node) {
-            Ok(index) => self.entries[index]
-                .1
-                .get(atom as usize)
-                .map(|(_, style)| *style),
-            Err(_) => None,
-        }
+        self.entry(block, atom).map(|entry| entry.style)
+    }
+
+    fn atom_decorations(&self, block: NodeId, atom: u32) -> Decorations {
+        self.entry(block, atom)
+            .map(|entry| entry.decorations)
+            .unwrap_or(Decorations::NONE)
+    }
+
+    fn atom_link(&self, block: NodeId, atom: u32) -> Option<&str> {
+        self.entry(block, atom)
+            .and_then(|entry| entry.link.as_deref())
     }
 
     fn uses_fallback(&self, block: NodeId, atom: u32) -> bool {
         self.fallbacks.binary_search(&(block.0, atom)).is_ok()
     }
+}
+
+impl TextIndex {
+    fn entry(&self, block: NodeId, atom: u32) -> Option<&TextEntry> {
+        match self.entries.binary_search_by_key(&block, |(node, _)| *node) {
+            Ok(index) => self.entries[index].1.get(atom as usize),
+            Err(_) => None,
+        }
+    }
+}
+
+/// One atom as the renderers see it: text, style, and what the source asked
+/// for on top of the style.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextEntry {
+    pub text: String,
+    pub style: StyleId,
+    pub decorations: Decorations,
+    pub link: Option<alloc::sync::Arc<str>>,
 }
 
 /// One layout failure.
@@ -897,6 +931,8 @@ struct OwnedSpan {
     text: String,
     style: StyleId,
     kind: SpanKind,
+    decor: Decorations,
+    link: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1858,6 +1894,8 @@ impl Builder<'_> {
         self.collect(
             inlines,
             style_id,
+            Decorations::NONE,
+            None,
             &mut spans,
             &mut footnotes,
             &mut marker_notes,
@@ -1870,6 +1908,8 @@ impl Builder<'_> {
                 text: &span.text,
                 style: span.style,
                 kind: span.kind,
+                decor: span.decor,
+                link: span.link.as_deref(),
             })
             .collect();
 
@@ -1909,7 +1949,12 @@ impl Builder<'_> {
             paragraph
                 .atoms
                 .iter()
-                .map(|atom| (atom.text.clone(), atom.style))
+                .map(|atom| TextEntry {
+                    text: atom.text.clone(),
+                    style: atom.style,
+                    decorations: atom.decor,
+                    link: atom.link.clone(),
+                })
                 .collect(),
         );
         // Record which atoms a rescue face draws, so the renderer picks the
@@ -2001,10 +2046,13 @@ impl Builder<'_> {
         }))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn collect(
         &mut self,
         inlines: &[Inline],
         fallback: StyleId,
+        decor: Decorations,
+        link: Option<&str>,
         out: &mut Vec<OwnedSpan>,
         footnotes: &mut Vec<usize>,
         marker_notes: &mut Vec<Option<usize>>,
@@ -2017,30 +2065,68 @@ impl Builder<'_> {
                     text: node.value.clone(),
                     style,
                     kind: SpanKind::Text,
+                    decor,
+                    link: link.map(String::from),
                 }),
                 Inline::Code(node) => out.push(OwnedSpan {
                     text: node.value.clone(),
                     style,
                     kind: SpanKind::Code,
+                    decor,
+                    link: link.map(String::from),
                 }),
+                Inline::Underline(node) => self.collect(
+                    &node.children,
+                    style,
+                    decor.union(Decorations::UNDERLINE),
+                    link,
+                    out,
+                    footnotes,
+                    marker_notes,
+                    objects,
+                ),
+                Inline::Strikethrough(node) => self.collect(
+                    &node.children,
+                    style,
+                    decor.union(Decorations::STRIKETHROUGH),
+                    link,
+                    out,
+                    footnotes,
+                    marker_notes,
+                    objects,
+                ),
                 Inline::Strong(node)
                 | Inline::Emphasis(node)
-                | Inline::Underline(node)
-                | Inline::Strikethrough(node)
                 | Inline::SmallCaps(node)
                 | Inline::Superscript(node)
-                | Inline::Subscript(node) => {
-                    self.collect(&node.children, style, out, footnotes, marker_notes, objects)
-                }
-                Inline::Link(node) => {
-                    self.collect(&node.children, style, out, footnotes, marker_notes, objects)
-                }
+                | Inline::Subscript(node) => self.collect(
+                    &node.children,
+                    style,
+                    decor,
+                    link,
+                    out,
+                    footnotes,
+                    marker_notes,
+                    objects,
+                ),
+                Inline::Link(node) => self.collect(
+                    &node.children,
+                    style,
+                    decor,
+                    Some(node.href.as_str()),
+                    out,
+                    footnotes,
+                    marker_notes,
+                    objects,
+                ),
                 Inline::Image(node) => out.push(OwnedSpan {
                     text: node
                         .source
                         .alt
                         .clone()
                         .unwrap_or_else(|| String::from("\u{fffc}")),
+                    decor,
+                    link: link.map(String::from),
                     style,
                     kind: SpanKind::Object,
                 }),
@@ -2056,12 +2142,16 @@ impl Builder<'_> {
                                 text: marker,
                                 style,
                                 kind: SpanKind::Object,
+                                decor,
+                                link: link.map(String::from),
                             });
                         }
                         None => out.push(OwnedSpan {
                             text: node.source.clone(),
                             style,
                             kind: SpanKind::Object,
+                            decor,
+                            link: link.map(String::from),
                         }),
                     }
                 }
@@ -2077,20 +2167,28 @@ impl Builder<'_> {
                         text: String::from(FOOTNOTE_MARKER),
                         style,
                         kind: SpanKind::Object,
+                        decor,
+                        link: link.map(String::from),
                     });
                 }
                 Inline::Ruby(node) => out.push(OwnedSpan {
                     text: node.base.clone(),
                     style,
                     kind: SpanKind::Text,
+                    decor,
+                    link: link.map(String::from),
                 }),
                 Inline::Index(node) => self.pending_index.push(node.term.clone()),
                 Inline::LineBreak(_) => out.push(OwnedSpan {
                     text: String::new(),
                     style,
                     kind: SpanKind::HardBreak,
+                    decor,
+                    link: link.map(String::from),
                 }),
                 Inline::Raw(node) => out.push(OwnedSpan {
+                    decor,
+                    link: link.map(String::from),
                     text: if node.content.fallback.is_empty() {
                         node.content.value.clone()
                     } else {
@@ -2111,7 +2209,7 @@ impl Builder<'_> {
     ) -> Result<Option<FlowItem>, LayoutError> {
         let computed = self.computed(style_id);
         let mut lines = Vec::new();
-        let mut atoms: Vec<(String, StyleId)> = Vec::new();
+        let mut atoms: Vec<TextEntry> = Vec::new();
         let mut y = Width::ZERO;
         let mut stage = FallbackStage::Normal;
 
@@ -2133,12 +2231,12 @@ impl Builder<'_> {
                     continue;
                 }
             };
-            atoms.extend(
-                paragraph
-                    .atoms
-                    .iter()
-                    .map(|atom| (atom.text.clone(), atom.style)),
-            );
+            atoms.extend(paragraph.atoms.iter().map(|atom| TextEntry {
+                text: atom.text.clone(),
+                style: atom.style,
+                decorations: atom.decor,
+                link: atom.link.clone(),
+            }));
             let result = break_paragraph(&paragraph, self.metrics, self.engine)
                 .map_err(|_| LayoutError::new(Some(node), "code breaking failed"))?;
             if result.fallback_stage != FallbackStage::Normal {
@@ -2269,7 +2367,12 @@ impl Builder<'_> {
             paragraph
                 .atoms
                 .iter()
-                .map(|atom| (atom.text.clone(), atom.style))
+                .map(|atom| TextEntry {
+                    text: atom.text.clone(),
+                    style: atom.style,
+                    decorations: atom.decor,
+                    link: atom.link.clone(),
+                })
                 .collect(),
         );
 
@@ -2990,7 +3093,12 @@ fn margin_block(
         paragraph
             .atoms
             .iter()
-            .map(|atom| (atom.text.clone(), atom.style))
+            .map(|atom| TextEntry {
+                text: atom.text.clone(),
+                style: atom.style,
+                decorations: atom.decor,
+                link: atom.link.clone(),
+            })
             .collect(),
     );
     let result = break_paragraph(&paragraph, builder.metrics, builder.engine).ok()?;

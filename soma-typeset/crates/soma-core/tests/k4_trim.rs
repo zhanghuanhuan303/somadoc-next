@@ -6,8 +6,8 @@
 
 use soma_core::{
     break_paragraph, break_paragraph_traced, Align, Atom, AtomKind, Boundary, BoundaryKind,
-    BoundaryRole, BreakConfig, BreakError, Breakability, Glue, Paragraph, ParagraphStyle, ParamSet,
-    PunctClass, StyleId, SyntheticMetrics, TrimPriority, Width,
+    BoundaryRole, BreakConfig, BreakError, Breakability, Decorations, Glue, Paragraph,
+    ParagraphStyle, ParamSet, PunctClass, StyleId, SyntheticMetrics, TrimPriority, Width,
 };
 
 fn atom(text: &str, kind: AtomKind, class: PunctClass, left: Width, right: Width) -> Atom {
@@ -16,6 +16,8 @@ fn atom(text: &str, kind: AtomKind, class: PunctClass, left: Width, right: Width
         kind,
         class,
         style: StyleId(0),
+        decor: Decorations::NONE,
+        link: None,
         compress_left: left,
         compress_right: right,
     }

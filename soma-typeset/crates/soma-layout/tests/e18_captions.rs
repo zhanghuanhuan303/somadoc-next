@@ -173,9 +173,9 @@ fn emphasis_inside_a_caption_keeps_the_caption_base_size() {
 
     let mut found = None;
     for (node, spans) in layout.text.blocks() {
-        for (atom_text, style) in spans {
-            if atom_text == "note" {
-                found = Some((*node, *style));
+        for entry in spans {
+            if entry.text == "note" {
+                found = Some((*node, entry.style));
             }
         }
     }

@@ -509,6 +509,14 @@ fn footnote_definition(text: &str) -> Option<(String, &str)> {
 // ---------------------------------------------------------------------------
 
 /// Parse inline Markdown. Unmatched delimiters are literal text.
+/// What an inline delimiter run produces.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mark {
+    Strong,
+    Emphasis,
+    Strikethrough,
+}
+
 pub fn parse_inlines(text: &str, offset: u32) -> Vec<Inline> {
     let mut out = Vec::new();
     let mut cursor = 0usize;
@@ -603,7 +611,15 @@ pub fn parse_inlines(text: &str, offset: u32) -> Vec<Inline> {
         }
 
         let mut matched = false;
-        for (delimiter, strong) in [("**", true), ("__", true), ("*", false), ("_", false)] {
+        // GFM strikes through with `~~`; the delimiters are tried longest
+        // first so `**` never wins over a single `*`.
+        for (delimiter, role) in [
+            ("**", Mark::Strong),
+            ("__", Mark::Strong),
+            ("~~", Mark::Strikethrough),
+            ("*", Mark::Emphasis),
+            ("_", Mark::Emphasis),
+        ] {
             if !rest.starts_with(delimiter) {
                 continue;
             }
@@ -618,10 +634,10 @@ pub fn parse_inlines(text: &str, offset: u32) -> Vec<Inline> {
                 let children = parse_inlines(inner, start + delimiter.len() as u32);
                 flush!();
                 let container = Container::new(meta, children);
-                out.push(if strong {
-                    Inline::Strong(container)
-                } else {
-                    Inline::Emphasis(container)
+                out.push(match role {
+                    Mark::Strong => Inline::Strong(container),
+                    Mark::Emphasis => Inline::Emphasis(container),
+                    Mark::Strikethrough => Inline::Strikethrough(container),
                 });
                 cursor += delimiter.len() * 2 + close;
                 matched = true;

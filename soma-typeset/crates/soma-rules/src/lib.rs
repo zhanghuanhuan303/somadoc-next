@@ -17,9 +17,11 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use alloc::sync::Arc;
+
 use soma_core::{
-    Align, Atom, AtomKind, Boundary, BoundaryKind, BoundaryRole, Breakability, Glue, Paragraph,
-    ParagraphStyle, PunctClass, StyleId, Width,
+    Align, Atom, AtomKind, Boundary, BoundaryKind, BoundaryRole, Breakability, Decorations, Glue,
+    Paragraph, ParagraphStyle, PunctClass, StyleId, Width,
 };
 
 /// Stretch/shrink for a boundary between two CJK atoms.
@@ -204,6 +206,10 @@ pub struct InlineSpan<'a> {
     pub text: &'a str,
     pub style: StyleId,
     pub kind: SpanKind,
+    /// Underline and friends, carried to the renderers (ADR-0044).
+    pub decor: Decorations,
+    /// Link target, carried to the renderers.
+    pub link: Option<&'a str>,
 }
 
 impl<'a> InlineSpan<'a> {
@@ -212,6 +218,8 @@ impl<'a> InlineSpan<'a> {
             text,
             style,
             kind: SpanKind::Text,
+            decor: Decorations::NONE,
+            link: None,
         }
     }
 
@@ -220,6 +228,8 @@ impl<'a> InlineSpan<'a> {
             text,
             style,
             kind: SpanKind::Code,
+            decor: Decorations::NONE,
+            link: None,
         }
     }
 
@@ -228,6 +238,8 @@ impl<'a> InlineSpan<'a> {
             text,
             style,
             kind: SpanKind::Object,
+            decor: Decorations::NONE,
+            link: None,
         }
     }
 
@@ -236,6 +248,8 @@ impl<'a> InlineSpan<'a> {
             text: "",
             style,
             kind: SpanKind::HardBreak,
+            decor: Decorations::NONE,
+            link: None,
         }
     }
 }
@@ -248,6 +262,8 @@ pub fn paragraph_from_spans(
 ) -> Result<Paragraph, RuleError> {
     let mut builder = Builder::new();
     for span in spans {
+        builder.decor = span.decor;
+        builder.link = span.link;
         match span.kind {
             SpanKind::Text => builder.push_text(span.text, span.style),
             SpanKind::Code => {
@@ -274,10 +290,13 @@ pub fn paragraph_from_spans(
 /// Shared state for both entry points. `pending_space` lives here so it carries
 /// across spans: a trailing space in one run produces the same glue as a space
 /// inside one run.
-struct Builder {
+struct Builder<'a> {
     atoms: Vec<Atom>,
     boundaries: Vec<Boundary>,
     join: Join,
+    /// Decorations and link of the span currently being pushed.
+    decor: Decorations,
+    link: Option<&'a str>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -287,12 +306,14 @@ enum Join {
     Forced,
 }
 
-impl Builder {
+impl<'a> Builder<'a> {
     fn new() -> Self {
         Self {
             atoms: Vec::new(),
             boundaries: Vec::new(),
             join: Join::Normal,
+            decor: Decorations::NONE,
+            link: None,
         }
     }
 
@@ -320,6 +341,8 @@ impl Builder {
             class,
             style,
             join,
+            self.decor,
+            self.link,
         );
         self.join = Join::Normal;
     }
@@ -442,6 +465,7 @@ pub fn paragraph_from_lines(
     merged.ok_or(RuleError::EmptyText)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_atom(
     atoms: &mut Vec<Atom>,
     boundaries: &mut Vec<Boundary>,
@@ -450,6 +474,8 @@ fn push_atom(
     class: PunctClass,
     style: StyleId,
     join: Join,
+    decor: Decorations,
+    link: Option<&str>,
 ) {
     let full_width = text.chars().next().is_some_and(is_full_width_punct);
     let (mut compress_left, compress_right) = trim_caps(class, full_width);
@@ -467,6 +493,8 @@ fn push_atom(
         kind,
         class,
         style,
+        decor,
+        link: link.map(Arc::from),
         compress_left,
         compress_right,
     };

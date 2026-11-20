@@ -6,7 +6,8 @@
 
 use soma_core::{
     break_paragraph, Align, Atom, AtomKind, Boundary, BoundaryKind, BreakConfig, BreakError,
-    Breakability, Glue, Paragraph, ParagraphStyle, PunctClass, StyleId, SyntheticMetrics, Width,
+    Breakability, Decorations, Glue, Paragraph, ParagraphStyle, PunctClass, StyleId,
+    SyntheticMetrics, Width,
 };
 
 fn two_atom_paragraph(align: Align) -> Paragraph {
@@ -23,6 +24,8 @@ fn two_atom_paragraph(align: Align) -> Paragraph {
                 kind: AtomKind::Cjk,
                 class: PunctClass::None,
                 style: StyleId(0),
+                decor: Decorations::NONE,
+                link: None,
                 compress_left: Width::ZERO,
                 compress_right: Width::ZERO,
             },
@@ -31,6 +34,8 @@ fn two_atom_paragraph(align: Align) -> Paragraph {
                 kind: AtomKind::Cjk,
                 class: PunctClass::None,
                 style: StyleId(0),
+                decor: Decorations::NONE,
+                link: None,
                 compress_left: Width::ZERO,
                 compress_right: Width::ZERO,
             },

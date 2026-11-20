@@ -126,7 +126,7 @@ Cumulative public test files:
 | `effect.rs` (eval) | 7 | Gate Q′ structural claims on the scorecard |
 | `engine.rs` | 15 | `soma.engine/1`: parse, reject, canonical hash, layout equivalence |
 | `corpus.rs` (eval) | 9 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
-| `a5_md.rs` | 14 | Markdown subset, inlines, spans, index extension, front matter, validity |
+| `a5_md.rs` | 15 | Markdown subset, inlines (including GFM `~~`), spans, index extension, front matter, validity |
 | `html.rs` (html) | 9 | HTML subset shapes, table grid, degradation, recovery, pipeline |
 | `latex.rs` (latex) | 15 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, recovery, pipeline |
 | `math.rs` (soma-math) | 26 | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, spacing, styles, errors |
@@ -146,7 +146,7 @@ Cumulative public test files:
 | `cli.rs` (soma-cli) | 17 | render md/tex to html/svg/json/pdf, template geometry, TOC template, example book, fonts, `--metrics`, `--out`, check, error paths |
 | `blind_pipeline.rs` (eval) | 3 | dry-run fixture through key + statistics + decision |
 | `k7_object_metrics.rs` | 4 | object hooks vs text paths, default-hook equivalence |
-| `pdf.rs` (render-pdf) | 9 | TrueType cmap/subset, CFF subset and `/CIDFontType0`, name-keyed promotion, `seac` composite, CFF2 refusal, PDF objects, bookmarks, byte determinism |
+| `pdf.rs` (render-pdf) | 10 | TrueType cmap/subset, CFF subset and `/CIDFontType0`, name-keyed promotion, `seac` composite, CFF2 refusal, PDF objects, bookmarks, underlines and `/Annots`, byte determinism |
 | `math.rs` (svg) | 4 | exact formula coordinates |
 | `inline_math.rs` (svg) | 2 | inline items on the line baseline, marker never drawn |
 | `math.rs` (html) | 4 | formula preview spans, placeholder fallback |
@@ -167,9 +167,9 @@ Cumulative public test files:
 | `soma-core` vertical unit | 1 | vertical cost model hash |
 | core unit | 24 | IR, units, breaker, result, presets |
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
-| render-pdf unit | 9 | CFF INDEX round trip, glyph-preserving subset with identity charset, name-keyed promotion, `seac` expansion placed point by point, five deflate round trips against an independent decoder |
+| render-pdf unit | 17 | CFF INDEX round trip, glyph-preserving subset with identity charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check |
 
-Total: **572 tests**.
+Total: **582 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

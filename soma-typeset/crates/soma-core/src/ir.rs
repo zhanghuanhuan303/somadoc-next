@@ -111,6 +111,43 @@ pub struct Boundary {
     pub penalty: i32,
 }
 
+/// Inline decorations carried from the source to the renderers.
+///
+/// The breaker never reads this: an underline does not change a width or a
+/// break opportunity, it only changes what the renderer paints.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Decorations(u8);
+
+impl Decorations {
+    pub const NONE: Self = Self(0);
+    pub const UNDERLINE: Self = Self(1);
+    pub const STRIKETHROUGH: Self = Self(2);
+
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    pub const fn from_bits(bits: u8) -> Self {
+        Self(bits)
+    }
+
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+}
+
 /// One unbreakable unit of ink.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Atom {
@@ -118,6 +155,10 @@ pub struct Atom {
     pub kind: AtomKind,
     pub class: PunctClass,
     pub style: StyleId,
+    /// Underline and friends, from the inline that produced this atom.
+    pub decor: Decorations,
+    /// Link target, when the atom came from a link.
+    pub link: Option<alloc::sync::Arc<str>>,
     /// Maximum amount that may be trimmed from the left edge when this atom
     /// starts a line.
     pub compress_left: Width,
@@ -252,6 +293,8 @@ mod tests {
             kind: AtomKind::Cjk,
             class: PunctClass::None,
             style: StyleId(0),
+            decor: Decorations::NONE,
+            link: None,
             compress_left: Width::ZERO,
             compress_right: Width::ZERO,
         }

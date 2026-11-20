@@ -47,6 +47,20 @@ only).
 | [0029](0029-cli.md) | `soma` CLI: one source + one template to HTML/SVG/canonical JSON | Accepted |
 | [0030](0030-math-completion.md) | Math completion: stretched fences, matrices/aligned, math metrics face, text-style constants | Accepted |
 | [0031](0031-alignment-and-cover.md) | Alignment as a layout pass (`left` in the kernel, `center`/`right` shifted), generated cover page | Accepted |
+| [0032](0032-numbering-and-front-matter.md) | Heading levels, generated numbers, front matter, TOC lists | Accepted |
+| [0033](0033-captions-outline-index.md) | Caption styles, wrapping contents rows, outlines and indexes | Accepted |
+| [0034](0034-pdf-backend.md) | PDF output with embedded TrueType subsets, bookmarks and page labels | Accepted |
+| [0035](0035-metrics-from-pdf-font.md) | Layout metrics can come from the same font the PDF embeds | Accepted |
+| [0036](0036-line-end-punctuation.md) | Line-end punctuation pays only for its ink | Accepted |
+| [0037](0037-punctuation-ink.md) | Punctuation ink from the outline, not a class constant | Accepted |
+| [0038](0038-glyph-edges.md) | Every glyph edge, not just a mark's | Accepted |
+| [0039](0039-cff-outlines.md) | CFF outlines in the PDF backend (CID-keyed) | Accepted |
+| [0040](0040-name-keyed-cff.md) | name-keyed CFF promoted to CID-keyed; `seac` expanded | Accepted |
+| [0041](0041-space-shrink-and-overfull.md) | A space gives up a third; an overfull line is not a break | Accepted |
+| [0042](0042-no-fitness-dp.md) | Fitness demerits are not worth four times the DP | Accepted |
+| [0043](0043-pdf-flate.md) | PDF streams are deflated; fixed Huffman | Accepted; superseded in part by 0045 |
+| [0044](0044-decorations-and-links.md) | Underlines and links cross the layers as atom attributes | Accepted |
+| [0045](0045-dynamic-huffman.md) | The deflate encoder builds a dynamic Huffman table when it pays | Accepted |
 
 ## Rules
 

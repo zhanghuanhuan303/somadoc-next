@@ -3,8 +3,8 @@
 use soma_core::{BreakConfig, SyntheticMetrics};
 use soma_doc::block::Heading;
 use soma_doc::node::NodeMeta;
-use soma_doc::{Block, Document, Text};
-use soma_layout::{layout, PagedLayout};
+use soma_doc::{Block, Container, Document, Inline, Link, Text};
+use soma_layout::{layout, PagedLayout, TextSource};
 use soma_render_pdf::{render, PdfFont, PdfFonts, PdfMetadata, ProgramKind};
 use soma_template::{parse_template, resolve, StyledDoc};
 
@@ -187,6 +187,43 @@ fn cff2_is_rejected_with_a_clear_error() {
         Err(error) => error,
     };
     assert!(error.reason.contains("CFF2"), "{}", error.reason);
+}
+
+#[test]
+fn underlines_and_links_reach_the_page() {
+    let link = Link::new(
+        NodeMeta::synthesized(),
+        "https://example.com/a(b)",
+        vec![text("链接")],
+    );
+    let underline = Container::new(NodeMeta::synthesized(), vec![text("下划线")]);
+    let blocks = vec![Block::Paragraph(soma_doc::block::Paragraph::new(
+        NodeMeta::synthesized(),
+        vec![Inline::Link(link), text(" "), Inline::Underline(underline)],
+    ))];
+    let (layout, styled) = build(blocks);
+    let pdf = render_pdf(&layout, &styled);
+    let text = String::from_utf8_lossy(&pdf);
+    assert!(text.contains("/Subtype /Link"), "a link is an annotation");
+    assert!(
+        text.contains("/URI (https://example.com/a\\(b\\))"),
+        "the URI is an escaped PDF string"
+    );
+    // The content stream is deflated, so the rule itself is checked by the
+    // painter's unit test; here the decoration only has to reach the renderer.
+    let underlined = layout
+        .pages
+        .iter()
+        .flat_map(|page| page.blocks.iter())
+        .any(|block| {
+            (block.line_offset..block.line_offset + 8).any(|atom| {
+                layout
+                    .text
+                    .atom_decorations(block.node, atom)
+                    .contains(soma_core::Decorations::UNDERLINE)
+            })
+        });
+    assert!(underlined, "the underline reaches the text index");
 }
 
 #[test]

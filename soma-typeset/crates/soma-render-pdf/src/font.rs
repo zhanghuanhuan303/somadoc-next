@@ -75,6 +75,8 @@ pub struct PdfFont {
     descent: i16,
     bbox: [i16; 4],
     italic_angle: i16,
+    underline_position: i16,
+    underline_thickness: i16,
     cap_height: i16,
     bold: bool,
     serif: bool,
@@ -107,10 +109,24 @@ impl PdfFont {
         let descent = read_i16(&data, hhea + 6)?;
         let widths = parse_widths(&data, &face)?;
         let mut italic_angle = 0i16;
+        // `post`'s header carries the underline geometry in every version, so
+        // a version 3 face still answers with real values (ADR-0044).
+        let mut underline_position = -(upem as i16) / 10;
+        let mut underline_thickness = (upem as i16) / 20;
         if let Some(post) = face.find(b"post") {
             if post.length >= 8 {
                 let raw = read_u32(&data, post.offset + 4)?;
                 italic_angle = ((raw >> 16) & 0xFFFF) as u16 as i16;
+            }
+            if post.length >= 12 {
+                let position = read_i16(&data, post.offset + 8)?;
+                let thickness = read_i16(&data, post.offset + 10)?;
+                if position < 0 {
+                    underline_position = position;
+                }
+                if thickness > 0 {
+                    underline_thickness = thickness;
+                }
             }
         }
         let mut cap_height = ascent;
@@ -139,6 +155,8 @@ impl PdfFont {
             descent,
             bbox,
             italic_angle,
+            underline_position,
+            underline_thickness,
             cap_height,
             bold,
             serif: false,
@@ -301,6 +319,8 @@ impl PdfFont {
                 scale(self.bbox[3]),
             ],
             italic_angle: self.italic_angle as i32,
+            underline_position: scale(self.underline_position),
+            underline_thickness: scale(self.underline_thickness).max(1),
             flags: 4 | if self.serif { 2 } else { 0 } | if self.bold { 262144 } else { 0 },
         }
     }
@@ -388,6 +408,10 @@ pub struct PdfFontDescriptor {
     pub ascent: i32,
     pub descent: i32,
     pub cap_height: i32,
+    /// Baseline-relative underline geometry, in 1000-unit space. The position
+    /// is negative below the baseline.
+    pub underline_position: i32,
+    pub underline_thickness: i32,
     pub bbox: [i32; 4],
     pub italic_angle: i32,
     pub flags: u32,

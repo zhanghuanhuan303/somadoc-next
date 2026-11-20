@@ -23,6 +23,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt::Write;
 
+use soma_core::Decorations;
 use soma_layout::{BoxKind, MathBox, OutlineEntry, PagedLayout, PlacedBlock, TextSource};
 use soma_template::{ComputedStyle, FontWeight, StyledDoc};
 
@@ -110,7 +111,7 @@ pub fn render(
 
     let mut page_ids = Vec::with_capacity(layout.pages.len());
     for page in &layout.pages {
-        let content = paint_page(layout, styles, text, fonts, scale, page);
+        let (content, links) = paint_page(layout, styles, text, fonts, scale, page);
         let content_id = pdf.reserve();
         pdf.set(content_id, stream_flate(b"", &content));
 
@@ -118,9 +119,10 @@ pub fn render(
         for (role, font) in &embedded {
             let _ = write!(font_resources, "/{} {} 0 R ", role.resource(), font.type0);
         }
+        let annotations = link_annotations(&links);
         let page_id = pdf.reserve();
         let body = format!(
-            "<< /Type /Page /Parent {pages_object} 0 R /MediaBox [0 0 {} {}] /Resources << /Font << {font_resources}>> >> /Contents {content_id} 0 R >>",
+            "<< /Type /Page /Parent {pages_object} 0 R /MediaBox [0 0 {} {}] /Resources << /Font << {font_resources}>> >> /Contents {content_id} 0 R{annotations} >>",
             number(scale.milli(layout.page.width.0)),
             number(scale.milli(layout.page.height.0))
         );
@@ -417,6 +419,27 @@ fn embed_font(
     EmbeddedFont { type0 }
 }
 
+/// `/Annots` entries for a page's links, or an empty string when it has none.
+fn link_annotations(links: &[Link]) -> String {
+    if links.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(" /Annots [");
+    for link in links {
+        let _ = write!(
+            out,
+            "<< /Type /Annot /Subtype /Link /Rect [{} {} {} {}] /Border [0 0 0] /A << /S /URI /URI {} >> >> ",
+            number(link.rect[0]),
+            number(link.rect[1]),
+            number(link.rect[2]),
+            number(link.rect[3]),
+            pdf_string(&link.uri)
+        );
+    }
+    out.push(']');
+    out
+}
+
 fn to_unicode(entries: &[(u16, u32)]) -> Vec<u8> {
     let mut body = String::new();
     body.push_str(
@@ -454,7 +477,7 @@ fn paint_page(
     fonts: &PdfFonts<'_>,
     scale: Scale,
     page: &soma_layout::Page,
-) -> Vec<u8> {
+) -> (Vec<u8>, Vec<Link>) {
     let mut painter = Painter {
         out: Vec::new(),
         scale,
@@ -462,6 +485,7 @@ fn paint_page(
         text_open: false,
         font: None,
         size: 0,
+        links: Vec::new(),
     };
     for block in &page.blocks {
         paint_block(&mut painter, layout, styles, text, fonts, block, 0);
@@ -485,7 +509,13 @@ fn paint_page(
         );
     }
     painter.end_text();
-    painter.out
+    (painter.out, painter.links)
+}
+
+/// A link rectangle on the page, in milli-points.
+struct Link {
+    rect: [i64; 4],
+    uri: String,
 }
 
 struct Painter {
@@ -495,11 +525,49 @@ struct Painter {
     text_open: bool,
     font: Option<Role>,
     size: i64,
+    links: Vec<Link>,
 }
 
 impl Painter {
     fn emit(&mut self, value: &str) {
         self.out.extend_from_slice(value.as_bytes());
+    }
+
+    /// Fill a rectangle in layout units, in the current fill colour.
+    fn rule(&mut self, x: i32, y: i32, width: i32, height: i32) {
+        if width <= 0 || height <= 0 {
+            return;
+        }
+        self.end_text();
+        let line = format!(
+            "{} {} {} {} re f\n",
+            number(self.scale.milli(x)),
+            number(self.scale.milli(y)),
+            number(self.scale.milli(width)),
+            number(self.scale.milli(height))
+        );
+        self.emit(&line);
+    }
+
+    /// Record a link rectangle, merging with the previous one when the two run
+    /// on and point at the same target.
+    fn link(&mut self, rect: [i64; 4], uri: &str) {
+        if let Some(last) = self.links.last_mut() {
+            // Advances round to the milli-point, so a run's pieces can overlap
+            // by a unit; treat anything that close as touching.
+            if last.uri == uri
+                && last.rect[1] == rect[1]
+                && last.rect[3] == rect[3]
+                && (rect[0] - last.rect[2]).abs() <= 128
+            {
+                last.rect[2] = rect[2];
+                return;
+            }
+        }
+        self.links.push(Link {
+            rect,
+            uri: String::from(uri),
+        });
     }
 
     fn set_fill(&mut self, value: u32) {
@@ -571,6 +639,29 @@ impl Painter {
         );
         self.emit(&line);
     }
+}
+
+/// The rectangle an underline or a strikethrough occupies, in layout units,
+/// anchored at the PDF's bottom-left corner.
+///
+/// `offset` is the distance from the baseline to the top of the rule, positive
+/// downwards, which is how the font's `post` table states the underline
+/// position. Baselines count down from the page top, while a PDF rectangle
+/// grows up from the page bottom, so the vertical pass is flipped here — the
+/// one place that knows both conventions.
+#[allow(clippy::too_many_arguments)]
+fn decoration_rect(
+    em: i32,
+    thickness_1000: i32,
+    x: i32,
+    advance: i32,
+    baseline: i32,
+    page_height: i32,
+    offset: i32,
+) -> [i32; 4] {
+    let thickness = (em as i64 * thickness_1000 as i64 / 1000).max(1) as i32;
+    let top = baseline + offset;
+    [x, page_height - top - thickness, advance, thickness]
 }
 
 fn paint_block(
@@ -699,6 +790,56 @@ fn paint_block(
                     .collect(),
             };
             painter.show(painter.scale.milli(x), painter.scale.milli(y), &glyphs);
+
+            // Decorations and links are decided by the source, not the style:
+            // the renderer only asks the text index what the author asked for.
+            let decorations = text.atom_decorations(block.node, atom.atom);
+            if !decorations.is_empty() {
+                // Rules are painted in layout units, so the font's 1000-unit
+                // underline metrics scale by the atom's em, never by the
+                // milli-point size (ADR-0044).
+                let descriptor = font.descriptor();
+                let em = atom_style.font_size.0;
+                let advance = atom.advance.0;
+                let page_height = layout.page.height.0;
+                if decorations.contains(Decorations::UNDERLINE) {
+                    let rect = decoration_rect(
+                        em,
+                        descriptor.underline_thickness,
+                        x,
+                        advance,
+                        baseline,
+                        page_height,
+                        descriptor.underline_position.unsigned_abs() as i32,
+                    );
+                    painter.rule(rect[0], rect[1], rect[2], rect[3]);
+                }
+                if decorations.contains(Decorations::STRIKETHROUGH) {
+                    let rect = decoration_rect(
+                        em,
+                        descriptor.underline_thickness,
+                        x,
+                        advance,
+                        baseline,
+                        page_height,
+                        -em * 3 / 10,
+                    );
+                    painter.rule(rect[0], rect[1], rect[2], rect[3]);
+                }
+            }
+            if let Some(uri) = text.atom_link(block.node, atom.atom) {
+                let top = baseline - placed.line.ascent.0;
+                let bottom = baseline + placed.line.descent.0;
+                painter.link(
+                    [
+                        painter.scale.milli(x),
+                        painter.scale.milli(layout.page.height.0 - bottom),
+                        painter.scale.milli(x + atom.advance.0),
+                        painter.scale.milli(layout.page.height.0 - top),
+                    ],
+                    uri,
+                );
+            }
         }
     }
 }
@@ -1080,5 +1221,74 @@ fn roman(value: &str) -> Option<u32> {
         None
     } else {
         Some(total)
+    }
+}
+
+#[cfg(test)]
+mod painter_tests {
+    use super::{decoration_rect, Painter, Scale};
+
+    fn painter() -> Painter {
+        Painter {
+            out: Vec::new(),
+            scale: Scale { num: 1, den: 1 },
+            fill: None,
+            text_open: false,
+            font: None,
+            size: 0,
+            links: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_rule_is_a_filled_rectangle() {
+        let mut painter = painter();
+        // One em is 4096 layout units, so these are 10, 20, 30 and 2 points.
+        let em = soma_core::UNITS_PER_EM;
+        painter.rule(em * 10, em * 20, em * 30, em * 2);
+        assert_eq!(
+            String::from_utf8_lossy(&painter.out),
+            "10.000 20.000 30.000 2.000 re f\n",
+            "an underline is a filled rule, not a stroke"
+        );
+    }
+
+    #[test]
+    fn an_underline_sits_below_the_baseline() {
+        // A body-em atom with a 50/1000 underline under a baseline 10000 units
+        // down a 40000-unit page. The rule must land inside the text band, not
+        // at the page bottom (ADR-0044).
+        let rect = decoration_rect(4096, 50, 700, 3000, 10_000, 40_000, 512);
+        assert_eq!(rect[0], 700);
+        assert_eq!(rect[2], 3000);
+        assert_eq!(rect[3], 204, "50/1000 of one em, in layout units");
+        // The rectangle's top edge is baseline + offset, measured from the page
+        // top, so it flips to 40000 - 10512 - 204 from the bottom.
+        assert_eq!(rect[1], 40_000 - 10_512 - 204);
+        assert_eq!(rect[1] + rect[3], 40_000 - 10_512);
+    }
+
+    #[test]
+    fn a_strikeout_sits_above_the_baseline() {
+        let rect = decoration_rect(4096, 50, 0, 1000, 10_000, 40_000, -4096 * 3 / 10);
+        assert_eq!(rect[1] + rect[3], 40_000 - 10_000 + 1228);
+    }
+
+    #[test]
+    fn a_hairline_underline_is_at_least_one_unit() {
+        // A font that reports 0 thickness still gets a drawable rule.
+        let rect = decoration_rect(4096, 0, 0, 1000, 100, 10_000, 100);
+        assert_eq!(rect[3], 1);
+    }
+
+    #[test]
+    fn adjacent_links_with_one_target_merge() {
+        let mut painter = painter();
+        painter.link([0, 0, 10, 12], "https://a");
+        painter.link([10, 0, 25, 12], "https://a");
+        painter.link([0, 40, 10, 52], "https://a");
+        painter.link([0, 0, 5, 12], "https://b");
+        assert_eq!(painter.links.len(), 3);
+        assert_eq!(painter.links[0].rect, [0, 0, 25, 12]);
     }
 }

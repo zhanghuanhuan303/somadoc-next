@@ -2,7 +2,7 @@
 
 use soma_core::{
     break_paragraph, break_paragraph_greedy, Align, Atom, AtomKind, Boundary, BoundaryKind,
-    BoundaryRole, BreakConfig, BreakError, Breakability, Glue, GreedyMode, Paragraph,
+    BoundaryRole, BreakConfig, BreakError, Breakability, Decorations, Glue, GreedyMode, Paragraph,
     ParagraphStyle, ParamSet, PunctClass, StyleId, SyntheticMetrics, Width,
 };
 
@@ -12,6 +12,8 @@ fn atom(text: &str) -> Atom {
         kind: AtomKind::Cjk,
         class: PunctClass::None,
         style: StyleId(0),
+        decor: Decorations::NONE,
+        link: None,
         compress_left: Width::ZERO,
         compress_right: Width::ZERO,
     }

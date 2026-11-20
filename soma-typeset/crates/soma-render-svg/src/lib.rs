@@ -151,8 +151,18 @@ fn render_block_at(
             let x = layout.page.margin_left.0 + block.x.0 + atom.x.0;
             let y =
                 layout.page.margin_top.0 + block.y.0 + extra_y + placed.y.0 + placed.line.ascent.0;
+            let decorations = text.atom_decorations(block.node, atom.atom);
+            let decoration = if decorations.contains(soma_core::Decorations::UNDERLINE) {
+                " text-decoration=\"underline\""
+            } else if decorations.contains(soma_core::Decorations::STRIKETHROUGH) {
+                " text-decoration=\"line-through\""
+            } else {
+                ""
+            };
+            // SVG is a preview like HTML, so it does not create external
+            // references either; the PDF annotation is the actionable copy.
             out.push_str(&format!(
-                "<text data-page=\"{page}\" data-node=\"{}\" data-atom=\"{}\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>\n",
+                "<text data-page=\"{page}\" data-node=\"{}\" data-atom=\"{}\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\"{decoration}>{}</text>\n",
                 block.node.0,
                 atom.atom,
                 em(Width(x)),

@@ -1526,7 +1526,7 @@ fn prefix_sums(values: &[i64]) -> Vec<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{Atom, AtomKind, Boundary, Glue, ParagraphStyle, PunctClass};
+    use crate::ir::{Atom, AtomKind, Boundary, Decorations, Glue, ParagraphStyle, PunctClass};
     use crate::metrics::{StyleId, SyntheticMetrics};
     use alloc::string::ToString;
     use alloc::vec;
@@ -1537,6 +1537,8 @@ mod tests {
             kind,
             class,
             style: StyleId(0),
+            decor: Decorations::NONE,
+            link: None,
             compress_left: Width::ZERO,
             compress_right: Width::ZERO,
         }

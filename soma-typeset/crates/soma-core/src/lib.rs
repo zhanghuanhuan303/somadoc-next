@@ -26,8 +26,8 @@ pub use breaker::{
     GreedyMode, KpTrace, LineTrace, Window,
 };
 pub use ir::{
-    Align, Atom, AtomKind, Boundary, BoundaryKind, BoundaryRole, Breakability, Glue, IrError,
-    Paragraph, ParagraphStyle, PunctClass,
+    Align, Atom, AtomKind, Boundary, BoundaryKind, BoundaryRole, Breakability, Decorations, Glue,
+    IrError, Paragraph, ParagraphStyle, PunctClass,
 };
 pub use metrics::{GlyphMetrics, LineMetrics, Metrics, StyleId, SyntheticMetrics};
 pub use params::{
