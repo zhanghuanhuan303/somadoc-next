@@ -1379,6 +1379,7 @@ fn run() -> Result<(), String> {
                 .map(|advance| scale(*advance as i32, upem))
         };
 
+        let outlines = font.table(b"glyf").is_some();
         let space = width(0x20).unwrap_or(scale(upem / 2, upem));
         let mut entries: Vec<(u32, i32)> = Vec::new();
         let mut blocks: Vec<(u32, u32, i32)> = Vec::new();
@@ -1398,8 +1399,15 @@ fn run() -> Result<(), String> {
             if covered.is_empty() {
                 continue;
             }
-            match modal(&values) {
-                Some((value, count)) if count * 10 >= values.len() * 9 => {
+            // A block says "these advances agree", and `Face::has` can only
+            // treat it as coverage when the per-glyph list is authoritative —
+            // that list is `glyph_ink`, which needs `glyf`. Without it a block
+            // would over-report: Noto CJK has no U+2A6A5, but a sparse
+            // extension-B block would claim it and the rescue face would be
+            // skipped (ADR-0039).
+            let uniform = modal(&values);
+            match uniform {
+                Some((value, count)) if outlines && count * 10 >= values.len() * 9 => {
                     blocks.push((start, end, value));
                     for cp in covered {
                         let advance = width(cp).unwrap();
@@ -1466,7 +1474,7 @@ fn run() -> Result<(), String> {
         // any character, and with fallback it can land on a face other than the
         // body's (ADR-0038).
         let mut glyph_ink: Vec<(u32, u8, u8)> = Vec::new();
-        if font.table(b"glyf").is_some() {
+        if outlines {
             for (&codepoint, &gid) in &map {
                 if spec.latin_only && codepoint >= 0x3000 {
                     continue;

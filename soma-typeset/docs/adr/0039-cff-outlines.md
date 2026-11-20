@@ -115,6 +115,13 @@ already `Adobe-Identity-0`.
 - A name-keyed CFF face fails at `PdfFont::subset` with a message that names
   the reason and the alternatives; it does not fail at PDF render time with a
   generic error. This is D85.
+- A metrics table for a CFF face records every covered codepoint instead of
+  collapsing uniform ranges into blocks. `Face::has` treats the per-glyph ink
+  list as authoritative and blocks as a hint, and that list needs `glyf`; a
+  block would therefore claim characters the face does not have. Noto CJK has
+  no U+2A6A5, but a sparse extension-B block claimed it, the rescue face was
+  skipped, and the glyph reached the page as `.notdef`. The table is ~2x larger
+  for a CJK CFF face; the alternative is a schema version.
 - `metrics-gen --audit` keeps its `glyf` requirement for **ink**: `ink_bounds`
   reads `glyf`. A CFF face still reports `no-outlines` there, but that verdict
   now means "this tool cannot measure its marks", not "the PDF backend cannot
