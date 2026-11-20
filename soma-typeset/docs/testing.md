@@ -142,6 +142,7 @@ Cumulative public test files:
 | `e20_index.rs` (layout) | 5 | sorted unique terms, page lists, own page, entry styles, empty index |
 | `e21_line_end_punctuation.rs` (layout) | 6 | trailing bearing trimmed on justified lines, ink on the text edge, ragged lines untouched |
 | `e22_fallback.rs` (layout) | 2 | a rescue face measures the glyph and its edge is what a line end trims |
+| `e23_space_shrink.rs` (layout) | 2 | a space gives up at most a third of itself; an unbreakable word still lays out |
 | `cli.rs` (soma-cli) | 17 | render md/tex to html/svg/json/pdf, template geometry, TOC template, example book, fonts, `--metrics`, `--out`, check, error paths |
 | `blind_pipeline.rs` (eval) | 3 | dry-run fixture through key + statistics + decision |
 | `k7_object_metrics.rs` | 4 | object hooks vs text paths, default-hook equivalence |
@@ -168,7 +169,7 @@ Cumulative public test files:
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 | render-pdf unit | 4 | CFF INDEX round trip, glyph-preserving subset with identity charset, name-keyed promotion, `seac` expansion placed point by point |
 
-Total: **563 tests**.
+Total: **565 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.

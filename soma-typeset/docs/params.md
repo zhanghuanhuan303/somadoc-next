@@ -328,7 +328,7 @@ pub struct ParamError {
 
 ```json
 {
-  "modelVersion": 1,
+  "modelVersion": 2,
   "preset": "default-v1",
   "rulesVersion": 3,
   "metricsVersion": 2,

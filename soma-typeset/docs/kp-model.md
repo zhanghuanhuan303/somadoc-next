@@ -140,12 +140,16 @@ E < 0   → 行不足（underfull）
         否则:
             r = -E' / H
             overfull = E' > H
+            若 overfull:
+                正常阶段：不可行
+                fallback：cost += emergency；emergency = true
 ```
 
 - **`S == 0 && D > 0` 不是完美行。** 它表示这一行没有任何可拉伸的边界，正常阶段必须进入 fallback；`BADNESS_RATIO_CLAMP` 是「无有限比例」的哨兵，不是物理比例。这样不会把「不足但无法拉伸」误判为 `r = 0`。
 - **`H == 0 && E' > 0`** 同理；同时 `overfull = true`，因为即使耗尽名义 shrink 也放不下。
-- **`overfull` 的精确含义**是裁剪后 `E' > H`：名义 shrink 全部用尽仍超宽。它是**质量标记**，不是 fallback 阶段；只要 `|r| <= tol`，它可以在 `Normal` 阶段出现。`0 < E' <= H` 但 `|r| > tol` 是「超过容差但仍可压缩」，正常阶段不可行，fallback 记 `emergency`，不记 `overfull`。这与 Greedy-F 的标记语义一致。
+- **`overfull` 的精确含义**是裁剪后 `E' > H`：名义 shrink 全部用尽仍超宽。这就是 TeX 的 overfull box，badness 无穷，因此**正常阶段不可行**，只能经 fallback 到达（`cost += emergency`，`emergency = true`）。ADR-0041 之前它只是标记，结果是一行可以声明 `overfull: true` 却照样按 `-E'` 压缩、把词间空挤到粘连。`0 < E' <= H` 但 `|r| > tol` 是「超过容差但仍可压缩」，同样走 fallback，只是不记 `overfull`。
 - **末行 / 强制段尾例外：** 它们不齐行，`adjustment = 0`，不进入上面的 S/H 分支；只允许 trim。裁剪后 `E' > 0` 时正常阶段不可行，fallback 记 `overfull + emergency`。
+- **词间空的可压缩量是字体相关的：** 规则层给出 1/8 em 的上限，`soma-layout` 再把它夹到 `space_advance / 3`（TeX 的 space glue）。固定 em 在窄空字体上等于允许 40% 以上的压缩，宽空字体上又过于保守（ADR-0041）。
 - `emergency_stretch > 0` 时，fallback 先把它加入 `S`；此时 `S > 0`，不需要哨兵。
 - 可行性：`|r| <= tol`。`tol` 用千分比整数表示，例如 `tol = 1000` 表示 1.0。
 - **`r` 与 TeX 的 tolerance 不是同一量。** TeX 的 `\tolerance=200` 是 badness 阈值；在 `p=3`、`scale=100` 下约对应 `|r| ≈ 1.26`。`default-v1` 的 `3000‰ = 3.0` 更宽松，它只是硬上限，不是首选比例；接近上限的行会被 badness 强烈惩罚。
