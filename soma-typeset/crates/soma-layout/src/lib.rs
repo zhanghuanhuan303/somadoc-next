@@ -374,6 +374,26 @@ pub trait TextSource {
     fn uses_fallback(&self, _block: NodeId, _atom: u32) -> bool {
         false
     }
+
+    /// Image source of a figure block, exactly as the document wrote it.
+    ///
+    /// The renderer does not open files; it hands this string to the caller's
+    /// [`ImageSource`] so the same layout can be rendered from another asset
+    /// root (ADR-0047).
+    fn block_image(&self, _block: NodeId) -> Option<&str> {
+        None
+    }
+
+    /// Alt text of a figure, for the tagged-PDF `/Alt` entry.
+    fn block_alt(&self, _block: NodeId) -> Option<&str> {
+        None
+    }
+
+    /// Heading level of a heading block; `None` for every other block. The
+    /// tagged PDF maps it to `/H1`…`/H6`.
+    fn block_heading_level(&self, _block: NodeId) -> Option<u8> {
+        None
+    }
 }
 
 /// Owned atom text per DocIR block. Built while laying out, so the renderer
@@ -383,6 +403,10 @@ pub struct TextIndex {
     entries: Vec<(NodeId, Vec<TextEntry>)>,
     /// Atoms drawn by a rescue face, `(node, atom)`, sorted at `finish`.
     fallbacks: Vec<(u32, u32)>,
+    /// Figures: `(node, source, alt text)`, sorted at `finish`.
+    figures: Vec<(NodeId, String, Option<String>)>,
+    /// Heading levels, `(node, level)`, sorted at `finish`.
+    headings: Vec<(NodeId, u8)>,
     /// Highest node id inserted so far. Tracked explicitly: `entries` is only
     /// sorted at `finish`, so the last element is not the maximum while blocks
     /// are still being added (the TOC adds ids above the document's).
@@ -403,10 +427,21 @@ impl TextIndex {
         self.fallbacks.push((node.0, atom));
     }
 
+    fn mark_figure(&mut self, node: NodeId, src: &str, alt: Option<&str>) {
+        self.figures
+            .push((node, String::from(src), alt.map(String::from)));
+    }
+
+    fn mark_heading(&mut self, node: NodeId, level: u8) {
+        self.headings.push((node, level));
+    }
+
     fn finish(&mut self) {
         self.entries.sort_by_key(|(node, _)| *node);
         self.fallbacks.sort_unstable();
         self.fallbacks.dedup();
+        self.figures.sort_by_key(|(node, _, _)| *node);
+        self.headings.sort_by_key(|(node, _)| *node);
     }
 
     fn max_node(&self) -> u32 {
@@ -448,6 +483,27 @@ impl TextSource for TextIndex {
 
     fn uses_fallback(&self, block: NodeId, atom: u32) -> bool {
         self.fallbacks.binary_search(&(block.0, atom)).is_ok()
+    }
+
+    fn block_image(&self, block: NodeId) -> Option<&str> {
+        self.figures
+            .binary_search_by_key(&block, |(node, _, _)| *node)
+            .ok()
+            .map(|index| self.figures[index].1.as_str())
+    }
+
+    fn block_alt(&self, block: NodeId) -> Option<&str> {
+        self.figures
+            .binary_search_by_key(&block, |(node, _, _)| *node)
+            .ok()
+            .and_then(|index| self.figures[index].2.as_deref())
+    }
+
+    fn block_heading_level(&self, block: NodeId) -> Option<u8> {
+        self.headings
+            .binary_search_by_key(&block, |(node, _)| *node)
+            .ok()
+            .map(|index| self.headings[index].1)
     }
 }
 
@@ -1258,6 +1314,7 @@ impl Builder<'_> {
                     if let Some(item) =
                         self.paragraph_item(node.meta.id, BoxKind::Heading, &inlines, style)?
                     {
+                        self.text.mark_heading(node.meta.id, node.level);
                         items.push(item);
                         self.headings.push(Heading {
                             item: index,
@@ -2961,6 +3018,8 @@ impl Builder<'_> {
         style_id: StyleId,
     ) -> Result<FlowItem, LayoutError> {
         let computed = self.computed(style_id);
+        self.text
+            .mark_figure(node, &image.src, image.alt.as_deref());
         let width = self.content_width;
         let height = match image.intrinsic {
             Some(intrinsic) if intrinsic.width_px > 0 => {

@@ -16,10 +16,10 @@ use std::process::ExitCode;
 use soma_core::{BreakConfig, VerticalParams};
 use soma_doc::Document;
 use soma_engine::EngineConfig;
-use soma_layout::{layout_with, PaginationStrategy, StyledMetrics};
+use soma_layout::{layout_with, BoxKind, PaginationStrategy, StyledMetrics, TextSource};
 use soma_metrics::MetricsTable;
 use soma_render_html::render as render_html;
-use soma_render_pdf::{render as render_pdf, PdfFont, PdfFonts, PdfMetadata};
+use soma_render_pdf::{render as render_pdf, ImageSource, PdfFont, PdfFonts, PdfMetadata};
 use soma_render_svg::render as render_svg;
 use soma_template::{parse_template, resolve, StyledDoc, Template};
 
@@ -232,7 +232,8 @@ fn render(args: &[String]) -> Result<(), String> {
                 math: faces.math.as_ref(),
                 fallback: faces.fallback.as_ref(),
             };
-            let bytes = render_pdf(&pages, &styled, &pages.text, &fonts, &metadata)
+            let assets = FileImages::load(&options.input, &pages);
+            let bytes = render_pdf(&pages, &styled, &pages.text, &fonts, &metadata, &assets)
                 .map_err(|error| format!("pdf: {error}"))?;
             write_bytes(&options, &bytes)?;
         }
@@ -404,6 +405,48 @@ fn load_pdf_font(spec: &str) -> Result<PdfFont, String> {
     };
     let bytes = std::fs::read(path).map_err(|error| format!("{path}: {error}"))?;
     PdfFont::from_bytes(bytes, index).map_err(|error| format!("{path}: {error}"))
+}
+
+/// Image assets that sit next to the input document.
+///
+/// Only local paths are read: a source string with a scheme (`http:`, `data:`,
+/// …) is ignored, so a document can never make the renderer talk to the
+/// network. Anything that fails to load leaves the figure as a placeholder
+/// rather than failing the run (ADR-0047).
+struct FileImages {
+    files: std::collections::BTreeMap<String, Vec<u8>>,
+}
+
+impl FileImages {
+    fn load(input: &str, pages: &soma_layout::PagedLayout) -> Self {
+        let base = std::path::Path::new(input)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let mut files = std::collections::BTreeMap::new();
+        for page in &pages.pages {
+            for block in &page.blocks {
+                if block.kind != BoxKind::Figure {
+                    continue;
+                }
+                let Some(src) = pages.text.block_image(block.node) else {
+                    continue;
+                };
+                if files.contains_key(src) || src.contains("://") || src.starts_with("data:") {
+                    continue;
+                }
+                if let Ok(bytes) = std::fs::read(base.join(src)) {
+                    files.insert(String::from(src), bytes);
+                }
+            }
+        }
+        Self { files }
+    }
+}
+
+impl ImageSource for FileImages {
+    fn image(&self, src: &str) -> Option<&[u8]> {
+        self.files.get(src).map(|bytes| bytes.as_slice())
+    }
 }
 
 fn write_bytes(options: &Options, output: &[u8]) -> Result<(), String> {

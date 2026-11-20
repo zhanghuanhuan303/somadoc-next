@@ -82,8 +82,10 @@ scripts/book.sh
 示例书用 MiSans（约 510 KB，只含用到的字形），11 页、10 个书签；
 `scripts/book.sh` 先用 `tools/metrics-gen` 从 MiSans 生成度量表，再以
 `--metrics` 交给 PDF 渲染，断行与 PDF 画出的字宽来自同一张脸。
-图片嵌入不在这一版（D82）；CFF 字体（Noto/Source Han 的 CID-keyed 与多数西文
-OTF 的 name-keyed）已可嵌入，流用固定 Huffman deflate 压缩（ADR-0043）。
+CFF 字体（Noto/Source Han 的 CID-keyed 与多数西文 OTF 的 name-keyed）已可嵌入，
+流用动态/固定 Huffman 自适应压缩（ADR-0045），CFF 子集按压缩排（ADR-0046）。
+图片以 XObject 嵌入（PNG 解码、JPEG 直通），每页带 tagged 结构树与 `/Alt`
+（ADR-0047）；下划线与链接注解也已支持（ADR-0044）。
 
 ## 仍然明显的缺口
 
@@ -96,7 +98,7 @@ OTF 的 name-keyed）已可嵌入，流用固定 Huffman deflate 压缩（ADR-00
 | 3 | **章首页只有「无页眉」** | 模板能做到，但没有扉页/章前空白页的概念 | 章页留白全靠 `space-before` |
 | 4 | **表格没有行高控制、没有单元格内边距** | 单元贴线，行距就是行高 | 密排表格显得挤 |
 | 5 | **脚注只支持整块移页** | 脚注不能跨页拆 | 超长脚注会把整块推到下一页 |
-| 6 | **PDF 只支持 `glyf` 与 CFF** | 图片是占位框；无 tagged PDF | 扫描版与无障碍交付需另做（D82） |
+| 6 | **PDF 的结构树不带表格层次** | 表格单元在结构树里记作段落；无 ICC/CMYK 配置；图片只按盒缩放 | 无障碍表格导航不完整（D51/D82） |
 
 这六条都记在 `docs/debt.md`，没有一条阻塞「用现在的引擎排一本书」。
 

@@ -1,9 +1,11 @@
 //! PDF renderer: consumes `PagedLayout` + `StyledDoc`/`TextSource` and writes a
-//! deterministic PDF with embedded TrueType subsets, bookmarks and page labels.
+//! deterministic PDF with embedded TrueType subsets, bookmarks, page labels,
+//! image XObjects and a tagged structure tree.
 //!
-//! It never breaks lines, never paginates, and never reads DocIR. Fonts are
-//! supplied by the caller (the CLI reads them from disk); the renderer keeps
-//! only the glyphs the layout actually uses.
+//! It never breaks lines, never paginates, and never reads DocIR. Fonts and
+//! images are supplied by the caller (the CLI reads them from disk); the
+//! renderer keeps only the glyphs the layout actually uses and the images a
+//! figure actually points at.
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
@@ -13,6 +15,8 @@ extern crate alloc;
 mod cff;
 mod deflate;
 mod font;
+mod image;
+mod inflate;
 mod standard_encoding;
 
 pub use cff::CidSystem;
@@ -48,6 +52,25 @@ pub struct PdfMetadata<'a> {
     pub language: Option<&'a str>,
 }
 
+/// Image bytes for a figure, supplied by the caller.
+///
+/// The renderer never opens files: a document says `fig/pipeline.png`, and the
+/// caller decides where that lives. `src` is exactly what the source wrote, so
+/// the same layout can be rendered from a different asset root.
+pub trait ImageSource {
+    fn image(&self, src: &str) -> Option<&[u8]>;
+}
+
+/// An [`ImageSource`] with no assets: every figure renders as the placeholder
+/// box. This is what a renderer without a file system passes.
+pub struct NoImages;
+
+impl ImageSource for NoImages {
+    fn image(&self, _src: &str) -> Option<&[u8]> {
+        None
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Role {
     Regular,
@@ -70,12 +93,17 @@ impl Role {
 }
 
 /// Render every page to one PDF file.
+///
+/// `assets` resolves the source strings figures carry to bytes; pass
+/// [`NoImages`] when there is nothing to read and the figures keep their
+/// placeholder boxes.
 pub fn render(
     layout: &PagedLayout,
     styles: &StyledDoc,
     text: &dyn TextSource,
     fonts: &PdfFonts<'_>,
     metadata: &PdfMetadata<'_>,
+    assets: &dyn ImageSource,
 ) -> Result<Vec<u8>, PdfError> {
     let scale = Scale {
         num: styles.body_pt().num(),
@@ -96,6 +124,8 @@ pub fn render(
     let mut pdf = Pdf::new();
     let catalog = pdf.reserve();
     let pages_object = pdf.reserve();
+    let struct_root = pdf.reserve();
+    let document_elem = pdf.reserve();
 
     let mut embedded: Vec<(Role, EmbeddedFont)> = Vec::new();
     for role in Role::ALL {
@@ -109,9 +139,27 @@ pub fn render(
         embedded.push((role, embed_font(&mut pdf, font, role, &subset, &entries)));
     }
 
+    // One XObject per distinct source, in first-appearance order. A source that
+    // does not resolve, or a format this backend cannot read, is skipped: the
+    // figure keeps its placeholder instead of failing the page.
+    let images = collect_images(&mut pdf, layout, text, assets);
+
+    let scene = Scene {
+        layout,
+        styles,
+        text,
+        fonts,
+        images: &images,
+    };
+
     let mut page_ids = Vec::with_capacity(layout.pages.len());
-    for page in &layout.pages {
-        let (content, links) = paint_page(layout, styles, text, fonts, scale, page);
+    // Structure elements per page, in MCID order, built after the page looks
+    // exist because each element points back at its page.
+    let mut structure: Vec<Vec<u32>> = Vec::with_capacity(layout.pages.len());
+    for (index, page) in layout.pages.iter().enumerate() {
+        let mut tags = PageTags::default();
+        let mut page_images = Vec::new();
+        let (content, links) = paint_page(&scene, scale, page, &mut tags, &mut page_images);
         let content_id = pdf.reserve();
         pdf.set(content_id, stream_flate(b"", &content));
 
@@ -119,15 +167,46 @@ pub fn render(
         for (role, font) in &embedded {
             let _ = write!(font_resources, "/{} {} 0 R ", role.resource(), font.type0);
         }
+        let mut xobject_resources = String::new();
+        for used_index in &page_images {
+            let object = &images[*used_index];
+            let _ = write!(xobject_resources, "/{} {} 0 R ", object.name, object.object);
+        }
+        let xobjects = if xobject_resources.is_empty() {
+            String::new()
+        } else {
+            format!("/XObject << {xobject_resources}>> ")
+        };
         let annotations = link_annotations(&links);
+        let parents = if tags.elements.is_empty() {
+            String::new()
+        } else {
+            format!(" /StructParents {index}")
+        };
         let page_id = pdf.reserve();
         let body = format!(
-            "<< /Type /Page /Parent {pages_object} 0 R /MediaBox [0 0 {} {}] /Resources << /Font << {font_resources}>> >> /Contents {content_id} 0 R{annotations} >>",
+            "<< /Type /Page /Parent {pages_object} 0 R /MediaBox [0 0 {} {}] /Resources << /Font << {font_resources}>> {xobjects}>> /Contents {content_id} 0 R{annotations}{parents} >>",
             number(scale.milli(layout.page.width.0)),
             number(scale.milli(layout.page.height.0))
         );
         pdf.set(page_id, body.into_bytes());
         page_ids.push(page_id);
+
+        let mut elements = Vec::with_capacity(tags.elements.len());
+        for element in &tags.elements {
+            let id = pdf.reserve();
+            let mut body = format!(
+                "<< /Type /StructElem /S /{} /P {document_elem} 0 R /Pg {page_id} 0 R /K {}",
+                element.tag, element.mcid
+            );
+            if let Some(alt) = element.alt.as_deref() {
+                let _ = write!(body, " /Alt {}", pdf_string(alt));
+            }
+            body.push_str(" >>");
+            pdf.set(id, body.into_bytes());
+            elements.push(id);
+        }
+        structure.push(elements);
     }
 
     let outline = pdf_outline(&mut pdf, &layout.outline, &page_ids, layout, scale);
@@ -136,7 +215,45 @@ pub fn render(
     let info = pdf.reserve();
     pdf.set(info, info_object(metadata));
 
-    let mut catalog_body = format!("<< /Type /Catalog /Pages {pages_object} 0 R");
+    // The structure tree: a Document element holding every page's elements in
+    // reading order, and a parent tree keyed by `StructParents`.
+    let mut numbers = String::new();
+    for (index, elements) in structure.iter().enumerate() {
+        if elements.is_empty() {
+            continue;
+        }
+        let _ = write!(numbers, "{index} [");
+        for id in elements {
+            let _ = write!(numbers, "{id} 0 R ");
+        }
+        numbers.push_str("] ");
+    }
+    let parent_tree = pdf.reserve();
+    pdf.set(parent_tree, format!("<< /Nums [{numbers}] >>").into_bytes());
+
+    let mut kids = String::new();
+    for elements in &structure {
+        for id in elements {
+            let _ = write!(kids, "{id} 0 R ");
+        }
+    }
+    pdf.set(
+        document_elem,
+        format!("<< /Type /StructElem /S /Document /P {struct_root} 0 R /K [{kids}] >>")
+            .into_bytes(),
+    );
+    pdf.set(
+        struct_root,
+        format!(
+            "<< /Type /StructTreeRoot /K [{document_elem} 0 R] /ParentTree {parent_tree} 0 R /ParentTreeNextKey {} >>",
+            layout.pages.len()
+        )
+        .into_bytes(),
+    );
+
+    let mut catalog_body = format!(
+        "<< /Type /Catalog /Pages {pages_object} 0 R /MarkInfo << /Marked true >> /StructTreeRoot {struct_root} 0 R"
+    );
     if let Some(outline) = outline {
         let _ = write!(
             catalog_body,
@@ -152,20 +269,71 @@ pub fn render(
     catalog_body.push_str(" >>");
     pdf.set(catalog, catalog_body.into_bytes());
 
-    let mut kids = String::new();
+    let mut page_kids = String::new();
     for id in &page_ids {
-        let _ = write!(kids, "{id} 0 R ");
+        let _ = write!(page_kids, "{id} 0 R ");
     }
     pdf.set(
         pages_object,
         format!(
-            "<< /Type /Pages /Kids [{kids}] /Count {} >>",
+            "<< /Type /Pages /Kids [{page_kids}] /Count {} >>",
             page_ids.len()
         )
         .into_bytes(),
     );
 
     Ok(pdf.finish(catalog, info))
+}
+
+/// Build one image XObject per distinct figure source, in reading order.
+fn collect_images(
+    pdf: &mut Pdf,
+    layout: &PagedLayout,
+    text: &dyn TextSource,
+    assets: &dyn ImageSource,
+) -> Vec<ImageObject> {
+    let mut objects: Vec<ImageObject> = Vec::new();
+    for page in &layout.pages {
+        for block in &page.blocks {
+            if block.kind != BoxKind::Figure {
+                continue;
+            }
+            let Some(src) = text.block_image(block.node) else {
+                continue;
+            };
+            if objects.iter().any(|object| object.src == src) {
+                continue;
+            }
+            let Some(bytes) = assets.image(src) else {
+                continue;
+            };
+            let Ok(decoded) = image::decode(bytes) else {
+                continue;
+            };
+            let name = format!("Im{}", objects.len() + 1);
+            let object = pdf.reserve();
+            let header = format!(
+                "/Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace {} /BitsPerComponent 8",
+                decoded.width,
+                decoded.height,
+                decoded.color_space.name()
+            );
+            let stream = match decoded.filter {
+                image::Filter::Flate => stream_flate(header.as_bytes(), &decoded.data),
+                image::Filter::Dct => {
+                    let full = format!("{header} /Filter /DCTDecode");
+                    stream(full.as_bytes(), &decoded.data)
+                }
+            };
+            pdf.set(object, stream);
+            objects.push(ImageObject {
+                src: String::from(src),
+                name,
+                object,
+            });
+        }
+    }
+    objects
 }
 
 // ---------------------------------------------------------------------------
@@ -471,12 +639,11 @@ fn to_unicode(entries: &[(u16, u32)]) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 fn paint_page(
-    layout: &PagedLayout,
-    styles: &StyledDoc,
-    text: &dyn TextSource,
-    fonts: &PdfFonts<'_>,
+    scene: &Scene<'_>,
     scale: Scale,
     page: &soma_layout::Page,
+    tags: &mut PageTags,
+    used_images: &mut Vec<usize>,
 ) -> (Vec<u8>, Vec<Link>) {
     let mut painter = Painter {
         out: Vec::new(),
@@ -488,28 +655,82 @@ fn paint_page(
         links: Vec::new(),
     };
     for block in &page.blocks {
-        paint_block(&mut painter, layout, styles, text, fonts, block, 0);
+        paint_block(scene, &mut painter, block, 0, Some(tags), used_images);
     }
+    // Running heads and folios are not part of the reading order, so they are
+    // painted but not tagged.
     for block in &page.header {
-        paint_block(&mut painter, layout, styles, text, fonts, block, 0);
+        paint_block(scene, &mut painter, block, 0, None, used_images);
     }
     for block in &page.footer {
-        paint_block(&mut painter, layout, styles, text, fonts, block, 0);
+        paint_block(scene, &mut painter, block, 0, None, used_images);
     }
-    let footnote_top = layout.page.content_height().0 - page.footnote_height.0;
+    let footnote_top = scene.layout.page.content_height().0 - page.footnote_height.0;
     for block in &page.footnotes {
         paint_block(
+            scene,
             &mut painter,
-            layout,
-            styles,
-            text,
-            fonts,
             block,
             footnote_top.max(0),
+            None,
+            used_images,
         );
     }
     painter.end_text();
     (painter.out, painter.links)
+}
+
+/// The document-level inputs a page needs. Bundled so that `paint_block` keeps
+/// a readable parameter list.
+struct Scene<'a> {
+    layout: &'a PagedLayout,
+    styles: &'a StyledDoc,
+    text: &'a dyn TextSource,
+    fonts: &'a PdfFonts<'a>,
+    images: &'a [ImageObject],
+}
+
+impl Scene<'_> {
+    /// Index into `images` for a figure block, when the asset decoded.
+    fn image_for(&self, block: &PlacedBlock) -> Option<usize> {
+        let src = self.text.block_image(block.node)?;
+        self.images.iter().position(|object| object.src == src)
+    }
+}
+
+/// One image XObject, addressed by the source string the document wrote.
+struct ImageObject {
+    src: String,
+    /// Resource name inside a page's `/XObject` dictionary.
+    name: String,
+    /// Object number of the image stream.
+    object: u32,
+}
+
+/// One marked-content sequence, and the structure element it belongs to.
+struct TagElement {
+    tag: &'static str,
+    alt: Option<String>,
+    mcid: u32,
+}
+
+/// The structure elements of one page, in reading order. The MCID of an
+/// element is its index, which is what the content stream marks.
+#[derive(Default)]
+struct PageTags {
+    elements: Vec<TagElement>,
+}
+
+impl PageTags {
+    fn open(&mut self, tag: &'static str, alt: Option<&str>) -> u32 {
+        let mcid = self.elements.len() as u32;
+        self.elements.push(TagElement {
+            tag,
+            alt: alt.map(String::from),
+            mcid,
+        });
+        mcid
+    }
 }
 
 /// A link rectangle on the page, in milli-points.
@@ -639,6 +860,36 @@ impl Painter {
         );
         self.emit(&line);
     }
+
+    /// Open a marked-content sequence and remember which structure element it
+    /// belongs to (ADR-0047).
+    fn begin_marked(&mut self, tag: &str, mcid: u32) {
+        self.end_text();
+        let line = format!("/{tag} << /MCID {mcid} >> BDC\n");
+        self.emit(&line);
+    }
+
+    fn end_marked(&mut self) {
+        self.end_text();
+        self.emit("EMC\n");
+    }
+
+    /// Draw an image XObject into the box at `(x, y)` with the given size, all
+    /// in layout units. `y` is the bottom edge, measured from the page bottom.
+    fn image(&mut self, name: &str, x: i32, y: i32, width: i32, height: i32) {
+        if width <= 0 || height <= 0 {
+            return;
+        }
+        self.end_text();
+        let line = format!(
+            "q {} 0 0 {} {} {} cm /{name} Do Q\n",
+            number(self.scale.milli(width)),
+            number(self.scale.milli(height)),
+            number(self.scale.milli(x)),
+            number(self.scale.milli(y))
+        );
+        self.emit(&line);
+    }
 }
 
 /// The rectangle an underline or a strikethrough occupies, in layout units,
@@ -664,15 +915,23 @@ fn decoration_rect(
     [x, page_height - top - thickness, advance, thickness]
 }
 
+/// Paint one placed block.
+///
+/// `tags` is `Some` for the main reading order (body blocks) and `None` for
+/// running heads, folios and footnote areas, which stay untagged: a structure
+/// tree that repeated the header on every page would be worse than none.
 fn paint_block(
+    scene: &Scene<'_>,
     painter: &mut Painter,
-    layout: &PagedLayout,
-    styles: &StyledDoc,
-    text: &dyn TextSource,
-    fonts: &PdfFonts<'_>,
     block: &PlacedBlock,
     extra_y: i32,
+    mut tags: Option<&mut PageTags>,
+    used_images: &mut Vec<usize>,
 ) {
+    let layout = scene.layout;
+    let styles = scene.styles;
+    let text = scene.text;
+    let fonts = scene.fonts;
     let style = styles
         .style(block.style)
         .cloned()
@@ -695,25 +954,52 @@ fn paint_block(
             let x = layout.page.margin_left.0 + block.x.0;
             let top = layout.page.margin_top.0 + block.y.0 + extra_y;
             let y = layout.page.height.0 - top - block.height.0;
-            painter.set_fill(0xEEEEEE);
-            painter.rect(
-                painter.scale.milli(x),
-                painter.scale.milli(y),
-                painter.scale.milli(block.width.0),
-                painter.scale.milli(block.height.0),
-            );
-            painter.stroke_rect(
-                painter.scale.milli(x),
-                painter.scale.milli(y),
-                painter.scale.milli(block.width.0),
-                painter.scale.milli(block.height.0),
-            );
+            let mcid = tags
+                .as_deref_mut()
+                .map(|tags| tags.open("Figure", text.block_alt(block.node)));
+            if let Some(mcid) = mcid {
+                painter.begin_marked("Figure", mcid);
+            }
+            match scene.image_for(block) {
+                Some(index) => {
+                    let object = &scene.images[index];
+                    if !used_images.contains(&index) {
+                        used_images.push(index);
+                    }
+                    painter.image(&object.name, x, y, block.width.0, block.height.0);
+                }
+                None => {
+                    // No asset, or a format the backend cannot read: keep the
+                    // placeholder so the layout stays honest about what the
+                    // figure occupies.
+                    painter.set_fill(0xEEEEEE);
+                    painter.rect(
+                        painter.scale.milli(x),
+                        painter.scale.milli(y),
+                        painter.scale.milli(block.width.0),
+                        painter.scale.milli(block.height.0),
+                    );
+                    painter.stroke_rect(
+                        painter.scale.milli(x),
+                        painter.scale.milli(y),
+                        painter.scale.milli(block.width.0),
+                        painter.scale.milli(block.height.0),
+                    );
+                }
+            }
+            if mcid.is_some() {
+                painter.end_marked();
+            }
             return;
         }
         BoxKind::Math if block.math.is_some() => {
             let math = block.math.as_ref().unwrap();
             let left = layout.page.margin_left.0 + block.x.0;
             let top = layout.page.margin_top.0 + block.y.0 + extra_y;
+            let mcid = tags.as_mut().map(|tags| tags.open("Formula", None));
+            if let Some(mcid) = mcid {
+                painter.begin_marked("Formula", mcid);
+            }
             paint_math(
                 painter,
                 layout,
@@ -723,9 +1009,29 @@ fn paint_block(
                 top + math.baseline.0,
                 style.color.unwrap_or(0),
             );
+            if mcid.is_some() {
+                painter.end_marked();
+            }
             return;
         }
         _ => {}
+    }
+
+    // Everything else is flowed text: paragraph, heading, code, a table cell.
+    let tag = block_tag(scene, block);
+    let mcid = match (tag, tags) {
+        (Some(tag), Some(tags)) => {
+            let alt = if tag == "Figure" {
+                text.block_alt(block.node)
+            } else {
+                None
+            };
+            Some(tags.open(tag, alt))
+        }
+        _ => None,
+    };
+    if let (Some(tag), Some(mcid)) = (tag, mcid) {
+        painter.begin_marked(tag, mcid);
     }
 
     for placed in &block.lines {
@@ -841,6 +1147,33 @@ fn paint_block(
                 );
             }
         }
+    }
+    if mcid.is_some() {
+        painter.end_marked();
+    }
+}
+
+/// The structure type a block maps to, when it belongs in the reading order.
+fn block_tag(scene: &Scene<'_>, block: &PlacedBlock) -> Option<&'static str> {
+    match block.kind {
+        BoxKind::Paragraph => Some("P"),
+        BoxKind::Heading => Some(match scene.text.block_heading_level(block.node) {
+            Some(1) => "H1",
+            Some(2) => "H2",
+            Some(3) => "H3",
+            Some(4) => "H4",
+            Some(5) => "H5",
+            Some(_) => "H6",
+            None => "P",
+        }),
+        BoxKind::Code => Some("Code"),
+        // A table cell would need a `/Table` structure above it; tagging it as
+        // a paragraph keeps the tree valid without inventing a hierarchy the
+        // box tree does not have (a cell is a placed block, not a row of one).
+        BoxKind::TableCell => Some("P"),
+        BoxKind::Footnote => Some("Note"),
+        BoxKind::Figure | BoxKind::Math => None,
+        BoxKind::Rule | BoxKind::TableRule => None,
     }
 }
 

@@ -146,7 +146,7 @@ Cumulative public test files:
 | `cli.rs` (soma-cli) | 17 | render md/tex to html/svg/json/pdf, template geometry, TOC template, example book, fonts, `--metrics`, `--out`, check, error paths |
 | `blind_pipeline.rs` (eval) | 3 | dry-run fixture through key + statistics + decision |
 | `k7_object_metrics.rs` | 4 | object hooks vs text paths, default-hook equivalence |
-| `pdf.rs` (render-pdf) | 10 | TrueType cmap/subset, CFF subset and `/CIDFontType0`, name-keyed promotion, `seac` composite, CFF2 refusal, PDF objects, bookmarks, underlines and `/Annots`, byte determinism |
+| `pdf.rs` (render-pdf) | 13 | TrueType cmap/subset, CFF subset and `/CIDFontType0`, name-keyed promotion, `seac` composite, CFF2 refusal, PDF objects, bookmarks, underlines and `/Annots`, image XObject and placeholder fallback, tagged structure tree, byte determinism |
 | `math.rs` (svg) | 4 | exact formula coordinates |
 | `inline_math.rs` (svg) | 2 | inline items on the line baseline, marker never drawn |
 | `math.rs` (html) | 4 | formula preview spans, placeholder fallback |
@@ -167,9 +167,9 @@ Cumulative public test files:
 | `soma-core` vertical unit | 1 | vertical cost model hash |
 | core unit | 24 | IR, units, breaker, result, presets |
 | layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
-| render-pdf unit | 18 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check |
+| render-pdf unit | 26 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing |
 
-Total: **583 tests**.
+Total: **594 tests**.
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
 kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.
