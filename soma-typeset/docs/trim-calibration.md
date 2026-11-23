@@ -81,5 +81,5 @@ Type 2 解释器把 CFF 也量了。CFF 面**只记标点**的墨迹（`ink` 段
 因此：
 
 - 重新生成过度量表的样张（`scripts/song.sh` 等）行末标点已经贴齐；
-- 但**内嵌的 `noto-cjk.smt` 还是 `soma.metrics/1` 的旧 blob，没有任何墨迹**，
-  不带 `--metrics` 的默认路径仍在用常量。这是 D96，单独决定。
+- **内嵌的 `noto-cjk.smt` 也重新生成到 `soma.metrics/5`**（ADR-0074），
+  所以不带 `--metrics` 的默认路径同样走真实墨迹。

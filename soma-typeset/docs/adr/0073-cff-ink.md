@@ -102,9 +102,10 @@ so the expected ink is exact (`(0,0,500,700)`, `(0,0,600,700)`, `(0,0,1000,800)`
 and any regression in INDEX parsing, `FDSelect`, subroutine bias or the curve
 math shows up immediately.
 
-The committed `crates/soma-metrics/data/noto-cjk.smt` is a **version 1** blob
-with no ink section at all; regenerating it at version 5 is a separate decision
-(1.1 MB, and the corpus baseline moves). It is recorded as D96.
+The committed `crates/soma-metrics/data/noto-cjk.smt` was a version 1 blob with
+no ink section, so the default path still used the constants. ADR-0074 regenerates
+it: run-split advance blocks bring it to 288 KB at `soma.metrics/5`, and the
+default path now has real punctuation ink too.
 
 ## Alternatives
 

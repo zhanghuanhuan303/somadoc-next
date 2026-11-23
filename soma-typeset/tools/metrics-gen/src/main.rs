@@ -14,7 +14,8 @@
 //!   --face serif:normal:/path/NotoSerifCJK-Regular.ttc#2 \
 //!   --face sans:normal:/path/NotoSansCJK-Regular.ttc#2 \
 //!   --face serif:bold:/path/NotoSerifCJK-Bold.ttc#2 \
-//!   --face sans:bold:/path/NotoSansCJK-Bold.ttc#2
+//!   --face sans:bold:/path/NotoSansCJK-Bold.ttc#2 \
+//!   --face math:normal:/path/NotoSansMath-Regular.ttf
 //! ```
 
 mod cff;
@@ -1574,12 +1575,19 @@ fn run() -> Result<(), String> {
             if covered.is_empty() {
                 continue;
             }
-            // A block says "these advances agree", and `Face::has` can only
-            // treat it as coverage when the per-glyph list is authoritative —
-            // that list is `glyph_ink`, which needs outlines. Without it a block
-            // would over-report: Noto CJK has no U+2A6A5, but a sparse
-            // extension-B block would claim it and the rescue face would be
-            // skipped (ADR-0039).
+            // A block says "every codepoint in this range exists and has this
+            // advance", because `Face::has` reads a block as coverage as well
+            // as a width. A `glyf` face can be generous — its per-glyph ink list
+            // is the authoritative coverage list (ADR-0039) — but a face without
+            // one must not claim codepoints it lacks: Noto CJK has no U+2A6A5,
+            // and a sparse extension-B block would swallow that hole and skip
+            // the rescue face.
+            //
+            // So a face without `glyf` emits one block per *run of consecutive
+            // covered codepoints* that share the mode advance. Holes break the
+            // run instead of hiding inside it (ADR-0074). That keeps the table
+            // small — 32 500 per-codepoint rows is what made it 1.1 MB — while
+            // staying exact.
             let uniform = modal(&values);
             match uniform {
                 Some((value, count)) if outlines && count * 10 >= values.len() * 9 => {
@@ -1589,6 +1597,28 @@ fn run() -> Result<(), String> {
                         if advance != value {
                             entries.push((cp, advance));
                         }
+                    }
+                }
+                Some((value, count)) if count * 10 >= values.len() * 9 => {
+                    let mut run: Option<(u32, u32)> = None;
+                    for cp in start..=end {
+                        let advance = width(cp);
+                        if advance == Some(value) {
+                            run = Some(match run {
+                                Some((first, _)) => (first, cp),
+                                None => (cp, cp),
+                            });
+                        } else {
+                            if let Some((first, last)) = run.take() {
+                                blocks.push((first, last, value));
+                            }
+                            if let Some(advance) = advance {
+                                entries.push((cp, advance));
+                            }
+                        }
+                    }
+                    if let Some((first, last)) = run {
+                        blocks.push((first, last, value));
                     }
                 }
                 _ => {

@@ -90,9 +90,9 @@ row: it has the best coverage here, but the distributed collection is
 CFF-outlined, so **this audit** cannot measure its marks. That is a limit of the
 audit, not of the generator: `metrics-gen` runs a bbox-only Type 2 interpreter
 over CFF charstrings, so a table generated from these faces does carry
-punctuation ink (ADR-0073). The committed `noto-cjk.smt`, however, is still a
-`soma.metrics/1` blob with no ink section, so the *default* path (no
-`--metrics`) trims with the class constants (ADR-0037). See D96.
+punctuation ink (ADR-0073). The committed `noto-cjk.smt` is regenerated at `soma.metrics/5`, so it carries
+that ink too and the *default* path (no `--metrics`) trims against the real
+glyphs (ADR-0074).
 
 ## Automatic selection
 

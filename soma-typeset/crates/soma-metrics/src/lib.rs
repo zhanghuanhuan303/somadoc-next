@@ -570,6 +570,28 @@ mod tests {
     }
 
     #[test]
+    fn embedded_table_never_claims_a_codepoint_it_lacks() {
+        // A block is both a width and a coverage claim, so a face without a
+        // per-glyph list must split its blocks at holes (ADR-0074). Noto CJK SC
+        // has no U+2A6A5: if the extension-B block swallowed it, the rescue face
+        // would be skipped and the Character would render as .notdef.
+        let table = MetricsTable::embedded();
+        let cjk: Vec<_> = table
+            .faces()
+            .iter()
+            .filter(|face| face.has(0x4e00))
+            .collect();
+        assert_eq!(cjk.len(), 4, "serif/sans, regular/bold");
+        for face in cjk {
+            assert!(!face.has(0x2a6a5), "no face claims the U+2A6A5 hole");
+            assert!(
+                face.ink(0xff0c).is_some(),
+                "the full-width comma carries ink"
+            );
+        }
+    }
+
+    #[test]
     fn embedded_table_has_regular_and_bold_faces() {
         let table = table();
         assert_eq!(table.unit(), UNIT);
@@ -764,11 +786,28 @@ mod tests {
 
     #[test]
     fn a_version_four_blob_has_no_math_data() {
-        let bytes: &[u8] = include_bytes!("../data/noto-cjk.smt");
-        let table = MetricsTable::parse(bytes).expect("v4 blob parses");
-        for face in table.faces() {
-            assert!(face.math().is_empty());
+        // Version 4 ends after the per-glyph ink list; only version 5 appends
+        // the `MATH` constants. A parser that read that far anyway would see
+        // the next face's header as math data.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC.to_le_bytes());
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(&(UNIT as u16).to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&[FAMILY_SERIF, 0, 0, 0]);
+        for value in [UNIT * 4 / 5, UNIT / 5, 0, UNIT / 4, UNIT] {
+            bytes.extend_from_slice(&value.to_le_bytes());
         }
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // blocks
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // entries
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // punctuation ink
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // per-glyph ink
+
+        let table = MetricsTable::parse(&bytes).expect("v4 blob parses");
+        assert_eq!(table.face_count(), 1);
+        assert!(table.faces()[0].math().is_empty());
     }
 
     #[test]
@@ -784,12 +823,10 @@ mod tests {
         let second = table().hash();
         assert_eq!(first, second);
 
-        let bytes: &[u8] = include_bytes!("../data/noto-cjk.smt");
-        let mut mutated = bytes.to_vec();
-        let last = mutated.len() - 1;
-        mutated[last] ^= 0xff;
-        let changed = MetricsTable::parse(&mutated).unwrap();
-        assert_ne!(first, changed.hash());
+        // A second, committed table: the hash must separate content, not paths.
+        let other: &[u8] = include_bytes!("../../../examples/book/metrics-lxgw.smt");
+        let other = MetricsTable::parse(other).expect("lxgw table");
+        assert_ne!(first, other.hash());
     }
 
     #[test]
