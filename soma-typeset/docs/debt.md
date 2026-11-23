@@ -94,6 +94,7 @@
 | D93 | 数学定界符用连续缩放，不取字体变体 | `MathVariants` 的 `v1`/装配件没有读进 `.smt`；3em 的括号是一个被放大的基本字形，笔画随比例变粗，不是设计好的大号字形。MATH 的顶部重音锚点与 `MathKernInfo` 也未读 | 超高定界符的比例与 LaTeX 有差距；宽重音只能居中 | 在 `.smt` v6 加 `MathVariants`（变体列表 + 装配件），M4 的几何不动 | 否 |
 | D94 | ~~emergency 阶段没有候选窗口~~ | **已关闭（ADR-0072）**：`line_length_bounds` 以前在 `allow_emergency` 时直接返回 `(1, n)`；现在过宽方向也有界——两个旗标同时打开时按 `emergency_stretch` 界住，否则按满 shrink（`tolerance_eff = min(tolerance, 1000)`，顺带修掉 `emergency_tolerance = 10.0` 让窗口算式失效的问题）。混排 2000 atoms @20 em：候选 1 255 320 → 30 316，Chromium 40.5 ms → 2.5 ms，断点序列与语料基线逐字不变 | — | ✅ 已关闭 | 否 |
 | D95 | 浏览器 preview 与 PDF 不同字节 | 网页端度量来自 `canvas.measureText`（唯一能保证「所见即所排」的来源），而 PDF 用的是 `.smt` 表；两者宽度差 1–2%，断点可能不同。`faithful` 模式（wasm 内解析 `.smt`）可对齐 PDF，但需要一次表下载与字符集裁剪 | 「网页上看到的就是印出来的」目前不成立 | 先做 preview（ABI 已允许换度量源）；faithful 按真实需求再做，需要 `.smt` 子集工具 | 否 |
+| D96 | 内嵌度量表是 v1，没有墨迹 | `crates/soma-metrics/data/noto-cjk.smt` 是 **`soma.metrics/1`** 的旧 blob（5 个面、6 个 uniform block、无 ink 段），而当前格式是 `/5`。后果：不带 `--metrics` 的默认路径用规则常量做行尾裁剪，CFF 正文（思源/Noto）行末逗号会留 0.28 em 的空档。用当前生成器重做一遍是 84 KB → 1.1 MB（CFF 没有 `glyf`，拿不到 uniform block，32 500 条 advance 逐条写），且语料基线会动 | 默认排版的行末标点不如重新生成过度量的样张；二进制大 1 MB | 两条路：给 CFF 加“块 + 空洞”以压缩 advance（要论证 `Face::has` 的覆盖语义），或接受 1.1 MB 并重新基线；先量化再定 | 否 |
 | D89 | ~~列表没有悬挂缩进~~ | **已关闭（ADR-0058）**：内核 `ParagraphStyle.hang`（默认 0，行为不变）；模板里写负的 `first-indent` 即悬挂缩进，记号落在文字列左侧 1.2em，续行回到文字列 | — | ✅ 已关闭 | 否 |
 | D80 | ~~索引按码位排序~~ | **已关闭（ADR-0061）**：`soma-collate` 内置 27,584 个码位的拼音序表；模板 `index.sort: codepoint\|pinyin`（默认 codepoint，canonical 字节不变） | — | ✅ 已关闭 | 否 |
 | D81 | ~~索引标记覆盖有限~~ | **已关闭（ADR-0061）**：`a!b` 子条目、`@排序键`、`\|see{}`/`\|seealso{}`；表格单元与脚注定义里的标记按所在页收集；父项未标时自动补父行；连续三页以上合并为 `3–5` | — | ✅ 已关闭 | 否 |
@@ -158,4 +159,4 @@
 | PDF 输出 | **已完成（ADR-0034/ADR-0039）**：TrueType 稀疏子集与 CID-keyed CFF、Identity-H、书签树、PageLabels；边界见 D82/D85 |
 | 全量补课 | **已完成（ADR-0059–0063）**：关闭 D09、D24、D37、D53、D80、D81 |
 | 遗留清账 | **已完成（ADR-0064–0067）**：关闭 D12、D70；D24/D69/D81 补齐（Word 样式与图片、HTML `colgroup`、索引页码区间） |
-| 未排期 | D01、D03、D04、D05、D10、D11、D13、D60、D62、D69、D71、D74、D91、D92、D93、D95、N1–N6 |
+| 未排期 | D01、D03、D04、D05、D10、D11、D13、D60、D62、D69、D71、D74、D91、D92、D93、D95、D96、N1–N6 |

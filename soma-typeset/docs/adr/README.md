@@ -91,6 +91,7 @@ only).
 | [0070](0070-math-v2.md) | Math v2: TeX atom classes and spacing, `MATH` constants + glyph ink, style levels, inline math breaking | Accepted |
 | [0071](0071-web-kp-slice.md) | Browser slice: `soma-core` + `soma-rules` behind a C ABI; three defaulted `Metrics` methods; no wasm-bindgen | Accepted |
 | [0072](0072-emergency-window.md) | The emergency stage gets a width window: 1.26M → 30k candidates at 20 em, same breaks (D94) | Accepted |
+| [0073](0073-cff-ink.md) | CFF faces record punctuation ink: a bbox-only Type 2 interpreter fills the gap that made a trailing comma sit 0.28 em inside | Accepted |
 
 ## Rules
 

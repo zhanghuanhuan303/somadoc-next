@@ -4316,11 +4316,14 @@ fn scale_trim(paragraph: &mut Paragraph, metrics: &dyn Metrics, size_of: impl Fn
         // end on a Han character or on a fallback face's glyph just as easily
         // as on a mark (ADR-0038). A table without outline data keeps the rule
         // table's constants.
+        // A gap can be negative: an italic or a full-width mark may hang its
+        // ink past the advance box. A trim budget cannot be (the IR validates
+        // it), and trimming into the glyph is never wanted, so clamp at zero.
         if let Some(ink) = metrics.ink_left(&atom.text, atom.style) {
-            atom.compress_left = ink;
+            atom.compress_left = Width(ink.0.max(0));
         }
         if let Some(ink) = metrics.ink_right(&atom.text, atom.style) {
-            atom.compress_right = ink;
+            atom.compress_right = Width(ink.0.max(0));
         }
     }
 }
@@ -4467,6 +4470,54 @@ mod unit {
     use super::*;
     use soma_core::SyntheticMetrics;
     use soma_rules::justified_style;
+
+    #[test]
+    fn negative_ink_never_becomes_a_negative_trim() {
+        // A mark can hang its ink past the advance box (`advance - x_max` is
+        // then negative). `compress_*` is validated as non-negative, so a table
+        // with such a mark must not make the paragraph unbreakable.
+        struct Overhang;
+        impl soma_core::Metrics for Overhang {
+            fn advance(&self, _text: &str, _style: soma_core::StyleId) -> Width {
+                Width::EM
+            }
+            fn line_metrics(&self, _style: soma_core::StyleId) -> soma_core::LineMetrics {
+                soma_core::LineMetrics {
+                    ascent: Width::EM,
+                    descent: Width::ZERO,
+                    leading: Width::ZERO,
+                }
+            }
+            fn ink_left(&self, _text: &str, _style: soma_core::StyleId) -> Option<Width> {
+                Some(Width(-120))
+            }
+            fn ink_right(&self, _text: &str, _style: soma_core::StyleId) -> Option<Width> {
+                Some(Width(-80))
+            }
+        }
+
+        let mut paragraph = paragraph_from_text(
+            "中文，排版。",
+            justified_style(Width::from_em(4)),
+            StyleId(0),
+        )
+        .expect("paragraph");
+        let punctuation = paragraph
+            .atoms
+            .iter()
+            .position(|atom| atom.text == "，")
+            .expect("the comma is an atom");
+        assert!(paragraph.atoms[punctuation].compress_right.0 > 0);
+
+        scale_trim(&mut paragraph, &Overhang, |_| 4096);
+
+        for atom in &paragraph.atoms {
+            assert!(atom.compress_left.0 >= 0, "{:?}", atom.text);
+            assert!(atom.compress_right.0 >= 0, "{:?}", atom.text);
+        }
+        assert_eq!(paragraph.atoms[punctuation].compress_right, Width::ZERO);
+        assert_eq!(paragraph.validate(), Ok(()));
+    }
 
     #[test]
     fn columns_share_the_measure_by_what_they_hold() {

@@ -1,9 +1,11 @@
 //! Extract numeric font metrics into the `soma.metrics/2` blob.
 //!
 //! The tool reads a TrueType/OpenType font (or a collection index) and writes
-//! advances, line metrics, per-codepoint widths, and — when the font has
-//! `glyf` outlines — the ink gap of punctuation. It never extracts outlines
-//! and never ships a font: the output is a table of integers.
+//! advances, line metrics, per-codepoint widths, and the ink gap of
+//! punctuation. The gap comes from the `glyf` bbox when the font has one, and
+//! from running the Type 2 charstring when the outlines are CFF (`cff.rs`).
+//! It never ships a font and never writes outlines: the output is a table of
+//! integers.
 //!
 //! Usage:
 //!
@@ -14,6 +16,8 @@
 //!   --face serif:bold:/path/NotoSerifCJK-Bold.ttc#2 \
 //!   --face sans:bold:/path/NotoSansCJK-Bold.ttc#2
 //! ```
+
+mod cff;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -101,6 +105,8 @@ struct FaceSpec {
 struct Font<'a> {
     data: &'a [u8],
     base: usize,
+    /// Present when the outlines are CFF: `ink_box` then runs charstrings.
+    cff: Option<cff::Cff<'a>>,
 }
 
 impl<'a> Font<'a> {
@@ -118,13 +124,29 @@ impl<'a> Font<'a> {
                 ));
             }
             let offset = read_u32(data, 12 + index * 4)? as usize;
-            Ok(Self { data, base: offset })
+            Ok(Self {
+                data,
+                base: offset,
+                cff: None,
+            })
         } else {
             if index != 0 {
                 return Err("a single font has only face 0".into());
             }
-            Ok(Self { data, base: 0 })
+            Ok(Self {
+                data,
+                base: 0,
+                cff: None,
+            })
         }
+        .map(|mut font: Self| {
+            // CFF outlines carry no bbox; parse the charstring index once so
+            // `ink_box` can run a single glyph instead of the whole table.
+            font.cff = font
+                .table(b"CFF ")
+                .and_then(|(offset, _)| cff::Cff::parse(font.data, offset));
+            font
+        })
     }
 
     fn table(&self, tag: &[u8; 4]) -> Option<(usize, usize)> {
@@ -330,9 +352,12 @@ impl<'a> Font<'a> {
     }
 
     /// Full outline box of a glyph in font units: `(x_min, y_min, x_max, y_max)`.
-    /// `None` for an empty glyph, a composite that points at nothing, or a CFF
-    /// face.
+    /// `None` for an empty glyph or a composite that points at nothing. A CFF
+    /// face is measured by running its charstring (`cff::Cff`).
     fn ink_box(&self, gid: u16) -> Result<Option<(i32, i32, i32, i32)>, String> {
+        if self.table(b"glyf").is_none() {
+            return Ok(self.cff.as_ref().and_then(|cff| cff.ink_box(gid)));
+        }
         let Some((head, _)) = self.table(b"head") else {
             return Ok(None);
         };
@@ -369,8 +394,7 @@ impl<'a> Font<'a> {
     }
 
     /// Horizontal extent of a glyph's outline in font units. `None` for an
-    /// empty glyph (a space), for a composite that points at nothing, or for a
-    /// font whose outlines are CFF rather than `glyf`.
+    /// empty glyph (a space) or a composite that points at nothing.
     fn ink_bounds(&self, gid: u16) -> Result<Option<(i32, i32)>, String> {
         Ok(self
             .ink_box(gid)?
@@ -401,8 +425,8 @@ impl<'a> Font<'a> {
         position += 2;
         raw[3] = read_u16(self.data, position)? as i32;
         position += 2;
-        for index in 4..55 {
-            raw[index] = read_i16(self.data, position)? as i32;
+        for slot in raw.iter_mut().take(55).skip(4) {
+            *slot = read_i16(self.data, position)? as i32;
             position += 4;
         }
         raw[55] = read_i16(self.data, position)? as i32;
@@ -1552,7 +1576,7 @@ fn run() -> Result<(), String> {
             }
             // A block says "these advances agree", and `Face::has` can only
             // treat it as coverage when the per-glyph list is authoritative —
-            // that list is `glyph_ink`, which needs `glyf`. Without it a block
+            // that list is `glyph_ink`, which needs outlines. Without it a block
             // would over-report: Noto CJK has no U+2A6A5, but a sparse
             // extension-B block would claim it and the rescue face would be
             // skipped (ADR-0039).
@@ -1590,9 +1614,12 @@ fn run() -> Result<(), String> {
         entries.dedup_by_key(|(cp, _)| *cp);
         blocks.sort_unstable();
 
-        // Ink is recorded for punctuation only, and only when the font has
-        // `glyf` outlines. The gaps say where the mark's ink ends inside its
-        // advance box, which is what a justified line pays for (ADR-0037).
+        // Ink is recorded for punctuation only. The gaps say where the mark's
+        // ink ends inside its advance box, which is what a justified line pays
+        // for (ADR-0037). A `glyf` face moves this list into the per-glyph
+        // section below; a CFF face keeps it, because its charstrings are
+        // measured one glyph at a time and a row per Han character would grow
+        // the table by an order of magnitude (ADR-0073).
         let mut ink: Vec<(u32, i32, i32)> = Vec::new();
         for &(start, end) in INK_RANGES {
             for cp in start..=end {
@@ -1606,18 +1633,21 @@ fn run() -> Result<(), String> {
                 let Some((x_min, x_max)) = font.ink_bounds(gid)? else {
                     continue;
                 };
-                let left = scale(x_min, upem).clamp(i16::MIN as i32, i16::MAX as i32);
-                let right =
-                    scale(advance as i32 - x_max, upem).clamp(i16::MIN as i32, i16::MAX as i32);
+                // A negative gap means the ink overhangs the advance; a trim
+                // budget is never negative (the IR validates it), so store it
+                // as zero like the per-glyph section does.
+                let left = scale(x_min, upem).clamp(0, i16::MAX as i32);
+                let right = scale(advance as i32 - x_max, upem).clamp(0, i16::MAX as i32);
                 ink.push((cp, left, right));
             }
         }
         ink.sort_unstable_by_key(|(cp, _, _)| *cp);
         ink.dedup_by_key(|(cp, _, _)| *cp);
 
-        // Version 4 carries punctuation ink inside the per-glyph section, so the
-        // version 2 section becomes redundant.
-        if VERSION >= 4 {
+        // Version 4 carries punctuation ink inside the per-glyph section, so
+        // the version 2 section becomes redundant — but only for a face that
+        // has that section.
+        if VERSION >= 4 && outlines {
             ink = Vec::new();
         }
 

@@ -87,11 +87,12 @@ optimal.
 
 Noto Sans/Serif CJK (`.ttc`, 65,535 glyphs) is the one surprising `no-outlines`
 row: it has the best coverage here, but the distributed collection is
-CFF-outlined, so this tool cannot measure its marks. That is a limit of the
-*audit*, not of the backend: a CFF face is embedded as `/CIDFontType0`
-(ADR-0039, ADR-0040) and can be a body or rescue face. The committed
-`noto-cjk.smt` is built from those faces and therefore has no ink section, which
-means line-end trim falls back to the class constants (ADR-0037).
+CFF-outlined, so **this audit** cannot measure its marks. That is a limit of the
+audit, not of the generator: `metrics-gen` runs a bbox-only Type 2 interpreter
+over CFF charstrings, so a table generated from these faces does carry
+punctuation ink (ADR-0073). The committed `noto-cjk.smt`, however, is still a
+`soma.metrics/1` blob with no ink section, so the *default* path (no
+`--metrics`) trims with the class constants (ADR-0037). See D96.
 
 ## Automatic selection
 
