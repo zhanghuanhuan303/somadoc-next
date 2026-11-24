@@ -407,6 +407,22 @@ pub fn go_to_page(studio: Studio, page: usize) {
 
 /* ------------------------------------------------------------------ rebuild */
 
+/// The frontend of the tab the user is looking at. A tab carries its own
+/// format: opening `notes.md` inside a LaTeX project must parse Markdown, not
+/// reuse the project input's format. Falls back to the project input when no
+/// tab is active yet.
+fn active_format(studio: Studio) -> Option<SourceFormat> {
+    let active = studio.active.get_untracked();
+    studio
+        .tabs
+        .with_untracked(|tabs| tabs.get(active).map(|tab| tab.format))
+        .or_else(|| {
+            studio
+                .project
+                .with_untracked(|project| project.as_ref().map(|project| project.format))
+        })
+}
+
 pub fn rebuild_now(studio: Studio) {
     if studio.tabs.with_untracked(|tabs| tabs.is_empty()) {
         studio.build_seq.update(|seq| *seq += 1);
@@ -418,7 +434,7 @@ pub fn rebuild_now(studio: Studio) {
     }
     let seq = studio.build_seq.get_untracked() + 1;
     studio.build_seq.set(seq);
-    let Some(project) = studio.project.get_untracked() else {
+    let Some(format) = active_format(studio) else {
         return;
     };
     let source = studio.source.get_untracked();
@@ -432,13 +448,13 @@ pub fn rebuild_now(studio: Studio) {
         if studio.build_seq.get_untracked() != seq {
             return;
         }
-        let result = if project.format == SourceFormat::Docx {
+        let result = if format == SourceFormat::Docx {
             let Some(bytes) = studio.docx_bytes.get_untracked() else {
                 studio.building.set(false);
                 return;
             };
             engine::build(
-                &project,
+                format,
                 SourceInput::Bytes(&bytes),
                 &template,
                 engine.as_deref(),
@@ -447,7 +463,7 @@ pub fn rebuild_now(studio: Studio) {
             .await
         } else {
             engine::build(
-                &project,
+                format,
                 SourceInput::Text(&source),
                 &template,
                 engine.as_deref(),
@@ -484,22 +500,20 @@ pub fn rebuild_now(studio: Studio) {
 /* ------------------------------------------------------------------- verify */
 
 pub fn verify_now(studio: Studio) {
-    let Some(project) = studio.project.get_untracked() else {
+    let Some(format) = active_format(studio) else {
         return;
     };
-    if project.format == SourceFormat::Docx {
-        // The server reads the binary input; there is no edited text to send.
-    }
     let seq = studio.verify_seq.get_untracked() + 1;
     studio.verify_seq.set(seq);
     let request = BuildRequest {
-        source: if project.format == SourceFormat::Docx {
+        source: if format == SourceFormat::Docx {
             None
         } else {
             Some(studio.source.get_untracked())
         },
         template: Some(studio.template.get_untracked()),
         engine: studio.engine_text.get_untracked(),
+        format: Some(format),
     };
     spawn_local(async move {
         let result = api::verify(&request).await;
@@ -683,6 +697,9 @@ pub fn export_pdf(studio: Studio) {
     let Some(project) = studio.project.get_untracked() else {
         return;
     };
+    let Some(format) = active_format(studio) else {
+        return;
+    };
     if studio.build.with_untracked(|build| build.is_none()) {
         toast(studio, "还没有可导出的构建", "bad");
         return;
@@ -692,13 +709,14 @@ pub fn export_pdf(studio: Studio) {
         return;
     }
     let request = BuildRequest {
-        source: if project.format == SourceFormat::Docx {
+        source: if format == SourceFormat::Docx {
             None
         } else {
             Some(studio.source.get_untracked())
         },
         template: Some(studio.template.get_untracked()),
         engine: studio.engine_text.get_untracked(),
+        format: Some(format),
     };
     spawn_local(async move {
         match api::pdf(&request).await {

@@ -6,7 +6,7 @@
 use soma_render_html::PageFragment;
 use soma_studio_core::{
     build as build_engine, enrich_images, image_sources, parse_document, BuildOptions, ImageBytes,
-    ProjectPayload, SourceFormat,
+    SourceFormat,
 };
 
 use crate::api;
@@ -28,7 +28,7 @@ pub enum SourceInput<'a> {
 /// Build in the browser. Images are fetched from Axum and inlined into the
 /// page fragments, so a proof never points at a remote resource.
 pub async fn build(
-    project: &ProjectPayload,
+    format: SourceFormat,
     input: SourceInput<'_>,
     template: &str,
     engine: Option<&str>,
@@ -37,7 +37,7 @@ pub async fn build(
     let started = js_sys::Date::now();
     let bytes: &[u8] = match input {
         SourceInput::Text(text) => {
-            if project.format == SourceFormat::Docx {
+            if format == SourceFormat::Docx {
                 return Err(String::from("DOCX 源文是二进制，不能从文本编辑"));
             }
             text.as_bytes()
@@ -45,7 +45,7 @@ pub async fn build(
         SourceInput::Bytes(bytes) => bytes,
     };
 
-    let mut parsed = parse_document(project.format, bytes)?;
+    let mut parsed = parse_document(format, bytes)?;
     let mut images = ImageBytes::from_media(&parsed.media);
     for src in image_sources(&parsed) {
         if images.get(&src).is_some() {

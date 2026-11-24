@@ -128,7 +128,7 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   page-geometry half of D95. Typing rebuilds after a 220 ms debounce and IME
   composition defers the build. A missing `--font` falls back to a system CJK
   face via fontconfig, so PDF export still produces text. `scripts/studio.sh`
-  locks S1–S10. See [`docs/studio.md`](docs/studio.md).
+  locks S1–S11. See [`docs/studio.md`](docs/studio.md).
 - Code blocks (`ADR-0055`): each source line keeps its own spaces and is laid
   out on the block's atom table — indentation survives, nothing reflows, and a
   line that is too long overflows instead of wrapping.
@@ -352,7 +352,7 @@ scripts/
   demo.sh      # target/demo.html
   wasm-hash.sh # native vs wasm32-wasip1 canonical bytes
   kp-verify.sh # K-P closure: gates + bench budget + length policy
-  studio.sh    # S1–S10: browser self-test, CSP, PDF pages, SSE reloads, font probe
+  studio.sh    # S1–S11: browser self-test, CSP, PDF pages, SSE reloads, font probe
 web/
   soma-kp.js       # ES module: compile / measure / break / render (no dependencies)
   soma-kp.wasm     # built slice (32.7 KB gzip, zero imports) — rebuilt by scripts/web.sh
@@ -424,7 +424,7 @@ cargo run -p soma-studio -- --input examples/book/full.tex \
   --template examples/templates/plex.yaml --metrics examples/templates/out/plex.smt \
   --font ~/.fonts/IBMPlexSansSC_Regular.ttf --font-bold ~/.fonts/IBMPlexSansSC_Bold.ttf \
   --port 7070
-scripts/studio.sh          # S1–S10 (starts its own server)
+scripts/studio.sh          # S1–S11 (starts its own server)
 (cd . && python3 -m http.server 8000)   # or browse /web/demo.html
 scripts/wasm-hash.sh       # native vs wasm32-wasip1 canonical bytes
 scripts/bench.sh           # 100..4,000 atoms, P50/P95, budget check
@@ -437,10 +437,10 @@ cargo run -p soma-eval --release -- blind preferences.csv
 
 ```sh
 scripts/gates.sh
-scripts/studio.sh   # S1-S10 for the web workbench (needs chromium)
+scripts/studio.sh   # S1-S11 for the web workbench (needs chromium)
 ```
 
-The gate runs format, clippy, 925 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 926 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-highlight`, `soma-template`,
 `soma-layout`, `soma-tikz`, `soma-md`, `soma-render-html`, `soma-render-svg`, and
 `soma-render-pdf`, a

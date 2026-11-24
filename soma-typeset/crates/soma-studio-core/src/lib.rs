@@ -692,6 +692,16 @@ pub struct BuildRequest {
     pub source: Option<String>,
     pub template: Option<String>,
     pub engine: Option<String>,
+    /// The frontend of the tab being built. `None` keeps the project input's
+    /// format, so older clients and the initial load behave as before.
+    pub format: Option<SourceFormat>,
+}
+
+impl BuildRequest {
+    /// The frontend this request should parse with.
+    pub fn format_or(&self, fallback: SourceFormat) -> SourceFormat {
+        self.format.unwrap_or(fallback)
+    }
 }
 
 /// A file in the project tree.

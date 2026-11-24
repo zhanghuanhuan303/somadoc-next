@@ -1,5 +1,5 @@
 #!/bin/sh
-# Gate S: the all-Rust Studio (S1-S10).
+# Gate S: the all-Rust Studio (S1-S11).
 #
 #   S1 shell baseline      38/34/29/24, three 34px bars share a baseline, one tree
 #   S2 tabs                three files, no duplicates, right-neighbour close, empty workspace
@@ -11,6 +11,7 @@
 #   S8 offline/security    no external requests, no script/a[href] in pages, CSP header
 #   S9 fonts/rebuild       probe p95, missing fonts degrade, SSE built/error, old build kept
 #   S10 AI boundary        remote off; local reply is text-only; no engine imports in ai.rs
+#   S11 mixed frontends    a tab parses with its own format (md/html/tex) in wasm and native
 #
 # The browser assertions live in `soma-studio-ui/src/selftest.rs` and are read
 # from `#selftest` with `--dump-dom`. Requires chromium; trunk is used when
@@ -90,6 +91,20 @@ fn main() {
 EOF
 printf '# 文档 B\n\nB 文档的正文，用于标签页与不重复打开。\n' > "$WORK/b.md"
 printf '# 文档 C\n\nC 文档的正文，用于关闭活动标签后选择右邻。\n' > "$WORK/c.md"
+cat > "$WORK/extra.html" <<'EOF'
+<!doctype html>
+<html><body>
+<h1>HTML 标记</h1>
+<p>网页标记进入 DocIR 后与 Markdown 走同一套断行。</p>
+</body></html>
+EOF
+cat > "$WORK/extra.tex" <<'EOF'
+\documentclass{article}
+\begin{document}
+\section{源码标题}
+源码命令进入 DocIR 后与 Markdown 走同一套断行。
+\end{document}
+EOF
 
 FONT_ARGS=""
 if [ -f "$PLEX_REGULAR" ]; then
@@ -127,15 +142,15 @@ if ! curl -sf "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "== gate S: S1-S10 (chromium) =="
+echo "== gate S: S1-S11 (chromium) =="
 if command -v chromium >/dev/null 2>&1; then
-    timeout 150s chromium --headless --no-sandbox --disable-gpu \
+    timeout 180s chromium --headless --no-sandbox --disable-gpu \
         --hide-scrollbars --user-data-dir="$CHROME_DIR" \
-        --virtual-time-budget=40000 --window-size=1920,1080 --dump-dom \
+        --virtual-time-budget=60000 --window-size=1920,1080 --dump-dom \
         "http://127.0.0.1:$PORT/?selftest=1&theme=dark" > "$WORK/dom.html" 2>"$WORK/chrome.err" || true
     grep -oE 'S[0-9]+\|(ok|fail)\|[^<]*' "$WORK/dom.html" > "$WORK/results.txt" || true
     cat "$WORK/results.txt"
-    for id in S1 S2 S3 S4 S5 S6 S7 S8 S9 S10; do
+    for id in S1 S2 S3 S4 S5 S6 S7 S8 S9 S10 S11; do
         if ! grep -q "^$id|ok|" "$WORK/results.txt"; then
             fail "$id missing or failed"
         fi

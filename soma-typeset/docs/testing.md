@@ -201,9 +201,9 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `studio.rs` (studio-core) | 3 | fragments follow pages and join the full document, probe samples come from layout faces, build determinism |
 | `soma-studio-ui` unit | 2 | assistant markdown escapes raw HTML and rejects `javascript:`/`data:` destinations |
 
-Total: **925 tests passed** (`cargo test --workspace`), plus **1 ignored**
+Total: **926 tests passed** (`cargo test --workspace`), plus **1 ignored**
 (`perturbation.rs`, run with `--ignored`). Counting that ignored test, the
-workspace lists **926 test functions**. The standalone
+workspace lists **927 test functions**. The standalone
 `tools/metrics-gen` crate adds its own 4 (`cargo test --manifest-path tools/metrics-gen/Cargo.toml`).
 
 Still deferred: the human blind-test run (D01), a quality-labeled corpus
@@ -236,7 +236,7 @@ The script runs:
     renderer safety
 11. Gate V/R (`scripts/gate-r.sh`): SVG visual lock and cross-renderer atom parity
 12. Gate Q′ (`scripts/gate-q.sh`): effect scorecard and real-corpus baseline
-13. Gate S (`scripts/studio.sh`, separate): S1–S10 for the Studio — shell
+13. Gate S (`scripts/studio.sh`, separate): S1–S11 for the Studio — shell
     baselines, tabs, panels, themes, page fragments and Shadow DOM, live
     rebuilds and IME, inspect/overlay agreement, CSP and external-resource
     checks, font probe with/without fonts, SSE `built`/`error`, PDF page count,

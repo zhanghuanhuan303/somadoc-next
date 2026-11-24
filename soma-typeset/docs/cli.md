@@ -95,7 +95,7 @@ soma check --input book.md --template book.yaml
 `soma-studio` is the Axum I/O boundary for the web workbench; the UI itself is
 `crates/soma-studio-ui` (Leptos CSR, the whole engine in wasm). See
 [`docs/studio.md`](studio.md) for the views, URL parameters, font probe, SSE
-reload semantics, security headers and the S1–S10 gates.
+reload semantics, security headers and the S1–S11 gates.
 
 ```sh
 cd crates/soma-studio-ui && trunk build --release && cd ../..

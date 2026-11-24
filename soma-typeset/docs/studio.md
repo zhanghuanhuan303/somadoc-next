@@ -56,6 +56,11 @@ The server prints a warning when `dist/index.html` is missing; run
 
 ## Views
 
+Every tab is built with its own frontend. Opening `notes.md`, `page.html` or
+`chapter.tex` inside a project previews that file through the shared `DocIR`
+and the same layout engine; the project input only supplies defaults when no
+tab is open.
+
 | View | What it is |
 |---|---|
 | **分栏** (Split, default) | Source on the left, proof on the right, with a draggable splitter. Either pane can be closed with its `×`; the sidebar 「视图 → 分栏」 restores both. The ratio and open state persist in `localStorage`. |
@@ -149,7 +154,7 @@ metrics file triggers a native rebuild:
 ## Gates
 
 ```sh
-bash scripts/studio.sh          # S1–S10, starts its own server on port 7091
+bash scripts/studio.sh          # S1–S11, starts its own server on port 7091
 SOMA_STUDIO_SKIP_TRUNK=1 bash scripts/studio.sh   # reuse dist/
 SOMA_STUDIO_PORT=7099 bash scripts/studio.sh      # another port
 ```
@@ -173,6 +178,7 @@ directory; `examples/` is not modified.
 | S8 | No external resources; no `<script>`/`<a href>` inside page shadows; remote AI disabled; CSP and nosniff present. |
 | S9 | Probe p95 with fonts and `不一致` without them; the proof's first block resolves to a dark ink colour (`color-scheme: light`); SSE `built`/`error`; a failed reload keeps the previous build; PDF page count. |
 | S10 | The assistant has no engine write path; its reply renders as text; remote is off. |
+| S11 | From a Markdown project, `extra.html` and `extra.tex` each rebuild with their own frontend: the wasm hash equals native verify, the proof shows the frontend marker, and raw `<h1>` / `\section` does not survive. |
 
 ## Known limits
 

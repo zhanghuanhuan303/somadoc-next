@@ -1,4 +1,4 @@
-//! Browser self-test for the Studio shell (gates S1–S10).
+//! Browser self-test for the Studio shell (gates S1–S11).
 //!
 //! It runs only when the URL carries `?selftest=1`. Every assertion writes a
 //! line into `<pre id="selftest">` (`S1|ok|…` / `S1|fail|…`), so a headless
@@ -8,6 +8,7 @@
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use soma_studio_core::SourceFormat;
 use wasm_bindgen::JsCast;
 use web_sys::{Document, Element, Event, EventInit, HtmlElement, PointerEvent, PointerEventInit};
 
@@ -69,6 +70,8 @@ async fn run(studio: Studio, only: Option<String>) {
         lines.push(s10(&document, studio).await);
         emit(&document, &lines);
         lines.push(s2(&document, studio).await);
+        emit(&document, &lines);
+        lines.push(s11(&document, studio).await);
     } else if only == "s9font" {
         if !wait_for(|| studio.build.with(|build| build.is_some()), 160).await {
             lines.push(result("S0", false, "构建未完成"));
@@ -1001,4 +1004,89 @@ async fn s10(document: &Document, studio: Studio) -> String {
         replied && sanitized && local_badge && remote_disabled,
         detail,
     )
+}
+
+/* --------------------------------------------------------------------- S11 */
+
+/// A tab's own frontend must drive both the wasm build and `/api/verify`.
+/// Before ADR-0095 the project input's format was reused for every tab, so a
+/// Markdown/HTML tab opened inside a LaTeX project was parsed as LaTeX.
+async fn s11(document: &Document, studio: Studio) -> String {
+    let mut parts = Vec::new();
+    let mut ok = true;
+    for (path, marker, forbidden, format) in [
+        ("extra.html", "网页标记", "<h1", SourceFormat::Html),
+        ("extra.tex", "源码命令", "\\section", SourceFormat::Latex),
+    ] {
+        let before = studio
+            .summary()
+            .map(|summary| summary.hash)
+            .unwrap_or_default();
+        click_selector(document, &format!(".nav-item[title='{path}']"));
+        let active_ok = wait_for(
+            || {
+                studio.tabs.with_untracked(|tabs| {
+                    tabs.get(studio.active.get_untracked())
+                        .map(|tab| tab.path == path)
+                        .unwrap_or(false)
+                })
+            },
+            60,
+        )
+        .await;
+        let verified = wait_for(
+            || {
+                let wasm = studio.summary();
+                let native = studio.verify.get_untracked();
+                match (wasm, native) {
+                    (Some(wasm), Some(native)) => {
+                        wasm.hash != before
+                            && wasm.hash == native.hash
+                            && wasm.pages == native.pages
+                            && wasm.page_lines == native.page_lines
+                            && !studio.building.get_untracked()
+                    }
+                    _ => false,
+                }
+            },
+            200,
+        )
+        .await;
+        TimeoutFuture::new(250).await;
+        let format_ok = studio.tabs.with_untracked(|tabs| {
+            tabs.get(studio.active.get_untracked())
+                .map(|tab| tab.format == format)
+                .unwrap_or(false)
+        });
+        let text = proof_text(document, studio.page_count().min(4));
+        let compact = compact_text(&text);
+        let marker_ok = compact.contains(&compact_text(marker));
+        let clean_ok = !compact.contains(&compact_text(forbidden));
+        ok = ok && active_ok && verified && format_ok && marker_ok && clean_ok;
+        parts.push(format!(
+            "{path} 活动 {active_ok} · 校验 {verified} · 前端 {format_ok} · 标记 {marker_ok} · 原文残留 {clean_ok} · 文本 {} 字",
+            text.chars().count(),
+        ));
+    }
+    result("S11", ok, parts.join(" | "))
+}
+
+/// Concatenated text of the first `pages` proof pages.
+fn proof_text(document: &Document, pages: usize) -> String {
+    let mut out = String::new();
+    for page in 1..=pages {
+        if let Some(shadow) = shadow_host(document, page) {
+            if let Ok(Some(page)) = shadow.query_selector(".page") {
+                out.push_str(&text(&page));
+                out.push('\n');
+            }
+        }
+    }
+    out
+}
+
+/// The renderer puts each atom on its own HTML line, so `textContent` inserts
+/// whitespace between glyphs. Compare without it.
+fn compact_text(text: &str) -> String {
+    text.chars().filter(|ch| !ch.is_whitespace()).collect()
 }

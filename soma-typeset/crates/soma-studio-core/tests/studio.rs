@@ -5,7 +5,7 @@
 //! `/api/verify` summary are the same shape.
 
 use soma_render_html::PAGE_STYLE;
-use soma_studio_core::{build, parse_document, BuildOptions, SourceFormat};
+use soma_studio_core::{build, parse_document, BuildOptions, BuildRequest, SourceFormat};
 
 fn source() -> String {
     let mut text = String::from("# 混排样张\n\n");
@@ -36,6 +36,19 @@ fn built() -> soma_studio_core::Build {
         },
     )
     .expect("build")
+}
+
+#[test]
+fn a_build_request_defaults_to_the_project_frontend() {
+    let legacy = BuildRequest::default();
+    assert_eq!(legacy.format, None);
+    assert_eq!(legacy.format_or(SourceFormat::Latex), SourceFormat::Latex);
+
+    let html = BuildRequest {
+        format: Some(SourceFormat::Html),
+        ..BuildRequest::default()
+    };
+    assert_eq!(html.format_or(SourceFormat::Latex), SourceFormat::Html);
 }
 
 #[test]

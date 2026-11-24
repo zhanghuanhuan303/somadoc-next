@@ -869,7 +869,7 @@ type RequestInput = (
 
 fn request_input(state: &AppState, request: &BuildRequest) -> Result<RequestInput, String> {
     let bundle = state.bundle.read().unwrap();
-    let format = bundle.project.format;
+    let format = request.format_or(bundle.project.format);
     let source = match &request.source {
         Some(text) => {
             if format == SourceFormat::Docx {
