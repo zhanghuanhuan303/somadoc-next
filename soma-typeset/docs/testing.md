@@ -146,7 +146,7 @@ Cumulative public test files:
 | `e21_line_end_punctuation.rs` (layout) | 6 | trailing bearing trimmed on justified lines, ink on the text edge, ragged lines untouched |
 | `e22_fallback.rs` (layout) | 2 | a rescue face measures the glyph and its edge is what a line end trims |
 | `e23_space_shrink.rs` (layout) | 2 | a space gives up at most a third of itself; an unbreakable word still lays out |
-| `cli.rs` (soma-cli) | 19 | render md/tex to html/svg/json/pdf, template geometry, LaTeX article defaults, TOC template, example book, fonts, `--metrics`, `--out`, check, error paths |
+| `cli.rs` (soma-cli) | 20 | render md/tex to html/svg/json/pdf, template geometry, LaTeX article defaults, TOC template, example book, fonts, the automatic math face, `--metrics`, `--out`, check, error paths |
 | `blind_pipeline.rs` (eval) | 3 | dry-run fixture through key + statistics + decision |
 | `k7_object_metrics.rs` | 4 | object hooks vs text paths, default-hook equivalence |
 | `pdf.rs` (render-pdf) | 14 | TrueType cmap/subset, CFF subset and `/CIDFontType0`, name-keyed promotion, `seac` composite, CFF2 refusal, PDF objects, bookmarks, underlines and `/Annots`, image XObject and placeholder fallback, tagged structure tree, byte determinism |
@@ -167,7 +167,7 @@ Cumulative public test files:
 | `soma-wasm` unit | 1 | fixture determinism + forced end + DocIR |
 | `vertical_slice.rs` (rules) | 6 | end-to-end rules + trim + hard break |
 | `soma-rules` unit | 19 | segmentation, punctuation, half-width bearings, pair trim, hyphen breaks, rule inventory, code-line spaces, dashes keep their width |
-| `soma-metrics` unit | 14 | table round-trip, CJK/Latin widths, regular/bold/math faces, hash, truncation, ink sections, v1/v2 compatibility |
+| `soma-metrics` unit | 17 | table round-trip, CJK/Latin widths, regular/bold/math faces, hash, truncation, ink sections, v1/v2 compatibility, math-face recognition by recorded advances |
 | `soma-core` vertical unit | 1 | vertical cost model hash |
 | core unit | 25 | IR, units, breaker, result, presets (`latex-v1` included) |
 | layout unit | 20 | trim scaling at body and non-body sizes; math metric adapter; index grammar, ordering and page ranges; column hints |
@@ -176,9 +176,10 @@ Cumulative public test files:
 | `soma-collate` unit | 4 | pinyin rank lookup, Latin before Han, shared prefixes, table coverage |
 | `soma-hyphen` unit | 10 | pattern parsing (`%`, `\patterns{}`), the `hyphenation` fixture, left/right limits, UTF-8 offsets, ordering |
 | `soma-docx` (unit + integration) | 32 | zip store/deflate, inflate, XML entities, headings from style names, `basedOn` styles, tables, lists, metadata, embedded media, damaged archives |
+| math geometry (ADR-0075/0076) | 14 | `soma.metrics/7` variants, gaps and top accents; TeX variant selection and fallback size; the radical link and degree; fraction and axis geometry; accent attachment and combining marks |
 | render-pdf unit | 26 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing |
 
-Total: **782 tests** (`cargo test --workspace`). The standalone
+Total: **800 tests** (`cargo test --workspace`). The standalone
 `tools/metrics-gen` crate adds its own 4 (`cargo test --manifest-path tools/metrics-gen/Cargo.toml`).
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,

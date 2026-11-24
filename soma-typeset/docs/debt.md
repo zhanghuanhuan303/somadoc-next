@@ -91,7 +91,9 @@
 | D90 | ~~表格列宽一律平分~~ | **已关闭（ADR-0058）**：布局先量每列的自然宽（含 colspan 摊派），再按比例分配，`measure / 6n` 作下限，最大余数法保证列宽之和精确等于版心 | — | ✅ 已关闭 | 否 |
 | D91 | 混排 2000 atoms 的性能预算擦边 | `bench --check` 的门槛是 ≤2000 atoms 20 ms、≤4000 atoms 80 ms。本机 release 实测：混排 2000 atoms p95 **20.23 ms**（超）、4000 atoms 79.0 ms（内存 4 MB）；纯中文 2000 atoms 0.24 ms，标点密集 0.62 ms，都远低于门槛。差值是 1.28M 次行评估里的整数除法与缓存 | 2,000 字的混排段落在最慢的一档上刚好越线 | 除法换乘法逆元、或按 D11 加保守剪枝；先测 wasm 再决定门槛是否上调 | 否 |
 | D92 | 垂直页 badness 的 body 参照取「页首项高度」 | `pagination::page_badness` 的 `body` 由 `items[i].height` 传入，而 `i` 是该页第一个垂直项。页首是图（约 70,000 单位）时，半页空白只算 86 点坏度；页首是 4,915 单位的正文行时，同样的空白算数千点。DP 因而宁愿把内容推到下一页，也不愿让页首较矮的页留白 | 默认版式下 `song.tex` 第 3 页留下约 55 mm 空洞，且留白随页首块的种类跳变 | `body` 改为正文行高（或 `VerticalParams` 新增 `body_height`，默认取文档 `line-height`）；会改全部分页 golden 与语料基线，单独一批做 | 否 |
-| D93 | 数学定界符用连续缩放，不取字体变体 | `MathVariants` 的 `v1`/装配件没有读进 `.smt`；3em 的括号是一个被放大的基本字形，笔画随比例变粗，不是设计好的大号字形。MATH 的顶部重音锚点与 `MathKernInfo` 也未读 | 超高定界符的比例与 LaTeX 有差距；宽重音只能居中 | 在 `.smt` v6 加 `MathVariants`（变体列表 + 装配件），M4 的几何不动 | 否 |
+| D93 | ~~数学定界符用连续缩放，不取字体变体~~ | **已关闭（ADR-0075 / ADR-0078）**：`soma.metrics/6`–`7` 记录基础字形的纵向 `MathVariants`（ADR-0078 后内嵌表为 Latin Modern Math：94 个基础字形、353 条变体；调查期 Noto 963 条、DejaVu 385 条），`soma-math` 按 TeX 规则选「最小可覆盖」的设计字形，PDF 用字形号绘制；根号横线改从墨迹右端起笔，根指数按 `radicalDegreeBottomRaisePercent` 落位，kern 改为有符号。语料基线一行未动 | 大算符、根号与定界符的笔画不再随放大变粗 | ✅ 已关闭 | 否 |
+| D97 | 数学装配件与横向变体未用 | 三款已装数学字体（Noto Sans Math、DejaVu Math TeX Gyre、TeX Gyre Pagella Math）的纵向 `GlyphAssembly` part 数都是 0，`soma.metrics/7` 因此只写变体列表；超过最大变体时用最大设计字形（TeX 在没有更大字形时的做法）。横向变体仍未读：`\overbrace` 在该字体没有横向构造时退回规则拼装（Noto 的 U+23DE 正是如此） | 极端高的根式/括号不能继续加高；横向大括号/宽重音仍是拉伸或规则拼装，不是字体设计件 | 有字体真的提供装配件，或横向变体出现视觉需求时，加 `soma.metrics/8` | 否 |
+| D98 | 重音不用 `MathKernInfo` 与扁平重音 | **部分关闭（ADR-0076）**：顶部重音锚点（`MathTopAccentAttachment`）与组合重音已读，`\hat`/`\bar`/`\tilde`/`\vec` 不再画 `.notdef`；仍未读 `MathKernInfo`、`flattenedAccentBaseHeight` 与扁平重音变体，宽重音只用横向 `stretch` | 宽重音/高基底的细节与 LaTeX 仍有差距 | 与横向变体（D97）一起做，加 `soma.metrics/8` | 否 |
 | D94 | ~~emergency 阶段没有候选窗口~~ | **已关闭（ADR-0072）**：`line_length_bounds` 以前在 `allow_emergency` 时直接返回 `(1, n)`；现在过宽方向也有界——两个旗标同时打开时按 `emergency_stretch` 界住，否则按满 shrink（`tolerance_eff = min(tolerance, 1000)`，顺带修掉 `emergency_tolerance = 10.0` 让窗口算式失效的问题）。混排 2000 atoms @20 em：候选 1 255 320 → 30 316，Chromium 40.5 ms → 2.5 ms，断点序列与语料基线逐字不变 | — | ✅ 已关闭 | 否 |
 | D95 | 浏览器 preview 与 PDF 不同字节 | 网页端度量来自 `canvas.measureText`（唯一能保证「所见即所排」的来源），而 PDF 用的是 `.smt` 表；两者宽度差 1–2%，断点可能不同。`faithful` 模式（wasm 内解析 `.smt`）可对齐 PDF，但需要一次表下载与字符集裁剪 | 「网页上看到的就是印出来的」目前不成立 | 先做 preview（ABI 已允许换度量源）；faithful 按真实需求再做，需要 `.smt` 子集工具 | 否 |
 | D96 | ~~内嵌度量表是 v1，没有墨迹~~ | **已关闭（ADR-0073/0074）**：内嵌 `noto-cjk.smt` 重新生成到 `soma.metrics/5`，含 4 个 CJK 面（标点墨迹）与 1 个数学面（35 个 MATH 常数 + 2,901 个字形墨迹）；CFF 没有 `glyf`，改用「覆盖区间拆成连续 run 的 block」来压缩 advance，8.4 万 → **28.8 万字节**（逐条写是 110 万）。语料重新基线：断点/页数一行未动，`fitness_jumps` 3 → 8、`jitter_p95` 377 不变 | 默认路径的行末标点现在也贴边 | ✅ 已关闭 | 否 |
@@ -159,4 +161,4 @@
 | PDF 输出 | **已完成（ADR-0034/ADR-0039）**：TrueType 稀疏子集与 CID-keyed CFF、Identity-H、书签树、PageLabels；边界见 D82/D85 |
 | 全量补课 | **已完成（ADR-0059–0063）**：关闭 D09、D24、D37、D53、D80、D81 |
 | 遗留清账 | **已完成（ADR-0064–0067）**：关闭 D12、D70；D24/D69/D81 补齐（Word 样式与图片、HTML `colgroup`、索引页码区间） |
-| 未排期 | D01、D03、D04、D05、D10、D11、D13、D60、D62、D69、D71、D74、D91、D92、D93、D95、N1–N6 |
+| 未排期 | D01、D03、D04、D05、D10、D11、D13、D60、D62、D69、D71、D74、D91、D92、D95、D97、D98、N1–N6 |

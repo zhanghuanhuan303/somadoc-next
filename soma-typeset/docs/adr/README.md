@@ -93,6 +93,10 @@ only).
 | [0072](0072-emergency-window.md) | The emergency stage gets a width window: 1.26M → 30k candidates at 20 em, same breaks (D94) | Accepted |
 | [0073](0073-cff-ink.md) | CFF faces record punctuation ink: a bbox-only Type 2 interpreter fills the gap that made a trailing comma sit 0.28 em inside | Accepted |
 | [0074](0074-block-runs.md) | Blocks cover runs, not holes: exact coverage without a per-glyph list; the embedded table regenerates at 288 KB (D96) | Accepted |
+| [0075](0075-math-variants.md) | Math variants: display operators, radicals and fences use the font's designed glyphs; radicals connect and the degree sits in the nook (D93) | Accepted |
+| [0076](0076-math-typst-alignment.md) | Typst-aligned math geometry: radical clearance, axis-centred operators/matrices, fraction shifts, combining accents with top attachments (D93, D98) | Accepted |
+| [0077](0077-default-math-face.md) | The default math face is probed and proved against the metrics table: at least 16 exact advances, a warning when none matches, no font redistributed | Accepted; default face superseded by 0078 |
+| [0078](0078-latin-modern-math.md) | The default math face is Latin Modern Math; CFF math ink, Type 2 curve/stem fixes, the regenerated tables and the bundled face | Accepted |
 
 ## Rules
 

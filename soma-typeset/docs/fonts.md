@@ -1,6 +1,6 @@
 # Choosing a body font
 
-The engine never opens a font: layout reads a `soma.metrics/5` table, the PDF
+The engine never opens a font: layout reads a `soma.metrics/7` table, the PDF
 backend embeds `glyf` outlines or CID-keyed CFF programs (ADR-0039). A face is
 therefore usable for PDF only when it has one of those two outline formats. `tools/metrics-gen --audit` scores every face on disk
 against what Chinese body typesetting actually needs, so the choice is a
@@ -90,7 +90,7 @@ row: it has the best coverage here, but the distributed collection is
 CFF-outlined, so **this audit** cannot measure its marks. That is a limit of the
 audit, not of the generator: `metrics-gen` runs a bbox-only Type 2 interpreter
 over CFF charstrings, so a table generated from these faces does carry
-punctuation ink (ADR-0073). The committed `noto-cjk.smt` is regenerated at `soma.metrics/5`, so it carries
+punctuation ink (ADR-0073). The committed `noto-cjk.smt` is regenerated at `soma.metrics/7`, so it carries
 that ink too and the *default* path (no `--metrics`) trims against the real
 glyphs (ADR-0074).
 
@@ -106,7 +106,20 @@ whose family is in a redistributable allow-list (OFL first, GPL-with-exception
 second, anything usable last). Inside a family it requires a `Regular` or
 `Normal` cut: a Light or Thin face would quietly set the whole document
 lighter. A `Bold` companion is added when the file naming offers one, and the
-Noto Sans Math face when present.
+Noto CJK face when present. The math face is added by `scripts/math-face.sh`,
+which prefers Latin Modern Math and falls back to DejaVu/Noto.
+
+`--font-math` names the face the PDF draws formulas with. When it is omitted
+and the document has a formula, `soma render --format pdf` uses the bundled
+Latin Modern Math first, then probes installed faces and accepts only one whose
+advances agree with the metrics table (ADR-0077). The bundle is the face the
+embedded table was measured from, so the default works on a machine with no
+TeX installation; a custom table measured from another face falls through to
+Noto Sans Math, DejaVu Math TeX Gyre, TeX Gyre Pagella Math, Libertinus Math,
+STIX Two Math or Cambria Math. A different math face resolves the same variant
+ordinals but draws them at other sizes, so the probe compares advances rather
+than names. `--stats` reports which face was chosen; a document whose formula
+symbols fall back to the body face prints a warning naming the flag.
 
 `scripts/book.sh` falls back to the committed `metrics-lxgw.smt` when no
 TrueType font exists, so HTML, SVG and JSON still reproduce the example book's
@@ -211,13 +224,14 @@ cargo run -p tools/metrics-gen -- \
   --out examples/book/metrics-lxgw.smt \
   --face serif:normal:/usr/share/fonts/TTF/LXGWWenKai-Regular.ttf \
   --face serif:bold:/usr/share/fonts/TTF/LXGWWenKai-Medium.ttf \
-  --face math:normal:/usr/share/fonts/noto/NotoSansMath-Regular.ttf
+  --face math:normal:/usr/share/texmf-dist/fonts/opentype/public/lm-math/latinmodern-math.otf
 ```
 
-`examples/book/metrics-lxgw.smt` is committed as an **OFL-licensed layout
-baseline** (360 KB, `soma.metrics/5`, per-glyph bearings for 46,473 glyphs: pointing `--metrics` at it reproduces the same line breaks on any
-machine without the font installed. Rendering a PDF still needs the font file
-itself, because the PDF embeds outlines.
+`examples/book/metrics-lxgw.smt` is committed as a freely redistributable
+layout baseline (360 KB, `soma.metrics/7`, per-glyph bearings for 46,473 glyphs):
+pointing `--metrics` at it reproduces the same line breaks on any machine
+without the font installed. Rendering a PDF still needs the font file itself,
+because the PDF embeds outlines.
 
 ## Licences
 
@@ -226,9 +240,15 @@ faces whose licence clearly allows redistribution:
 
 | Face | Licence |
 | --- | --- |
-| Noto CJK / Noto Sans Math | SIL OFL 1.1 |
+| Noto CJK | SIL OFL 1.1 |
+| Latin Modern Math | GUST Font License |
 | LXGW WenKai | SIL OFL 1.1 |
 | WenQuanYi Micro Hei | GPL v3 + font embedding exception |
 | MiSans | free to use; redistribution of the font is restricted — its table is generated locally, not committed |
+
+Latin Modern Math is also bundled as
+`crates/soma-cli/assets/latinmodern-math.otf`, with the GUST license text next
+to it; it is the only font binary in the repository. All other listed faces
+contribute measurements only.
 
 `PROVENANCE.md` records the source file hash of every committed table.
