@@ -240,6 +240,10 @@ pub enum SpanKind {
     Code,
     /// One unbreakable atom (replaced object: image, math fallback).
     Object,
+    /// One unbreakable atom that must stay attached to the atom on its left:
+    /// a footnote reference. A break before it would start a line with a
+    /// superscript number, and the CJK/Latin gap would open a hole before it.
+    Footnote,
     /// One unbreakable atom: a ruby base. The annotation travels beside it in
     /// the layout block, not in the atom text, so line breaking only sees the
     /// base width.
@@ -308,6 +312,18 @@ impl<'a> InlineSpan<'a> {
         }
     }
 
+    pub const fn footnote(text: &'a str, style: StyleId) -> Self {
+        Self {
+            text,
+            style,
+            kind: SpanKind::Footnote,
+            decor: Decorations::NONE,
+            link: None,
+            width: Width::ZERO,
+            penalty: 0,
+        }
+    }
+
     pub const fn hard_break(style: StyleId) -> Self {
         Self {
             text: "",
@@ -346,6 +362,14 @@ pub fn paragraph_from_spans(
                     continue;
                 }
                 let text = String::from(span.text);
+                builder.push_atom(text, AtomKind::InlineObject, PunctClass::None, span.style);
+            }
+            SpanKind::Footnote => {
+                if span.text.is_empty() {
+                    continue;
+                }
+                let text = String::from(span.text);
+                builder.join = Join::Attach;
                 builder.push_atom(text, AtomKind::InlineObject, PunctClass::None, span.style);
             }
             SpanKind::Ruby => {
@@ -387,6 +411,9 @@ enum Join {
     Normal,
     Space,
     Forced,
+    /// Attach this atom to the previous one: no break, no gap. Used by a
+    /// footnote reference, which belongs to the character before it.
+    Attach,
     /// Start of a continuation piece of a hyphenated word.
     Hyphen,
     /// A break opportunity inside inline math with its glue and penalty.
@@ -598,6 +625,13 @@ fn push_atom(
             Join::Space => space_boundary(previous, &atom),
             Join::Forced => Boundary {
                 breakable: Breakability::Forced,
+                kind: BoundaryKind::Normal,
+                role: BoundaryRole::Plain,
+                glue: Glue::default(),
+                penalty: 0,
+            },
+            Join::Attach => Boundary {
+                breakable: Breakability::Forbidden,
                 kind: BoundaryKind::Normal,
                 role: BoundaryRole::Plain,
                 glue: Glue::default(),

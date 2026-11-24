@@ -37,6 +37,7 @@ pub const PAGE_STYLE: &str = "html,body{margin:0;padding:0;background:#f4f4f4;co
 .block{position:absolute;white-space:pre;}\
 .atom{position:absolute;white-space:pre;}\
 .footnote-number{position:absolute;white-space:pre;}\
+.footnote-mark{font-size:66.6667%;vertical-align:0.6em;line-height:0;}\
 .math{position:absolute;white-space:pre;}\
 .math-rule{position:absolute;}\
 .figure{position:absolute;background:#eee;border:1px solid #ccc;}\
@@ -321,7 +322,8 @@ fn render_block(
             if atom_text.is_empty() {
                 continue;
             }
-            let drawn = match block.marks.iter().find(|mark| mark.atom == atom.atom) {
+            let mark = block.marks.iter().find(|mark| mark.atom == atom.atom);
+            let drawn = match mark {
                 Some(mark) => format!("{}", mark.number),
                 None => String::from(atom_text),
             };
@@ -367,6 +369,9 @@ fn render_block(
                     em(note.size),
                     escape(&note.text)
                 ),
+                None if mark.is_some() => {
+                    format!("<sup class=\"footnote-mark\">{}</sup>", escape(&drawn))
+                }
                 None => escape(&drawn),
             };
             // Links stay inert here: the preview must not create external

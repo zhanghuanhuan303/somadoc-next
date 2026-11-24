@@ -114,6 +114,7 @@ only).
 | [0093](0093-web-studio.md) | Web Studio is all-Rust wasm (Leptos CSR) plus an Axum I/O boundary; the whole engine runs in the browser and canonical hashes must match | Accepted |
 | [0094](0094-html-geometry-percent.md) | HTML geometry is percentage-based relative to the page/block frame; inline sizes are ratios, not nested em | Accepted |
 | [0095](0095-studio-builds-the-active-tab-frontend.md) | Studio builds each tab with its own frontend; `BuildRequest.format` is optional and falls back to the project input | Accepted |
+| [0096](0096-footnote-mark-attachment.md) | A footnote mark attaches to the text before it (no break, no gap); body superscripts are 2/3 size, raised 2/5 em | Accepted |
 
 ## Rules
 

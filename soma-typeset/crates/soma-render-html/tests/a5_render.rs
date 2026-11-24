@@ -188,9 +188,10 @@ fn footnote_markers_render_the_number() {
         "placeholder must not reach the output"
     );
     assert!(
-        html.contains(">1</span>"),
-        "the marker must draw its number"
+        html.contains("<sup class=\"footnote-mark\">1</sup>"),
+        "the marker must draw its number as a superscript"
     );
+    assert!(PAGE_STYLE.contains("vertical-align:0.6em"));
     assert!(text_of(&html).contains("脚注内容。"));
 }
 

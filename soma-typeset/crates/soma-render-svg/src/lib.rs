@@ -148,7 +148,7 @@ fn render_footnote_number(
         + first.y.0
         + first.line.ascent.0
         + first.line.leading.0 / 2
-        - style.font_size.0 / 5;
+        - style.font_size.0 * 2 / 5;
     out.push_str(&format!(
         "<text data-page=\"{page}\" data-footnote-number=\"{number}\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\">{number}</text>\n",
         units(Width(x)),
@@ -262,7 +262,8 @@ fn render_block_at(
             if atom_text.is_empty() {
                 continue;
             }
-            let drawn = match block.marks.iter().find(|mark| mark.atom == atom.atom) {
+            let mark = block.marks.iter().find(|mark| mark.atom == atom.atom);
+            let drawn = match mark {
                 Some(mark) => format!("{}", mark.number),
                 None => String::from(atom_text),
             };
@@ -274,12 +275,20 @@ fn render_block_at(
                 .cloned()
                 .unwrap_or_else(ComputedStyle::base);
             let x = layout.page.margin_left.0 + block.x.0 + atom.x.0;
-            let y = layout.page.margin_top.0
+            let mut y = layout.page.margin_top.0
                 + block.y.0
                 + extra_y
                 + placed.y.0
                 + placed.line.ascent.0
                 + placed.line.leading.0 / 2;
+            let font_size = if mark.is_some() {
+                // A footnote reference is a superscript: two thirds of the
+                // body size, raised two fifths of an em (ADR-0096).
+                y -= effective.font_size.0 * 2 / 5;
+                Width(effective.font_size.0 * 2 / 3)
+            } else {
+                effective.font_size
+            };
             let decorations = text.atom_decorations(block.node, atom.atom);
             let decoration = if decorations.contains(soma_core::Decorations::UNDERLINE) {
                 " text-decoration=\"underline\""
@@ -299,7 +308,7 @@ fn render_block_at(
                 atom.atom,
                 units(Width(x)),
                 units(Width(y)),
-                units(effective.font_size),
+                units(font_size),
                 color(syntax.or(effective.color)),
                 escape(&drawn)
             ));

@@ -933,7 +933,7 @@ fn paint_footnote_number(
     let full = painter.scale.size(&style);
     let size = full * 2 / 3;
     let x = scene.layout.page.margin_left.0;
-    let y = scene.layout.page.height.0 - baseline + style.font_size.0 / 5;
+    let y = scene.layout.page.height.0 - baseline + style.font_size.0 * 2 / 5;
     painter.set_fill(style.color.unwrap_or(0));
     painter.start_text();
     painter.set_font(role, size);
@@ -1484,10 +1484,10 @@ fn paint_block(
             let mut y = layout.page.height.0 - baseline;
             if mark.is_some() {
                 // `full` is milli-points for the font operator; the baseline
-                // lives in layout units. Raise by 1/5 em in layout units so
-                // the superscript sits just above the cap height instead of
-                // floating a third of an em above the line.
-                y += atom_style.font_size.0 / 5;
+                // lives in layout units. Raise by two fifths of an em so the
+                // two-thirds-size digit clears the body cap height, matching
+                // LaTeX/Typst footnote marks (ADR-0096).
+                y += atom_style.font_size.0 * 2 / 5;
             }
             let syntax_color = text
                 .atom_syntax(block.node, atom.atom)

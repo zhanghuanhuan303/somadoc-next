@@ -154,7 +154,7 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
     <tr><td>中文规则</td><td>禁则/挤压/悬挂、标点类、行边裁剪上限、连字符断词、注音</td><td>规则表带 <code>ruleId</code>；未核实规则只能产生软约束</td></tr>
     <tr><td>数学</td><td>TeX 8 类原子与间距表；字体 MATH 常数 + 字形墨迹 + 纵向变体</td><td><code>soma.metrics/7</code>；41 个常数、4,283 个数学字形、490 条纵向变体（New Computer Modern Math）</td></tr>
     <tr><td>确定性</td><td>全整数（1/4096 em），canonical JSON，native 与 <code>wasm32-wasip1</code> 同哈希</td><td>无 <code>f32</code>；哈希覆盖 param/rules/metrics/template/engine</td></tr>
-    <tr><td>语料基线</td><td><span class="mono">ALL,48,599,1213,0,0,3,0,0,6,809,1404,428,9</span></td><td>Gate Q′；12 份中文文档；0 过度压缩、0 紧急回退、3 处续排、0 孤行/寡行</td></tr>
+    <tr><td>语料基线</td><td><span class="mono">ALL,48,599,1213,0,0,3,0,0,6,809,1404,428,0</span></td><td>Gate Q′；12 份中文文档；0 过度压缩、0 紧急回退、3 处续排、0 孤行/寡行</td></tr>
     <tr><td>K-P 性能</td><td>混排 2000 atoms p95 <b>1.12 ms</b>；4000 atoms <b>2.26 ms</b>；纯中文 2000 atoms 0.22 ms</td><td>本机 release，预算 ≤2000 atoms 20 ms、≤4000 atoms 80 ms，<code>bench --check</code> PASS</td></tr>
     <tr><td>成品</td><td>math-v2 2 页 · article 5 页 · full 14 页 · brief 12 页 · song 13 页</td><td>同一份 <code>examples/book</code> 源码 + 一份纯 YAML 模板</td></tr>
   </tbody>

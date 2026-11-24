@@ -72,6 +72,51 @@ fn attr<'a>(line: &'a str, name: &str) -> Option<&'a str> {
     Some(&rest[..end])
 }
 
+fn is_mark(layout: &PagedLayout, node: u32, atom: u32) -> bool {
+    layout
+        .pages
+        .iter()
+        .flat_map(|page| page.blocks.iter())
+        .filter(|block| block.node.0 == node)
+        .flat_map(|block| block.marks.iter())
+        .any(|mark| mark.atom == atom)
+}
+
+/// Baseline and body font size of a marked atom.
+fn mark_frame(fixture: &Fixture, node: u32, atom: u32) -> Option<(i32, i32)> {
+    for page in &fixture.layout.pages {
+        for block in &page.blocks {
+            if block.node.0 != node || !block.marks.iter().any(|mark| mark.atom == atom) {
+                continue;
+            }
+            for placed in &block.lines {
+                if atom < placed.line.start || atom >= placed.line.end {
+                    continue;
+                }
+                let baseline = fixture.layout.page.margin_top.0
+                    + block.y.0
+                    + placed.y.0
+                    + placed.line.ascent.0
+                    + placed.line.leading.0 / 2;
+                let style_id = fixture
+                    .layout
+                    .text
+                    .atom_style(block.node, atom)
+                    .unwrap_or(block.style);
+                let size = fixture
+                    .styled
+                    .table()
+                    .get(style_id)
+                    .or_else(|| fixture.styled.table().get(block.style))?
+                    .font_size
+                    .0;
+                return Some((baseline, size));
+            }
+        }
+    }
+    None
+}
+
 fn text_elements(svg: &str) -> Vec<(&str, &str, &str, &str)> {
     svg.lines()
         .filter(|line| line.starts_with("<text ") && !line.contains("data-footnote-number"))
@@ -184,6 +229,9 @@ fn svg_coordinates_equal_the_layout_coordinates() {
     {
         let node: u32 = attr(line, "data-node").unwrap().parse().unwrap();
         let atom: u32 = attr(line, "data-atom").unwrap().parse().unwrap();
+        if is_mark(&fixture.layout, node, atom) {
+            continue;
+        }
         let x = attr(line, "x").unwrap();
         let y = attr(line, "y").unwrap();
 
@@ -200,6 +248,41 @@ fn svg_coordinates_equal_the_layout_coordinates() {
         checked += 1;
     }
     assert!(checked > 20);
+}
+
+#[test]
+fn footnote_marks_are_smaller_and_raised() {
+    let fixture = fixture();
+    let svg = render(
+        &fixture.layout,
+        fixture.styled.table(),
+        &fixture.layout.text,
+    );
+
+    let mut checked = 0;
+    for line in svg
+        .lines()
+        .filter(|line| line.starts_with("<text ") && !line.contains("data-footnote-number"))
+    {
+        let node: u32 = attr(line, "data-node").unwrap().parse().unwrap();
+        let atom: u32 = attr(line, "data-atom").unwrap().parse().unwrap();
+        let Some((baseline, size)) = mark_frame(&fixture, node, atom) else {
+            continue;
+        };
+        // ADR-0096: two thirds of the body size, raised two fifths of an em.
+        assert_eq!(
+            attr(line, "font-size").unwrap(),
+            em(Width(size * 2 / 3)),
+            "mark size for node {node} atom {atom}"
+        );
+        assert_eq!(
+            attr(line, "y").unwrap(),
+            em(Width(baseline - size * 2 / 5)),
+            "mark baseline for node {node} atom {atom}"
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "the fixture must contain a footnote mark");
 }
 
 #[test]
@@ -271,4 +354,6 @@ fn svg_bytes_are_a_visual_regression_lock() {
 /// position changes; every body coordinate is untouched.
 /// 2026-11-25: the footnote area gains a separator rule and a note number,
 /// and table cells gain vertical padding (ADR-0082/0083/0084).
-const GOLDEN_SVG_HASH: u64 = 465_205_654_041_102_849;
+/// 2026-11-25: footnote marks are two thirds of the body size and raised two
+/// fifths of an em, matching the PDF and LaTeX (ADR-0096).
+const GOLDEN_SVG_HASH: u64 = 13_836_169_350_716_239_419;

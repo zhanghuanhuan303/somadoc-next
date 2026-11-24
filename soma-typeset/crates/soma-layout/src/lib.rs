@@ -3143,7 +3143,7 @@ impl Builder<'_> {
                     out.push(OwnedSpan {
                         text: String::from(FOOTNOTE_MARKER),
                         style,
-                        kind: SpanKind::Object,
+                        kind: SpanKind::Footnote,
                         decor,
                         link: link.map(String::from),
                         width: Width::ZERO,

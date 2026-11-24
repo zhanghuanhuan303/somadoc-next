@@ -2,7 +2,7 @@
 
 use soma_core::StyleId;
 use soma_core::Width;
-use soma_core::{AtomKind, PunctClass};
+use soma_core::{AtomKind, BoundaryRole, Breakability, PunctClass};
 use soma_rules::{
     is_cjk, justified_style, paragraph_from_spans, paragraph_from_text, punct_class, InlineSpan,
     SpanKind,
@@ -59,6 +59,30 @@ fn styled_runs_keep_their_style_id() {
     assert_eq!(paragraph.atoms[0].style, StyleId(0));
     assert_eq!(paragraph.atoms[2].style, StyleId(3));
     assert_eq!(paragraph.atoms[3].style, StyleId(3));
+}
+
+#[test]
+fn a_footnote_mark_attaches_to_the_text_before_it() {
+    let paragraph = paragraph_from_spans(
+        &[
+            InlineSpan::text("行", StyleId(0)),
+            InlineSpan::footnote("\u{e000}", StyleId(0)),
+            InlineSpan::text("。", StyleId(0)),
+        ],
+        style(),
+    )
+    .expect("paragraph");
+
+    assert_eq!(paragraph.atoms.len(), 3);
+    // No break and no CJK/Latin gap before a footnote reference: a line must
+    // never start with a superscript number (ADR-0096).
+    let before = paragraph.boundaries[0];
+    assert_eq!(before.breakable, Breakability::Forbidden);
+    assert_eq!(before.role, BoundaryRole::Plain);
+    assert_eq!(before.glue.width, Width::ZERO);
+    assert_eq!(before.glue.stretch, Width::ZERO);
+    // The following full stop may not start a line either.
+    assert_eq!(paragraph.boundaries[1].breakable, Breakability::Forbidden);
 }
 
 #[test]
