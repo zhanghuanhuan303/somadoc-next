@@ -81,6 +81,9 @@ pub struct PdfFont {
     bold: bool,
     serif: bool,
     cid: Option<CidSystem>,
+    /// Vertical `MathVariants`: base glyph id → variant glyph ids, in font
+    /// order. Empty for a face without `MATH` (ADR-0075).
+    math_variants: Vec<(u16, Vec<u16>)>,
 }
 
 impl PdfFont {
@@ -91,6 +94,7 @@ impl PdfFont {
     pub fn from_bytes(data: Vec<u8>, index: u32) -> Result<Self, PdfError> {
         let face = Face::open(&data, index)?;
         let cmap = parse_cmap(&data, &face)?;
+        let math_variants = parse_math_variants(&data, &face);
         let upem = read_u16(&data, face.required(b"head")?.offset + 18)?;
         if upem == 0 {
             return Err(PdfError::new("font unitsPerEm is zero"));
@@ -161,6 +165,7 @@ impl PdfFont {
             bold,
             serif: false,
             cid,
+            math_variants,
         })
     }
 
@@ -177,6 +182,52 @@ impl PdfFont {
             Ok(index) => self.cmap[index].1,
             Err(_) => 0,
         }
+    }
+
+    /// Whether the face maps the codepoint to a glyph.
+    pub fn has_glyph(&self, codepoint: u32) -> bool {
+        self.cmap
+            .binary_search_by_key(&codepoint, |(cp, _)| *cp)
+            .is_ok()
+    }
+
+    /// Advance in 1/4096 em, rounded like `soma-metrics` stores it. `None`
+    /// when the face has no glyph for the codepoint.
+    ///
+    /// This is the unit a metrics table speaks, so a caller can check that a
+    /// font file is the face a table was measured from (ADR-0077) without
+    /// re-reading the table's own font.
+    pub fn advance_4096(&self, codepoint: u32) -> Option<i32> {
+        let index = self
+            .cmap
+            .binary_search_by_key(&codepoint, |(cp, _)| *cp)
+            .ok()?;
+        let glyph = self.cmap[index].1 as usize;
+        let advance = self.widths.get(glyph).copied().unwrap_or(0) as i64;
+        let upem = self.upem.max(1) as i64;
+        let numerator = advance * 4096;
+        Some(if numerator >= 0 {
+            ((numerator + upem / 2) / upem) as i32
+        } else {
+            -(((-numerator) + upem / 2) / upem) as i32
+        })
+    }
+
+    /// The nth vertical design variant of `codepoint`, in the font's order.
+    ///
+    /// The variant glyph is usually not in the cmap, so this is the only way to
+    /// address it. `None` when the face has no construction or no such ordinal;
+    /// the caller then draws the base glyph at its fallback size.
+    pub fn math_variant_glyph(&self, codepoint: u32, index: u16) -> Option<u16> {
+        let base = self.glyph(codepoint);
+        if base == 0 {
+            return None;
+        }
+        let at = self
+            .math_variants
+            .binary_search_by_key(&base, |(gid, _)| *gid)
+            .ok()?;
+        self.math_variants[at].1.get(index as usize).copied()
     }
 
     pub fn is_bold(&self) -> bool {
@@ -539,6 +590,85 @@ fn parse_widths(data: &[u8], face: &Face) -> Result<Vec<u16>, PdfError> {
         widths.push(last);
     }
     Ok(widths)
+}
+
+/// Vertical `MathVariants` of a face: `(base glyph, [variant glyph])`.
+///
+/// Only the vertical coverage and construction offsets are read; the variant
+/// glyphs themselves are usually unencoded, so the ordinal is resolved here at
+/// draw time rather than baked into the page result (ADR-0075). A malformed
+/// MATH table yields no variants instead of failing the whole PDF.
+fn parse_math_variants(data: &[u8], face: &Face) -> Vec<(u16, Vec<u16>)> {
+    let Some(math) = face.find(b"MATH") else {
+        return Vec::new();
+    };
+    let Ok(offset) = read_u16(data, math.offset + 8) else {
+        return Vec::new();
+    };
+    if offset == 0 {
+        return Vec::new();
+    }
+    let base = math.offset + offset as usize;
+    let Ok(coverage_offset) = read_u16(data, base + 2) else {
+        return Vec::new();
+    };
+    let Ok(count) = read_u16(data, base + 6) else {
+        return Vec::new();
+    };
+    let Ok(glyphs) = math_coverage(data, base + coverage_offset as usize) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (index, gid) in glyphs.into_iter().take(count as usize).enumerate() {
+        let Ok(construction) = read_u16(data, base + 10 + index * 2) else {
+            continue;
+        };
+        let construction = base + construction as usize;
+        let Ok(variant_count) = read_u16(data, construction + 2) else {
+            continue;
+        };
+        let mut variants = Vec::with_capacity(variant_count as usize);
+        for variant in 0..variant_count as usize {
+            let Ok(glyph) = read_u16(data, construction + 4 + variant * 4) else {
+                break;
+            };
+            variants.push(glyph);
+        }
+        out.push((gid, variants));
+    }
+    out.sort_by_key(|(gid, _)| *gid);
+    out.dedup_by_key(|(gid, _)| *gid);
+    out
+}
+
+/// Glyph ids of an OpenType coverage table, in coverage order.
+fn math_coverage(data: &[u8], offset: usize) -> Result<Vec<u16>, PdfError> {
+    match read_u16(data, offset)? {
+        1 => {
+            let count = read_u16(data, offset + 2)? as usize;
+            let mut out = Vec::with_capacity(count);
+            for index in 0..count {
+                out.push(read_u16(data, offset + 4 + index * 2)?);
+            }
+            Ok(out)
+        }
+        2 => {
+            let count = read_u16(data, offset + 2)? as usize;
+            let mut out = Vec::new();
+            for index in 0..count {
+                let record = offset + 4 + index * 6;
+                let start = read_u16(data, record)?;
+                let end = read_u16(data, record + 2)?;
+                for gid in start..=end {
+                    out.push(gid);
+                }
+            }
+            Ok(out)
+        }
+        other => Err(PdfError::new(format!(
+            "unsupported coverage format {other}"
+        ))),
+    }
 }
 
 fn parse_cmap(data: &[u8], face: &Face) -> Result<Vec<(u32, u16)>, PdfError> {

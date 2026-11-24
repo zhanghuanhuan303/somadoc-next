@@ -62,7 +62,7 @@ fn json_is_the_canonical_page_result() {
     ]);
 
     assert!(ok, "stderr: {stderr}");
-    assert!(stdout.starts_with("{\"schema\":\"soma.pages/10\""));
+    assert!(stdout.starts_with("{\"schema\":\"soma.pages/11\""));
     assert!(stdout.ends_with("}\n"));
 }
 
@@ -370,6 +370,61 @@ fn pdf_without_a_font_is_an_error() {
 
     assert!(!ok, "pdf needs a font");
     assert!(stderr.contains("--font"), "stderr: {stderr}");
+}
+
+/// The face the table was measured from is bundled, so the default path works
+/// on a machine with no TeX installation and never lets a *different* math
+/// face stand in (the table's variants are addressed by ordinal, ADR-0077).
+#[test]
+fn the_bundled_math_face_is_used_without_the_flag() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("workspace root");
+    let font = root.join("crates/soma-render-pdf/tests/fixtures/tiny.ttf");
+    let input = temp(
+        "pdf-auto-math",
+        "tex",
+        "行内 $\\sum_{i=1}^{n} i$ 与 $\\sqrt{2}$。\n\n\\[ \\frac{a}{b} \\]\n",
+    );
+    let out =
+        std::env::temp_dir().join(format!("soma-cli-{}-pdf-auto-math.pdf", std::process::id()));
+
+    let (ok, stdout, stderr) = run(&[
+        "render",
+        "--input",
+        input.to_str().unwrap(),
+        "--format",
+        "pdf",
+        "--font",
+        font.to_str().unwrap(),
+        "--stats",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+
+    assert!(ok, "stderr: {stderr}");
+    assert!(stdout.is_empty(), "pdf goes to the file");
+    assert!(
+        stderr.contains("math:") && stderr.contains("(auto)"),
+        "the auto-picked face is reported under --stats: {stderr}"
+    );
+    let bytes = std::fs::read(&out).expect("pdf output");
+    // The tiny body face is TrueType (`/FontFile2`); Latin Modern Math is CFF
+    // (`/FontFile3`). Both programs are embedded.
+    let programs = bytes
+        .windows(10)
+        .filter(|window| window == b"/FontFile2")
+        .count()
+        + bytes
+            .windows(10)
+            .filter(|window| window == b"/FontFile3")
+            .count();
+    assert!(
+        programs >= 2,
+        "body and math programs are both embedded: {programs}"
+    );
+    let _ = std::fs::remove_file(out);
 }
 
 #[test]

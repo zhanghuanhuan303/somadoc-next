@@ -184,7 +184,7 @@ fn canonical_json_carries_inline_math() {
     let layout = layout_of(vec![paragraph_with(vec![text("甲"), math("x^2")])]);
     let json = layout.canonical_json();
 
-    assert!(json.contains("\"schema\":\"soma.pages/10\""));
+    assert!(json.contains("\"schema\":\"soma.pages/11\""));
     assert!(json.contains("\"inlineMath\":[{\"atom\":"));
     assert!(json.contains("\"source\":\"x^2\""));
     assert!(json.contains("\"math\":{\"width\":"));

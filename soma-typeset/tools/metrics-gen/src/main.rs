@@ -1,11 +1,11 @@
-//! Extract numeric font metrics into the `soma.metrics/2` blob.
+//! Extract numeric font metrics into the `soma.metrics/7` blob.
 //!
 //! The tool reads a TrueType/OpenType font (or a collection index) and writes
-//! advances, line metrics, per-codepoint widths, and the ink gap of
-//! punctuation. The gap comes from the `glyf` bbox when the font has one, and
-//! from running the Type 2 charstring when the outlines are CFF (`cff.rs`).
-//! It never ships a font and never writes outlines: the output is a table of
-//! integers.
+//! advances, line metrics, per-codepoint widths, ink gaps, the math face's
+//! `MATH` constants and its vertical design variants. The ink comes from the
+//! `glyf` bbox when the font has one, and from running the Type 2 charstring
+//! when the outlines are CFF (`cff.rs`). It never ships a font and never writes
+//! outlines: the output is a table of integers.
 //!
 //! Usage:
 //!
@@ -27,7 +27,7 @@ use std::process::ExitCode;
 
 const UNIT: i32 = 4096;
 const MAGIC: u32 = 0x534d_5431; // "SMT1"
-const VERSION: u16 = 5;
+const VERSION: u16 = 7;
 
 /// Codepoint blocks whose advance is expected to be uniform (CJK).
 const UNIFORM_BLOCKS: &[(u32, u32)] = &[
@@ -402,7 +402,7 @@ impl<'a> Font<'a> {
             .map(|(x_min, _, x_max, _)| (x_min, x_max)))
     }
 
-    /// The 35 constants `soma-math` reads, in `soma_core::MathParam` order, as
+    /// The 41 constants `soma-math` reads, in `soma_core::MathParam` order, as
     /// per-mille of one em. `None` when the face has no `MATH` table.
     ///
     /// OpenType stores four plain fields (`scriptPercentScaleDown`,
@@ -481,7 +481,110 @@ impl<'a> Font<'a> {
             length(raw[47]),  // UnderbarRule
             length(raw[48]),  // UnderbarExtra
             length(raw[6]),   // AccentBaseHeight
+            length(raw[49]),  // RadicalGap (radicalVerticalGap)
+            length(raw[50]),  // RadicalDisplayGap
+            length(raw[37]),  // NumDisplayGap
+            length(raw[40]),  // DenomDisplayGap
+            length(raw[9]),   // SubTopMax
+            length(raw[17]),  // SpaceAfterScript
         ]))
+    }
+
+    /// Vertical `MathVariants` of the face, keyed by the smallest codepoint
+    /// that reaches the base glyph.
+    ///
+    /// A variant glyph is usually not encoded in the cmap (Noto Sans Math has
+    /// 119 unencoded variants against 13 encoded ones), so the table stores the
+    /// variant's measurements and lets the renderer resolve the ordinal in the
+    /// actual font. The list order is the font's order (increasing size), and
+    /// must never be reordered: `soma-math` and the PDF writer both address a
+    /// variant by its index.
+    ///
+    /// Each row is `(horizontal advance, ink top, ink bottom, right gap)`, all
+    /// in 1/4096 em. The horizontal advance comes from `hmtx`; the MATH
+    /// record's `advanceMeasurement` is the *vertical* design extent, which is
+    /// already the ink height for the fonts measured here.
+    fn math_variants(
+        &self,
+        upem: i32,
+        map: &BTreeMap<u32, u16>,
+        advances: &[u16],
+    ) -> Result<Vec<(u32, Vec<(i32, i32, i32, i32)>)>, String> {
+        let Some((math, _)) = self.table(b"MATH") else {
+            return Ok(Vec::new());
+        };
+        let variants = read_u16(self.data, math + 8)? as usize;
+        if variants == 0 {
+            return Ok(Vec::new());
+        }
+        let base = math + variants;
+        let coverage = base + read_u16(self.data, base + 2)? as usize;
+        let count = read_u16(self.data, base + 6)? as usize;
+        let glyphs = coverage_glyphs(self.data, coverage)?;
+
+        let mut reverse: BTreeMap<u16, u32> = BTreeMap::new();
+        for (&codepoint, &gid) in map {
+            reverse.entry(gid).or_insert(codepoint);
+        }
+
+        let mut out = Vec::new();
+        for (index, gid) in glyphs.into_iter().take(count).enumerate() {
+            let Some(&codepoint) = reverse.get(&gid) else {
+                continue;
+            };
+            let construction = base + read_u16(self.data, base + 10 + index * 2)? as usize;
+            let variant_count = read_u16(self.data, construction + 2)? as usize;
+            let mut rows = Vec::with_capacity(variant_count);
+            for variant in 0..variant_count {
+                let record = construction + 4 + variant * 4;
+                let glyph = read_u16(self.data, record)?;
+                let width = advances.get(glyph as usize).copied().unwrap_or(0) as i32;
+                let (top, bottom, right_gap) = match self.ink_box(glyph)? {
+                    Some((_x_min, y_min, x_max, y_max)) => (
+                        scale(y_max, upem),
+                        scale(-y_min, upem),
+                        scale(width - x_max, upem).max(0),
+                    ),
+                    None => (scale(width, upem), 0, 0),
+                };
+                rows.push((
+                    scale(width, upem),
+                    top.clamp(i16::MIN as i32, i16::MAX as i32),
+                    bottom.clamp(i16::MIN as i32, i16::MAX as i32),
+                    right_gap.clamp(0, i16::MAX as i32),
+                ));
+            }
+            out.push((codepoint, rows));
+        }
+        out.sort_unstable_by_key(|(codepoint, _)| *codepoint);
+        out.dedup_by_key(|(codepoint, _)| *codepoint);
+        Ok(out)
+    }
+
+    /// Per-glyph top accent attachment in font units, from
+    /// `MathGlyphInfo/MathTopAccentAttachment`.
+    fn top_accent_attachments(&self) -> Result<BTreeMap<u16, i32>, String> {
+        let Some((math, _)) = self.table(b"MATH") else {
+            return Ok(BTreeMap::new());
+        };
+        let glyph_info = read_u16(self.data, math + 6)? as usize;
+        if glyph_info == 0 {
+            return Ok(BTreeMap::new());
+        }
+        let info = math + glyph_info;
+        let attachments = read_u16(self.data, info + 2)? as usize;
+        if attachments == 0 {
+            return Ok(BTreeMap::new());
+        }
+        let base = info + attachments;
+        let coverage = base + read_u16(self.data, base)? as usize;
+        let count = read_u16(self.data, base + 2)? as usize;
+        let glyphs = coverage_glyphs(self.data, coverage)?;
+        let mut out = BTreeMap::new();
+        for (index, gid) in glyphs.into_iter().take(count).enumerate() {
+            out.insert(gid, read_i16(self.data, base + 4 + index * 4)? as i32);
+        }
+        Ok(out)
     }
 
     /// Per-glyph italic correction in font units, from `MathGlyphInfo`.
@@ -629,6 +732,10 @@ struct OutFace {
     glyph_ink: Vec<(u32, u8, u8)>,
     math_constants: Vec<i32>,
     math_glyphs: Vec<(u32, i32, i32, i32)>,
+    /// `(base codepoint, [(advance, top, bottom, right gap)])`, in font order.
+    math_variants: Vec<(u32, Vec<(i32, i32, i32, i32)>)>,
+    /// `(codepoint, top accent attachment)`, in 1/4096 em.
+    math_top_accent: Vec<(u32, i32)>,
 }
 
 fn main() -> ExitCode {
@@ -1713,14 +1820,35 @@ fn run() -> Result<(), String> {
         // `soma-math` falls back to its TeX constants.
         let mut math_constants = Vec::new();
         let mut math_glyphs: Vec<(u32, i32, i32, i32)> = Vec::new();
+        let mut math_variants: Vec<(u32, Vec<(i32, i32, i32, i32)>)> = Vec::new();
+        let mut math_top_accent: Vec<(u32, i32)> = Vec::new();
         if spec.family == 2 {
             if let Some(constants) = font.math_constants(upem)? {
                 math_constants = constants;
             }
-            if outlines {
+            math_variants = font.math_variants(upem, &map, &advances)?;
+            let attachments = font.top_accent_attachments()?;
+            for (&codepoint, &gid) in &map {
+                if let Some(value) = attachments.get(&gid) {
+                    math_top_accent.push((codepoint, scale(*value, upem)));
+                }
+            }
+            math_top_accent.sort_unstable_by_key(|entry| entry.0);
+            math_top_accent.dedup_by_key(|entry| entry.0);
+            // A CFF math face can be measured too: `ink_box` runs its Type 2
+            // charstrings (ADR-0073), and `MATH` constants and variants do not
+            // need `glyf`. The ink is what lets a radical sit on its radicand
+            // and an operator centre on the axis, so a glyph the interpreter
+            // cannot measure is skipped rather than failing the whole table.
+            if outlines || font.cff.is_some() {
                 let italics = font.italic_corrections()?;
                 for (&codepoint, &gid) in &map {
-                    let Some((_, y_min, _, y_max)) = font.ink_box(gid)? else {
+                    let ink = if outlines {
+                        font.ink_box(gid)?
+                    } else {
+                        font.ink_box(gid).ok().flatten()
+                    };
+                    let Some((_, y_min, _, y_max)) = ink else {
                         continue;
                     };
                     let top = scale(y_max, upem).clamp(i16::MIN as i32, i16::MAX as i32);
@@ -1738,7 +1866,7 @@ fn run() -> Result<(), String> {
         }
 
         println!(
-            "face {}/{}: upem={} ascii-entries={} blocks={} entries={} ink={} glyphs-ink={} math-constants={} math-glyphs={}",
+            "face {}/{}: upem={} ascii-entries={} blocks={} entries={} ink={} glyphs-ink={} math-constants={} math-glyphs={} math-variants={}",
             spec.family,
             spec.weight,
             upem,
@@ -1748,7 +1876,8 @@ fn run() -> Result<(), String> {
             ink.len(),
             glyph_ink.len(),
             math_constants.len(),
-            math_glyphs.len()
+            math_glyphs.len(),
+            math_variants.iter().map(|(_, rows)| rows.len()).sum::<usize>()
         );
 
         faces.push(OutFace {
@@ -1765,6 +1894,8 @@ fn run() -> Result<(), String> {
             glyph_ink,
             math_constants,
             math_glyphs,
+            math_variants,
+            math_top_accent,
         });
     }
 
@@ -1827,6 +1958,31 @@ fn run() -> Result<(), String> {
             bytes.extend_from_slice(&(*top as i16).to_le_bytes());
             bytes.extend_from_slice(&(*bottom as i16).to_le_bytes());
             bytes.extend_from_slice(&(*italic as i16).to_le_bytes());
+        }
+        // Version 6: vertical MathVariants, keyed by base codepoint. The
+        // variant order is the font's and must not be reordered: layout and
+        // the PDF writer address a variant by its index.
+        bytes.extend_from_slice(&(face.math_variants.len() as u16).to_le_bytes());
+        let mut previous = 0u32;
+        for (cp, rows) in &face.math_variants {
+            write_varint(&mut bytes, cp - previous);
+            previous = *cp;
+            bytes.extend_from_slice(&(rows.len() as u16).to_le_bytes());
+            for (advance, top, bottom, right_gap) in rows {
+                bytes.extend_from_slice(&advance.to_le_bytes());
+                bytes.extend_from_slice(&(*top as i16).to_le_bytes());
+                bytes.extend_from_slice(&(*bottom as i16).to_le_bytes());
+                bytes.extend_from_slice(&(*right_gap as i16).to_le_bytes());
+            }
+        }
+        // Version 7: top accent attachments. An accent is aligned by these,
+        // not by its own advance: a combining mark has none (ADR-0076).
+        bytes.extend_from_slice(&(face.math_top_accent.len() as u32).to_le_bytes());
+        let mut previous = 0u32;
+        for (cp, value) in &face.math_top_accent {
+            write_varint(&mut bytes, cp - previous);
+            previous = *cp;
+            bytes.extend_from_slice(&(*value as i16).to_le_bytes());
         }
     }
 

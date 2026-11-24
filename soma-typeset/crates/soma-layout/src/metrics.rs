@@ -10,7 +10,7 @@
 //!
 //! Both are pure functions of `(table, style)`; no state, no cache, no fonts.
 
-use soma_core::{LineMetrics, MathParam, Metrics, StyleId, Width};
+use soma_core::{LineMetrics, MathParam, MathVariant, Metrics, StyleId, Width};
 use soma_metrics::{Face, MetricsTable};
 use soma_template::{ComputedStyle, FontWeight, StyledDoc};
 
@@ -91,6 +91,28 @@ impl Metrics for TableMetrics<'_> {
             Some(face) => math_italic(face, text, self.size),
             None => Width::ZERO,
         }
+    }
+
+    fn math_variant_count(&self, text: &str, _style: StyleId) -> u16 {
+        math_variant_count(self.table.math_face(), text)
+    }
+
+    fn math_variant(&self, text: &str, index: u16, _style: StyleId) -> Option<MathVariant> {
+        math_variant_of(self.table.math_face()?, text, index, self.size)
+    }
+
+    fn math_top_accent(&self, text: &str, _style: StyleId) -> Option<Width> {
+        math_top_accent(self.table.math_face()?, text, self.size)
+    }
+
+    fn math_has_glyph(&self, character: char, _style: StyleId) -> bool {
+        self.table
+            .math_face()
+            .is_some_and(|face| face.has(character as u32))
+    }
+
+    fn math_glyph_bottom(&self, text: &str, _style: StyleId) -> Option<Width> {
+        math_glyph_bottom(self.table.math_face()?, text, self.size)
     }
 
     fn ink_right(&self, text: &str, _style: StyleId) -> Option<Width> {
@@ -293,6 +315,31 @@ impl Metrics for StyledMetrics<'_> {
         }
     }
 
+    fn math_variant_count(&self, text: &str, _style: StyleId) -> u16 {
+        math_variant_count(self.table.math_face(), text)
+    }
+
+    fn math_variant(&self, text: &str, index: u16, style: StyleId) -> Option<MathVariant> {
+        let computed = self.computed(style);
+        math_variant_of(self.table.math_face()?, text, index, computed.font_size)
+    }
+
+    fn math_top_accent(&self, text: &str, style: StyleId) -> Option<Width> {
+        let computed = self.computed(style);
+        math_top_accent(self.table.math_face()?, text, computed.font_size)
+    }
+
+    fn math_has_glyph(&self, character: char, _style: StyleId) -> bool {
+        self.table
+            .math_face()
+            .is_some_and(|face| face.has(character as u32))
+    }
+
+    fn math_glyph_bottom(&self, text: &str, style: StyleId) -> Option<Width> {
+        let computed = self.computed(style);
+        math_glyph_bottom(self.table.math_face()?, text, computed.font_size)
+    }
+
     fn uses_fallback(&self, text: &str, style: StyleId) -> bool {
         let computed = self.computed(style);
         match (self.face_of(&computed), self.face_for(text, &computed)) {
@@ -368,6 +415,50 @@ fn math_italic(face: &soma_metrics::Face, text: &str, size: Width) -> Width {
         .glyph(codepoint)
         .map(|(_, _, italic)| Width(scale(italic, size.0)))
         .unwrap_or(Width::ZERO)
+}
+
+/// Number of vertical variants of the first glyph in `text`.
+fn math_variant_count(face: Option<&soma_metrics::Face>, text: &str) -> u16 {
+    let Some(face) = face else {
+        return 0;
+    };
+    let Some(codepoint) = first_codepoint(text) else {
+        return 0;
+    };
+    face.math().variants(codepoint).len().min(u16::MAX as usize) as u16
+}
+
+/// Signed ink bottom of the first glyph in `text`, scaled to `size`.
+fn math_glyph_bottom(face: &soma_metrics::Face, text: &str, size: Width) -> Option<Width> {
+    let codepoint = first_codepoint(text)?;
+    face.math()
+        .glyph(codepoint)
+        .map(|(_, bottom, _)| Width(scale(bottom, size.0)))
+}
+
+/// Top accent attachment of the first glyph in `text`, scaled to `size`.
+fn math_top_accent(face: &soma_metrics::Face, text: &str, size: Width) -> Option<Width> {
+    let codepoint = first_codepoint(text)?;
+    face.math()
+        .top_accent(codepoint)
+        .map(|value| Width(scale(value, size.0)))
+}
+
+/// One vertical variant of the first glyph in `text`, scaled to `size`.
+fn math_variant_of(
+    face: &soma_metrics::Face,
+    text: &str,
+    index: u16,
+    size: Width,
+) -> Option<MathVariant> {
+    let codepoint = first_codepoint(text)?;
+    let variant = face.math().variants(codepoint).get(index as usize)?;
+    Some(MathVariant {
+        advance: Width(scale(variant.advance, size.0)),
+        above: Width(scale(variant.above, size.0)),
+        below: Width(scale(variant.below, size.0)),
+        right_gap: Width(scale(variant.right_gap, size.0)),
+    })
 }
 
 /// Scale a table value (1/4096 em) by a font size (also 1/4096 em).

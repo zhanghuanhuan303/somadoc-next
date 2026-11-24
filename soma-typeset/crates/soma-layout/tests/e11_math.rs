@@ -153,7 +153,7 @@ fn canonical_json_carries_the_formula() {
     let layout = math_layout("\\frac{a}{b}");
     let json = layout.canonical_json();
 
-    assert!(json.contains("\"schema\":\"soma.pages/10\""));
+    assert!(json.contains("\"schema\":\"soma.pages/11\""));
     assert!(json.contains("\"math\":{\"width\":"));
     assert!(json.contains("\"inlineMath\":[]"));
     assert!(json.contains("\"baseline\":"));
@@ -195,4 +195,50 @@ fn math_height_does_not_change_the_line_count() {
         .map(|block| block.lines_total)
         .sum();
     assert_eq!(plain_lines, math_lines);
+}
+
+#[test]
+fn a_real_math_face_selects_design_variants() {
+    use soma_layout::StyledMetrics;
+    use soma_metrics::MetricsTable;
+
+    let doc = document(vec![Block::MathBlock(MathBlock::new(
+        NodeMeta::synthesized(),
+        r"\sum_{i=1}^{n} a_i + \sqrt{\frac{a}{b}}",
+    ))]);
+    let styled = styled(&doc, TIGHT);
+    let table = MetricsTable::embedded();
+    let metrics = StyledMetrics::new(&table, &styled);
+    let layout = layout(&doc, &styled, &metrics, &engine()).expect("layout");
+    let math = layout.pages[0].blocks[0].math.as_ref().expect("math box");
+
+    let sum = math
+        .items
+        .iter()
+        .find(|item| item.text == "∑")
+        .expect("summation");
+    assert!(
+        sum.variant().is_some(),
+        "the embedded Noto MATH table has a display sum: {sum:?}"
+    );
+    assert_eq!(
+        sum.design,
+        styled.style(soma_core::StyleId(0)).unwrap().font_size,
+        "a variant is drawn at the formula's design size"
+    );
+    assert!(sum.size.0 > sum.design.0, "the text fallback is larger");
+
+    let radical = math
+        .items
+        .iter()
+        .find(|item| item.text == "√")
+        .expect("radical");
+    assert!(radical.variant().is_some(), "a tall radicand has a variant");
+
+    let json = layout.canonical_json();
+    assert!(
+        json.contains("\"design\":"),
+        "the page result names the size"
+    );
+    assert!(json.contains("\"glyph\":1") || json.contains("\"glyph\":2"));
 }

@@ -76,6 +76,41 @@ impl MathMetrics for MathAdapter<'_> {
     fn param(&self, param: MathParam) -> Option<Width> {
         self.metrics.math_param(param, self.style).map(Width)
     }
+
+    fn vertical_variant_count(&self, text: &str) -> u16 {
+        self.metrics.math_variant_count(text, self.style)
+    }
+
+    fn math_has(&self, character: char) -> bool {
+        self.metrics.math_has_glyph(character, self.style)
+    }
+
+    fn top_accent(&self, text: &str, size: Width) -> Option<Width> {
+        self.metrics
+            .math_top_accent(text, self.style)
+            .map(|value| rescale(value, size, self.base))
+    }
+
+    fn accent_bottom(&self, text: &str, size: Width) -> Option<Width> {
+        self.metrics
+            .math_glyph_bottom(text, self.style)
+            .map(|value| rescale(value, size, self.base))
+    }
+
+    fn vertical_variant(
+        &self,
+        text: &str,
+        index: u16,
+        size: Width,
+    ) -> Option<soma_math::VerticalVariant> {
+        let variant = self.metrics.math_variant(text, index, self.style)?;
+        Some(soma_math::VerticalVariant {
+            advance: rescale(variant.advance, size, self.base),
+            above: rescale(variant.above, size, self.base),
+            below: rescale(variant.below, size, self.base),
+            right_gap: rescale(variant.right_gap, size, self.base),
+        })
+    }
 }
 
 /// Layout constants for a display formula at the style's font size.

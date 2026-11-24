@@ -322,8 +322,10 @@ impl<'a> Cff<'a> {
                     }
                 }
                 30 | 31 => {
-                    // vhcurveto / hvcurveto alternate their free axis; a fifth
-                    // argument on the last group closes the other axis.
+                    // vhcurveto / hvcurveto alternate their free axis. A group
+                    // is `dy1 dx2 dy2 dx3` (vertical first) or
+                    // `dx1 dx2 dy2 dy3` (horizontal first); a fifth argument
+                    // on the last group closes the other axis.
                     let values = stack.take_all()?;
                     let mut at = 0usize;
                     let mut horizontal = byte == 31;
@@ -333,19 +335,19 @@ impl<'a> Cff<'a> {
                         if horizontal {
                             pen.curve_by(
                                 values[at],
+                                0.0,
                                 values[at + 1],
                                 values[at + 2],
-                                values[at + 3],
                                 extra,
-                                0.0,
+                                values[at + 3],
                             );
                         } else {
                             pen.curve_by(
+                                0.0,
                                 values[at],
                                 values[at + 1],
                                 values[at + 2],
                                 values[at + 3],
-                                0.0,
                                 extra,
                             );
                         }

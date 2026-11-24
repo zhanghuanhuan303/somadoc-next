@@ -37,11 +37,13 @@ usage:
   --template  pure-YAML template; omitted uses the built-in A4 default
   --engine    soma.engine/1 configuration; omitted uses publish-v1
   --format    html (default), svg, json (canonical page result), or pdf
-  --metrics   soma.metrics/1 table; omitted uses the embedded Noto table.
+  --metrics   soma.metrics table; omitted uses the embedded table.
               Generate one with tools/metrics-gen to match a PDF font.
   --font      TrueType font for PDF output (required by --format pdf)
   --font-bold optional bold face; falls back to --font
-  --font-math optional math face; falls back to --font
+  --font-math optional math face; omitted uses the bundled Latin Modern
+              Math the embedded table was measured from, then probes
+              installed faces, then falls back to --font with a warning
   --font-fallback optional rescue face for glyphs --font lacks
   --hyphenation TeX pattern file enabling hyphenation of long Latin words
   --out       output path; '-' or omitted writes to stdout
@@ -369,7 +371,8 @@ fn render(args: &[String]) -> Result<(), String> {
             write_output(&options, &json)?;
         }
         Format::Pdf => {
-            let faces = load_pdf_fonts(&options)?;
+            let needs_math = pages_have_math(&pages);
+            let faces = load_pdf_fonts(&options, &metrics, needs_math)?;
             let title = document.title_text();
             let author = {
                 let names: Vec<&str> = document
@@ -400,6 +403,22 @@ fn render(args: &[String]) -> Result<(), String> {
             let bytes = render_pdf(&pages, styled, &pages.text, &fonts, &metadata, &assets)
                 .map_err(|error| format!("pdf: {error}"))?;
             write_bytes(&options, &bytes)?;
+            if options.stats {
+                match &faces.math_source {
+                    MathSource::Explicit => eprintln!(
+                        "math: {} (explicit)",
+                        options.font_math.as_deref().unwrap_or("")
+                    ),
+                    MathSource::Auto(spec) => eprintln!("math: {spec} (auto)"),
+                    MathSource::None => eprintln!("math: none"),
+                }
+            }
+            if needs_math && faces.math.is_none() {
+                eprintln!(
+                    "soma: warning: no installed math face matches the metrics table; \
+                     formula symbols use the body face (pass --font-math <file>)"
+                );
+            }
         }
     }
     if options.stats {
@@ -694,9 +713,59 @@ struct PdfFaceSet {
     sans_bold: Option<PdfFont>,
     math: Option<PdfFont>,
     fallback: Option<PdfFont>,
+    /// How the math face was chosen, for `--stats` and the warning.
+    math_source: MathSource,
 }
 
-fn load_pdf_fonts(options: &Options) -> Result<PdfFaceSet, String> {
+enum MathSource {
+    /// `--font-math` was given; trusted as-is.
+    Explicit,
+    /// Probed, and its advances agree with the metrics table.
+    Auto(&'static str),
+    /// No math face: formula symbols are drawn with the body face.
+    None,
+}
+
+/// The embedded metrics table was measured from Latin Modern Math. Bundling
+/// the same face makes the default machine-independent: a fresh install gets
+/// the LaTeX design without TeX Live (ADR-0078).
+const EMBEDDED_MATH_FACE: &[u8] = include_bytes!("../assets/latinmodern-math.otf");
+
+/// Installed math faces to try when `--font-math` is omitted, in preference
+/// order. A candidate is used only when its advances agree with the metrics
+/// table: a different math face resolves the same ordinals but draws variants
+/// at other sizes and places limits from other ink (ADR-0077).
+const MATH_FACE_CANDIDATES: &[&str] = &[
+    "/usr/share/texmf-dist/fonts/opentype/public/lm-math/latinmodern-math.otf",
+    "/usr/share/texmf/fonts/opentype/public/lm-math/latinmodern-math.otf",
+    "/usr/share/texlive/texmf-dist/fonts/opentype/public/lm-math/latinmodern-math.otf",
+    "/usr/share/fonts/OTF/latinmodern-math.otf",
+    "/usr/share/fonts/lm-math/latinmodern-math.otf",
+    "/usr/share/fonts/noto/NotoSansMath-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansMath-Regular.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansMath-Regular.ttf",
+    "/usr/share/fonts/google-noto/NotoSansMath-Regular.ttf",
+    "/usr/local/share/fonts/NotoSansMath-Regular.ttf",
+    "/usr/share/fonts/TTF/DejaVuMathTeXGyre.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuMathTeXGyre.ttf",
+    "/usr/share/fonts/dejavu/DejaVuMathTeXGyre.ttf",
+    "/usr/share/fonts/OTF/texgyrepagella-math.otf",
+    "/usr/share/fonts/tex-gyre-math/texgyrepagella-math.otf",
+    "/usr/share/texmf/fonts/opentype/public/tex-gyre-math/texgyrepagella-math.otf",
+    "/usr/share/texlive/texmf-dist/fonts/opentype/public/tex-gyre-math/texgyrepagella-math.otf",
+    "/usr/share/fonts/OTF/LibertinusMath-Regular.otf",
+    "/usr/share/fonts/libertinus/LibertinusMath-Regular.otf",
+    "/System/Library/Fonts/Supplemental/STIXTwoMath.otf",
+    "/Library/Fonts/STIXTwoMath.otf",
+    "C:\\Windows\\Fonts\\STIXTwoMath.otf",
+    "C:\\Windows\\Fonts\\cambria.ttc#1",
+];
+
+fn load_pdf_fonts(
+    options: &Options,
+    table: &MetricsTable,
+    needs_math: bool,
+) -> Result<PdfFaceSet, String> {
     let regular = options
         .font
         .as_deref()
@@ -714,9 +783,13 @@ fn load_pdf_fonts(options: &Options) -> Result<PdfFaceSet, String> {
         Some(spec) => Some(load_pdf_font(spec)?),
         None => None,
     };
-    let math = match options.font_math.as_deref() {
-        Some(spec) => Some(load_pdf_font(spec)?),
-        None => None,
+    let (math, math_source) = match options.font_math.as_deref() {
+        Some(spec) => (Some(load_pdf_font(spec)?), MathSource::Explicit),
+        None if needs_math => match installed_math_face(table) {
+            Some((font, spec)) => (Some(font), MathSource::Auto(spec)),
+            None => (None, MathSource::None),
+        },
+        None => (None, MathSource::None),
     };
     let fallback = match options.font_fallback.as_deref() {
         Some(spec) => Some(load_pdf_font(spec)?),
@@ -729,21 +802,64 @@ fn load_pdf_fonts(options: &Options) -> Result<PdfFaceSet, String> {
         sans_bold,
         math,
         fallback,
+        math_source,
     })
 }
 
+/// Whether any block on any page carries a formula. The probe reads font files,
+/// so a text-only document never pays for it.
+fn pages_have_math(pages: &soma_layout::PagedLayout) -> bool {
+    pages
+        .pages
+        .iter()
+        .flat_map(|page| page.blocks.iter())
+        .any(|block| block.math.is_some() || !block.inline_math.is_empty())
+}
+
+fn installed_math_face(table: &MetricsTable) -> Option<(PdfFont, &'static str)> {
+    if let Some(font) = embedded_math_face(table) {
+        return Some((font, "built-in Latin Modern Math"));
+    }
+    MATH_FACE_CANDIDATES.iter().find_map(|spec| {
+        let (path, index) = split_font_spec(spec).ok()?;
+        let bytes = std::fs::read(path).ok()?;
+        let font = PdfFont::from_bytes(bytes, index).ok()?;
+        math_face_matches(table, &font).then_some((font, *spec))
+    })
+}
+
+/// The bundled face, accepted only when it is the one the table measured.
+fn embedded_math_face(table: &MetricsTable) -> Option<PdfFont> {
+    let font = PdfFont::from_bytes(EMBEDDED_MATH_FACE.to_vec(), 0).ok()?;
+    math_face_matches(table, &font).then_some(font)
+}
+
+/// Whether `font` is the face `table`'s math metrics came from.
+///
+/// The table carries numbers, not a font name; `Face::math_matches` samples its
+/// math glyph advances and compares them in the table's own unit (1/4096 em).
+fn math_face_matches(table: &MetricsTable, font: &PdfFont) -> bool {
+    table
+        .math_face()
+        .is_some_and(|face| face.math_matches(|codepoint| font.advance_4096(codepoint)))
+}
+
 fn load_pdf_font(spec: &str) -> Result<PdfFont, String> {
-    let (path, index) = match spec.rsplit_once('#') {
-        Some((path, index)) => (
+    let (path, index) = split_font_spec(spec)?;
+    let bytes = std::fs::read(path).map_err(|error| format!("{path}: {error}"))?;
+    PdfFont::from_bytes(bytes, index).map_err(|error| format!("{path}: {error}"))
+}
+
+fn split_font_spec(spec: &str) -> Result<(&str, u32), String> {
+    match spec.rsplit_once('#') {
+        Some((path, index)) => Ok((
             path,
             index
                 .parse::<u32>()
                 .map_err(|_| format!("{spec}: face index must be a number"))?,
-        ),
-        None => (spec, 0),
-    };
-    let bytes = std::fs::read(path).map_err(|error| format!("{path}: {error}"))?;
-    PdfFont::from_bytes(bytes, index).map_err(|error| format!("{path}: {error}"))
+        )),
+        None => Ok((spec, 0)),
+    }
 }
 
 /// Image assets that sit next to the input document.

@@ -191,6 +191,45 @@ pub trait Metrics: Sync {
         Width::ZERO
     }
 
+    /// Number of vertical design variants for the first character of `text`
+    /// (OpenType `MATH` `MathVariants`). `0` when the host has no variant data;
+    /// `soma-math` then scales the text-size glyph as it always did (ADR-0075).
+    fn math_variant_count(&self, _text: &str, _style: StyleId) -> u16 {
+        0
+    }
+
+    /// One vertical design variant, in 1/4096 em at the style's size.
+    ///
+    /// The ordinal is the font's storage order (increasing design size) and is
+    /// deliberately not a glyph id: a renderer resolves it in the font it
+    /// actually draws with. `None` for an out-of-range ordinal or a host
+    /// without variants.
+    fn math_variant(&self, _text: &str, _index: u16, _style: StyleId) -> Option<MathVariant> {
+        None
+    }
+
+    /// Top accent attachment of the first glyph of `text`, in 1/4096 em at the
+    /// style's size. `None` when the face has no `MATH` attachment for it; an
+    /// accent is then centred on the base by its advance.
+    fn math_top_accent(&self, _text: &str, _style: StyleId) -> Option<Width> {
+        None
+    }
+
+    /// Whether the **math** face itself has `character`. [`Self::has_glyph`] is
+    /// the union of the text and math faces, which is not enough to choose a
+    /// combining accent: the text face may answer yes for a glyph the formula
+    /// will not draw.
+    fn math_has_glyph(&self, _character: char, _style: StyleId) -> bool {
+        false
+    }
+
+    /// Signed ink bottom of the first glyph of `text`, in 1/4096 em at the
+    /// style's size: negative when the whole glyph sits above its baseline (a
+    /// combining accent), which is exactly what the accent placement needs.
+    fn math_glyph_bottom(&self, _text: &str, _style: StyleId) -> Option<Width> {
+        None
+    }
+
     /// Advance of an unbreakable object atom (`AtomKind::InlineObject`).
     ///
     /// Hosts that typeset objects themselves (inline math, inline images with
@@ -212,6 +251,20 @@ pub trait Metrics: Sync {
     fn space_width(&self, style: StyleId) -> Width {
         self.advance(" ", style)
     }
+}
+
+/// A vertical design variant of a math glyph, measured at one style's size.
+///
+/// `advance` is horizontal (the cursor step); `above`/`below` are the glyph's
+/// ink around the baseline. `right_gap` is `advance - ink right`, never
+/// negative: a radical's vinculum starts at the ink edge, not at the advance
+/// (ADR-0075).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MathVariant {
+    pub advance: Width,
+    pub above: Width,
+    pub below: Width,
+    pub right_gap: Width,
 }
 
 /// A constant from the math face's OpenType `MATH` table.
@@ -293,10 +346,24 @@ pub enum MathParam {
     UnderbarExtra = 33,
     /// `MathConstants.accentBaseHeight`.
     AccentBaseHeight = 34,
+    /// `MathConstants.radicalVerticalGap`: clearance between the radicand's
+    /// ink top and the vinculum's bottom, in text style.
+    RadicalGap = 35,
+    /// `MathConstants.radicalDisplayStyleVerticalGap`: the same clearance in
+    /// display style.
+    RadicalDisplayGap = 36,
+    /// `MathConstants.fractionNumDisplayStyleGapMin`.
+    NumDisplayGap = 37,
+    /// `MathConstants.fractionDenomDisplayStyleGapMin`.
+    DenomDisplayGap = 38,
+    /// `MathConstants.subscriptTopMax`.
+    SubTopMax = 39,
+    /// `MathConstants.spaceAfterScript`.
+    SpaceAfterScript = 40,
 }
 
 impl MathParam {
-    pub const COUNT: usize = 35;
+    pub const COUNT: usize = 41;
 
     pub const ALL: [Self; Self::COUNT] = [
         Self::AxisHeight,
@@ -334,6 +401,12 @@ impl MathParam {
         Self::UnderbarRule,
         Self::UnderbarExtra,
         Self::AccentBaseHeight,
+        Self::RadicalGap,
+        Self::RadicalDisplayGap,
+        Self::NumDisplayGap,
+        Self::DenomDisplayGap,
+        Self::SubTopMax,
+        Self::SpaceAfterScript,
     ];
 
     pub const fn index(self) -> usize {

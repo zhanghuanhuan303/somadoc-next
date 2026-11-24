@@ -9,7 +9,7 @@ use core::fmt::{self, Write};
 
 use crate::PagedLayout;
 
-pub(crate) const SCHEMA: &str = "soma.pages/10";
+pub(crate) const SCHEMA: &str = "soma.pages/11";
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -249,8 +249,16 @@ fn write_math_payload(out: &mut impl Write, math: &crate::MathBox) -> fmt::Resul
         write_string(out, &item.text)?;
         write!(
             out,
-            ",\"x\":{},\"y\":{},\"size\":{},\"stretch\":{},\"color\":",
-            item.x.0, item.y.0, item.size.0, item.stretch
+            ",\"x\":{},\"y\":{},\"size\":{},\"design\":{},\"glyph\":{},\"stretch\":{},\"color\":",
+            item.x.0,
+            item.y.0,
+            item.size.0,
+            item.design.0,
+            match item.glyph {
+                soma_math::MathGlyph::Text => 0u32,
+                soma_math::MathGlyph::Vertical(index) => u32::from(index) + 1,
+            },
+            item.stretch
         )?;
         match item.color {
             Some(color) => write!(out, "{color}}}")?,

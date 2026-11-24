@@ -561,11 +561,13 @@ impl<'a> Type2<'a> {
                     cursor += 1;
                     match byte {
                         1 | 3 | 18 | 23 => {
-                            self.hints += self.stack.len() & !1;
+                            // A leading width operand makes the argument count
+                            // odd; flooring the half leaves the stem count.
+                            self.hints += self.stack.len() / 2;
                             self.stack.clear();
                         }
                         19 | 20 => {
-                            self.hints += self.stack.len() & !1;
+                            self.hints += self.stack.len() / 2;
                             self.stack.clear();
                             cursor += self.hints.div_ceil(8);
                         }

@@ -17,7 +17,7 @@ serif_bold=${SOMA_SONG_SERIF_BOLD:-/usr/share/fonts/adobe-source-han-serif/Sourc
 sans=${SOMA_SONG_SANS:-/usr/share/fonts/misan/MiSans-Normal.ttf}
 sans_bold=${SOMA_SONG_SANS_BOLD:-/usr/share/fonts/misan/MiSans-Bold.ttf}
 rescue=${SOMA_SONG_FALLBACK:-/home/badleric/.local/share/fonts/somadoc-fandol/FandolKai-Regular.otf}
-math=${SOMA_SONG_MATH:-/usr/share/fonts/TTF/DejaVuMathTeXGyre.ttf}
+math=${SOMA_SONG_MATH:-$(sh scripts/math-face.sh)}
 
 if [ ! -f "$serif" ]; then
     echo "no serif face at $serif; set SOMA_SONG_SERIF" >&2

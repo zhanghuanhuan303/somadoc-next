@@ -42,7 +42,7 @@ use soma_rules::{
 };
 use soma_template::{ComputedStyle, ResolvedPage, StyledDoc};
 
-pub const SCHEMA: &str = "soma.pages/10";
+pub const SCHEMA: &str = "soma.pages/11";
 
 /// Break one paragraph with the layout's space rule applied.
 ///
@@ -3704,16 +3704,14 @@ impl Builder<'_> {
             match label {
                 Label::Text(text) => {
                     let advance = self.metrics.advance(&text, style_id).0;
-                    layout.items.push(soma_math::MathItem {
+                    layout.items.push(soma_math::MathItem::text(
                         text,
                         // Items are relative to the box origin `x`, so undo the
                         // centering offset to land on the right margin.
-                        x: Width(self.content_width.0 - advance - x.0),
-                        y: Width(*baseline),
-                        size: computed.font_size,
-                        stretch: 1000,
-                        color: None,
-                    });
+                        Width(self.content_width.0 - advance - x.0),
+                        Width(*baseline),
+                        computed.font_size,
+                    ));
                 }
                 Label::Tag(tag) => {
                     let dx = self.content_width.0 - tag.width.0 - x.0;

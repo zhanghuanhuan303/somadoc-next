@@ -465,6 +465,13 @@ impl Used {
         self.list(role).push((gid, codepoint));
     }
 
+    /// A design glyph that has no codepoint of its own (a MATH variant).
+    fn add_glyph(&mut self, role: Role, gid: u16, unicode: u32) {
+        if gid != 0 {
+            self.list(role).push((gid, unicode));
+        }
+    }
+
     fn list(&mut self, role: Role) -> &mut Vec<(u16, u32)> {
         match role {
             Role::Regular => &mut self.regular,
@@ -641,6 +648,18 @@ fn math_face(fonts: &PdfFonts<'_>, character: char, text_role: Role) -> Role {
 
 fn collect_math(math: &MathBox, fonts: &PdfFonts<'_>, used: &mut Used, text_role: Role) {
     for item in &math.items {
+        if let Some(index) = item.variant() {
+            if let Some(character) = item.text.chars().next() {
+                let role = math_face(fonts, character, text_role);
+                if let Some(gid) = fonts.font(role).math_variant_glyph(character as u32, index) {
+                    used.add_glyph(role, gid, character as u32);
+                    // Keep the base glyph too: a renderer that cannot resolve
+                    // the ordinal draws it at the fallback size.
+                    used.add(role, fonts.font(role), character);
+                    continue;
+                }
+            }
+        }
         for character in item.text.chars() {
             let role = math_face(fonts, character, text_role);
             used.add(role, fonts.font(role), character);
@@ -1529,6 +1548,19 @@ fn paint_math(
                 &glyphs,
             );
             continue;
+        }
+        if let Some(index) = item.variant() {
+            // The variant glyph is unencoded; the font resolves the ordinal.
+            // When it cannot (a different math face), the base glyph at the
+            // fallback size keeps the formula readable.
+            if let Some(character) = item.text.chars().next() {
+                let role = math_face(fonts, character, text_role);
+                if let Some(glyph) = fonts.font(role).math_variant_glyph(character as u32, index) {
+                    painter.set_font(role, painter.scale.milli(item.design.0));
+                    painter.show(painter.scale.milli(x), painter.scale.milli(y), &[glyph]);
+                    continue;
+                }
+            }
         }
         // A formula's text is mostly math-face glyphs, but a `\text{...}` run
         // may hold characters only the text face carries. Draw contiguous

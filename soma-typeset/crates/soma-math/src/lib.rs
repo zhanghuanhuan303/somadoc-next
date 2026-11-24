@@ -60,6 +60,61 @@ pub trait MathMetrics {
     fn has(&self, _character: char) -> bool {
         false
     }
+
+    /// Number of vertical design variants of `text`'s first glyph. `0` when the
+    /// host has no `MATH` variant data; callers then scale the text glyph
+    /// (ADR-0075).
+    fn vertical_variant_count(&self, _text: &str) -> u16 {
+        0
+    }
+
+    /// One vertical design variant, measured at `size`.
+    ///
+    /// The ordinal is the font's storage order (increasing design size).
+    /// Rendering resolves it in the actual font, so nothing here depends on
+    /// glyph ids.
+    fn vertical_variant(&self, _text: &str, _index: u16, _size: Width) -> Option<VerticalVariant> {
+        None
+    }
+
+    /// Whether the *math* face (not the text face) has `character`. Accents
+    /// use the combining form when the math face carries it (ADR-0076); the
+    /// default trusts [`Self::has`], which is the union.
+    fn math_has(&self, character: char) -> bool {
+        self.has(character)
+    }
+
+    /// Top accent attachment of `text`'s first glyph at `size`.
+    fn top_accent(&self, _text: &str, _size: Width) -> Option<Width> {
+        None
+    }
+
+    /// Signed ink bottom of `text`'s first glyph at `size`; negative when the
+    /// whole glyph is above its baseline. Accents need this to avoid floating
+    /// by their own ink height.
+    fn accent_bottom(&self, _text: &str, _size: Width) -> Option<Width> {
+        None
+    }
+}
+
+/// One vertical design glyph, measured at a concrete size.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct VerticalVariant {
+    /// Horizontal advance (the cursor step).
+    pub advance: Width,
+    /// Ink above the baseline.
+    pub above: Width,
+    /// Ink below the baseline.
+    pub below: Width,
+    /// `advance - ink right`, never negative: a vinculum starts at the ink
+    /// edge, not at the advance.
+    pub right_gap: Width,
+}
+
+impl VerticalVariant {
+    pub fn height(self) -> i32 {
+        self.above.0 + self.below.0
+    }
 }
 
 /// Ink band of the stretchy brace glyphs, in permille of the glyph's own
@@ -169,8 +224,19 @@ pub struct MathStyle {
     pub limit_below_drop: u16,
     pub radical_rule: u16,
     pub radical_extra: u16,
-    pub radical_kern_before: u16,
-    pub radical_kern_after: u16,
+    /// Clearance between the radicand's ink top and the vinculum's bottom.
+    /// Text style and display style have their own values in `MATH`.
+    pub radical_gap: u16,
+    pub radical_display_gap: u16,
+    /// Fraction gap minima in display style; the text-style values are
+    /// `num_gap`/`denom_gap`.
+    pub num_display_gap: u16,
+    pub denom_display_gap: u16,
+    /// Cap on a subscript's ascent above the base's baseline (TeX rule 18).
+    pub sub_top_max: u16,
+    /// Signed: the fonts supply −450…−526‰ for the kern after the degree.
+    pub radical_kern_before: i32,
+    pub radical_kern_after: i32,
     pub radical_degree_raise: u16,
     pub display_operator_min: u16,
     pub overbar_gap: u16,
@@ -248,16 +314,27 @@ impl MathStyle {
         set(MathParam::LimitBelowDrop, &mut self.limit_below_drop, true);
         set(MathParam::RadicalRule, &mut self.radical_rule, false);
         set(MathParam::RadicalExtra, &mut self.radical_extra, true);
+        set(MathParam::RadicalGap, &mut self.radical_gap, true);
         set(
-            MathParam::RadicalKernBefore,
-            &mut self.radical_kern_before,
+            MathParam::RadicalDisplayGap,
+            &mut self.radical_display_gap,
             true,
         );
+        set(MathParam::NumDisplayGap, &mut self.num_display_gap, true);
         set(
-            MathParam::RadicalKernAfter,
-            &mut self.radical_kern_after,
+            MathParam::DenomDisplayGap,
+            &mut self.denom_display_gap,
             true,
         );
+        set(MathParam::SubTopMax, &mut self.sub_top_max, true);
+        set(MathParam::SpaceAfterScript, &mut self.script_space, true);
+        let set_signed = |param: MathParam, slot: &mut i32| {
+            if let Some(value) = metrics.param(param) {
+                *slot = value.0;
+            }
+        };
+        set_signed(MathParam::RadicalKernBefore, &mut self.radical_kern_before);
+        set_signed(MathParam::RadicalKernAfter, &mut self.radical_kern_after);
         set(
             MathParam::RadicalDegreeRaise,
             &mut self.radical_degree_raise,
@@ -311,6 +388,11 @@ impl Default for MathStyle {
             limit_below_drop: 600,
             radical_rule: 40,
             radical_extra: 40,
+            radical_gap: 50,
+            radical_display_gap: 100,
+            num_display_gap: 100,
+            denom_display_gap: 100,
+            sub_top_max: 300,
             radical_kern_before: 278,
             radical_kern_after: 0,
             radical_degree_raise: 600,
@@ -338,12 +420,54 @@ pub struct MathItem {
     pub text: String,
     pub x: Width,
     pub y: Width,
+    /// Font size for drawing `text`. A renderer that cannot address an
+    /// unencoded design glyph (SVG/HTML) uses this.
     pub size: Width,
+    /// Font size for drawing the selected design glyph. Equal to `size` when
+    /// `glyph` is [`MathGlyph::Text`].
+    pub design: Width,
+    /// Which glyph of the math font draws this item.
+    pub glyph: MathGlyph,
     /// Horizontal scale in permille, for a glyph that has to span a body:
     /// an `\overbrace` is one brace glyph stretched sideways (1000 = as is).
     pub stretch: u16,
     /// Explicit colour, from `\color{...}`. `None` means "the style's colour".
     pub color: Option<u32>,
+}
+
+impl MathItem {
+    /// A plain text run at `size`: the shape every constructor used before
+    /// design variants existed (ADR-0075).
+    pub fn text(text: impl Into<String>, x: Width, y: Width, size: Width) -> Self {
+        Self {
+            text: text.into(),
+            x,
+            y,
+            size,
+            design: size,
+            glyph: MathGlyph::Text,
+            stretch: 1000,
+            color: None,
+        }
+    }
+
+    /// The vertical design-variant ordinal, when this item selects one.
+    pub fn variant(&self) -> Option<u16> {
+        match self.glyph {
+            MathGlyph::Text => None,
+            MathGlyph::Vertical(index) => Some(index),
+        }
+    }
+}
+
+/// Which glyph draws a [`MathItem`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MathGlyph {
+    /// The glyph the text's first character maps to.
+    #[default]
+    Text,
+    /// The nth vertical design variant of that character, in font order.
+    Vertical(u16),
 }
 
 /// One rule (a fraction bar) in the math box.
@@ -1710,6 +1834,21 @@ pub fn lay_out(
     }
 }
 
+/// A design glyph chosen for a body, with the fallback size a text renderer
+/// should use when it cannot address the unencoded glyph (ADR-0075).
+#[derive(Clone, Copy, Debug)]
+struct Design {
+    glyph: MathGlyph,
+    /// Size at which the design glyph is drawn.
+    design: Width,
+    /// Size at which the text glyph approximates the design glyph's height.
+    fallback: Width,
+    advance: i32,
+    above: i32,
+    below: i32,
+    right_gap: i32,
+}
+
 struct Context<'a> {
     style: &'a MathStyle,
     metrics: &'a dyn MathMetrics,
@@ -1731,22 +1870,63 @@ struct Context<'a> {
     level: StyleLevel,
     /// Cramped variant: the denominator of a fraction, and anything inside it.
     cramped: bool,
-    /// Size chosen by an enclosing `\left…\right`, for `\middle`.
-    fence_size: Option<Width>,
+    /// Size chosen by an enclosing `\left…\right`, for `\middle`: the needed
+    /// height and the body's ink box, so a middle fence selects the same class
+    /// of variant.
+    fence_size: Option<(i32, i32, i32)>,
 }
 
 impl Context<'_> {
+    /// The design glyph that covers `needed` vertical units, or `None` when the
+    /// font has no variants (the caller then scales the text glyph, as before).
+    ///
+    /// TeX asks for the smallest variant whose height reaches the target and
+    /// falls back to the largest one it has, never to an enlarged base glyph.
+    fn design_variant(&self, text: &str, needed: i32, size: Width) -> Option<Design> {
+        let count = self.metrics.vertical_variant_count(text);
+        if count == 0 {
+            return None;
+        }
+        let mut chosen: Option<(u16, VerticalVariant)> = None;
+        for index in 0..count {
+            let Some(variant) = self.metrics.vertical_variant(text, index, size) else {
+                continue;
+            };
+            chosen = Some((index, variant));
+            if variant.height() >= needed {
+                break;
+            }
+        }
+        let (index, variant) = chosen?;
+        let (base_above, base_below) = self
+            .metrics
+            .ink(text, size)
+            .map(|(above, below)| (above.0, below.0))
+            .unwrap_or((self.metrics.ascent(size).0, self.metrics.descent(size).0));
+        let base_height = (base_above + base_below).max(1);
+        let ratio = ((variant.height() as i64 * 1000 + base_height as i64 / 2) / base_height as i64)
+            .clamp(1000, 4000) as i32;
+        let fallback = Width(scale(size, ratio));
+        Some(Design {
+            glyph: MathGlyph::Vertical(index),
+            design: size,
+            fallback,
+            advance: variant.advance.0,
+            above: variant.above.0,
+            below: variant.below.0,
+            right_gap: variant.right_gap.0,
+        })
+    }
+
     fn node(&mut self, node: &Node, size: Width, baseline: i32) {
         match node {
             Node::Symbol { text, .. } => {
-                self.items.push(MathItem {
-                    text: text.clone(),
-                    x: Width(self.cursor),
-                    y: Width(baseline),
+                self.items.push(MathItem::text(
+                    text.clone(),
+                    Width(self.cursor),
+                    Width(baseline),
                     size,
-                    stretch: 1000,
-                    color: None,
-                });
+                ));
                 self.cursor += self.metrics.advance(text, size).0;
             }
             Node::Letter(character) => {
@@ -1754,14 +1934,12 @@ impl Context<'_> {
                 // otherwise it stays upright, which is ugly but honest — the
                 // alternative is `.notdef` in the middle of a formula.
                 let text = self.letter_text(*character);
-                self.items.push(MathItem {
-                    text: text.clone(),
-                    x: Width(self.cursor),
-                    y: Width(baseline),
+                self.items.push(MathItem::text(
+                    text.clone(),
+                    Width(self.cursor),
+                    Width(baseline),
                     size,
-                    stretch: 1000,
-                    color: None,
-                });
+                ));
                 self.cursor += self.metrics.advance(&text, size).0;
             }
             Node::Group(nodes) => {
@@ -1805,15 +1983,15 @@ impl Context<'_> {
             }
             Node::Delimited { left, body, right } => {
                 let body_box = self.measure_ink(body, size);
-                let (delim_size, baseline_off) = self.fence_geometry(body_box, size);
-                self.delimiter(left, delim_size, baseline + baseline_off);
+                let needed = (body_box.1 + body_box.2).max(1);
+                self.delimiter(left, needed, body_box.1, body_box.2, baseline, size);
                 let body_x = self.cursor;
                 let saved = self.fence_size;
-                self.fence_size = Some(delim_size);
+                self.fence_size = Some((needed, body_box.1, body_box.2));
                 self.node_with_x(body, size, baseline, body_x);
                 self.fence_size = saved;
                 self.cursor = body_x + body_box.0;
-                self.delimiter(right, delim_size, baseline + baseline_off);
+                self.delimiter(right, needed, body_box.1, body_box.2, baseline, size);
             }
             Node::Matrix { kind, rows, aligns } => self.matrix(*kind, rows, aligns, size, baseline),
             Node::Substack(rows) => self.substack(rows, size, baseline),
@@ -1885,8 +2063,8 @@ impl Context<'_> {
                 self.cramped = saved.1;
             }
             Node::Middle(text) => {
-                if let Some(fence) = self.fence_size {
-                    self.delimiter(text, fence, baseline);
+                if let Some((needed, height, depth)) = self.fence_size {
+                    self.delimiter(text, needed, height, depth, baseline, size);
                 }
             }
         }
@@ -1967,7 +2145,10 @@ impl Context<'_> {
         } else {
             0
         };
-        let bar_y = baseline - axis;
+        // The rule is centred on the axis (Typst `fraction.rs`). The shifts are
+        // distances from the formula baseline to each part's baseline; the ink
+        // plus the minimum gap can push a part further out.
+        let bar_y = baseline - axis - thickness / 2;
         let num_shift = scale(
             size,
             if self.level == StyleLevel::Display {
@@ -1984,13 +2165,27 @@ impl Context<'_> {
                 self.style.denom_shift
             },
         );
-        let num_gap = scale(size, self.style.num_gap).max(1);
-        let den_gap = scale(size, self.style.denom_gap).max(1);
-        // TeX's num/denom shifts are baselines from the bar; the ink depth and
-        // height then guarantee the minimum clearance so a descender never
-        // touches the rule.
-        let num_baseline = bar_y - num_shift.max(num_d + num_gap);
-        let den_baseline = bar_y + thickness + den_shift.max(den_h + den_gap);
+        let display = self.level == StyleLevel::Display;
+        let num_gap = scale(
+            size,
+            if display {
+                self.style.num_display_gap
+            } else {
+                self.style.num_gap
+            },
+        )
+        .max(1);
+        let den_gap = scale(
+            size,
+            if display {
+                self.style.denom_display_gap
+            } else {
+                self.style.denom_gap
+            },
+        )
+        .max(1);
+        let num_baseline = baseline - num_shift.max(axis + thickness / 2 + num_d + num_gap);
+        let den_baseline = baseline + den_shift.max(-axis + thickness / 2 + den_h + den_gap);
         let left = self.cursor;
         self.in_style(level, num_cramped, |c| {
             c.node_with_x(
@@ -2020,69 +2215,140 @@ impl Context<'_> {
     }
 
     /// `\sqrt[...]{...}`, with the vinculum on the body's ink top.
+    ///
+    /// The surd is a **design variant** (ADR-0075). Its ink top meets the
+    /// vinculum, and the vinculum starts at the ink's right edge — not at the
+    /// advance, which would leave the gap the bug reports called a broken leg.
     fn radical(&mut self, index: Option<&Node>, body: &Node, size: Width, baseline: i32) {
         let rule = scale(size, self.style.radical_rule).max(1);
-        let extra = scale(size, self.style.radical_extra);
-        let (body_w, body_h, body_d) = self.measure_ink(body, size);
-        let target = (body_h + body_d + rule + extra).max(1) as i64;
-        let surd_extent = |metrics: &dyn MathMetrics, at: Width| -> i64 {
-            match metrics.ink("√", at) {
-                Some((above, below)) => (above.0 + below.0).max(1) as i64,
-                None => (metrics.ascent(at).0 + metrics.descent(at).0).max(1) as i64,
-            }
-        };
-        let unit = surd_extent(self.metrics, size);
-        let mut radical_size = Width(
-            ((size.0 as i64 * target + unit - 1) / unit).clamp(size.0 as i64 / 2, size.0 as i64 * 4)
-                as i32,
+        let gap = scale(
+            size,
+            if self.level == StyleLevel::Display {
+                self.style.radical_display_gap
+            } else {
+                self.style.radical_gap
+            },
         );
-        let mut guard = 0;
-        while surd_extent(self.metrics, radical_size) < target && guard < 8 {
-            radical_size = Width((radical_size.0 * 9 / 8).max(1));
-            guard += 1;
-        }
-        let (surd_above, _surd_below) = self.metrics.ink("√", radical_size).unwrap_or((
-            self.metrics.ascent(radical_size),
-            self.metrics.descent(radical_size),
-        ));
-        let glyph_advance = self.metrics.advance("√", radical_size).0.max(rule);
-        let bar_y = baseline - body_h - rule;
+        let (body_w, body_h, body_d) = self.measure_ink(body, size);
+        let needed = (body_h + body_d + rule + gap).max(1);
+        let start = self.cursor;
 
+        // The degree's width decides where the surd starts, so measure it first.
         let script_size = self.script_size(size);
-        let index_width = match index {
-            Some(index) => {
-                let before = scale(size, self.style.radical_kern_before);
-                let after = scale(size, self.style.radical_kern_after).max(0);
-                let (index_w, index_h, _index_d) =
-                    self.in_style(StyleLevel::Script, self.cramped, |c| {
-                        c.measure_ink(index, script_size)
-                    });
-                let raise = scale(script_size, self.style.radical_degree_raise) / 1000;
-                let y = bar_y + index_h - raise;
-                let x = self.cursor + before;
-                self.in_style(StyleLevel::Script, self.cramped, |c| {
-                    c.node_with_x(index, script_size, y, x)
-                });
-                index_w + before + after
+        let degree = index.map(|index| {
+            self.in_style(StyleLevel::Script, self.cramped, |c| {
+                c.measure_ink(index, script_size)
+            })
+        });
+
+        let choice = self.design_variant("√", needed, size);
+        let (glyph, design, fallback, advance, above, below, right_gap) = match choice {
+            Some(design) => (
+                design.glyph,
+                design.design,
+                design.fallback,
+                design.advance.max(rule),
+                design.above,
+                design.below,
+                design.right_gap,
+            ),
+            None => {
+                // No variant data: grow the text glyph until its ink covers the
+                // body, as before.
+                let surd_extent = |metrics: &dyn MathMetrics, at: Width| -> i64 {
+                    match metrics.ink("√", at) {
+                        Some((above, below)) => (above.0 + below.0).max(1) as i64,
+                        None => (metrics.ascent(at).0 + metrics.descent(at).0).max(1) as i64,
+                    }
+                };
+                let unit = surd_extent(self.metrics, size);
+                let mut radical_size = Width(
+                    ((size.0 as i64 * needed as i64 + unit - 1) / unit)
+                        .clamp(size.0 as i64 / 2, size.0 as i64 * 4) as i32,
+                );
+                let mut guard = 0;
+                while surd_extent(self.metrics, radical_size) < needed as i64 && guard < 8 {
+                    radical_size = Width((radical_size.0 * 9 / 8).max(1));
+                    guard += 1;
+                }
+                let (surd_above, surd_below) = self.metrics.ink("√", radical_size).unwrap_or((
+                    self.metrics.ascent(radical_size),
+                    self.metrics.descent(radical_size),
+                ));
+                let advance = self.metrics.advance("√", radical_size).0.max(rule);
+                (
+                    MathGlyph::Text,
+                    radical_size,
+                    radical_size,
+                    advance,
+                    surd_above.0,
+                    surd_below.0,
+                    0,
+                )
             }
-            None => 0,
         };
-        let surd_x = self.cursor + index_width;
+        let bar_y = {
+            // TeXbook p 443 / Typst: if the chosen surd is taller than the
+            // target, distribute the surplus equally above and below instead of
+            // leaving one long leg.
+            let height = above + below;
+            let surplus = height - rule - (body_h + body_d);
+            let balanced = (surplus + gap) / 2;
+            let gap = gap.max(balanced).max(0);
+            baseline - body_h - gap - rule
+        };
+
+        let (before, after) = if index.is_some() {
+            (
+                scale(size, self.style.radical_kern_before),
+                scale(size, self.style.radical_kern_after),
+            )
+        } else {
+            (0, 0)
+        };
+        let degree_width = degree.map(|box_| box_.0).unwrap_or(0);
+        let offset = before + degree_width + after;
+        // Never hang the surd left of the cursor. When the degree kerns make
+        // the offset negative, move the degree right instead (Typst/TeXbook).
+        let surd_x = start + offset.max(0);
+        let degree_x = start + before - offset.min(0);
+
+        if let (Some(index), Some((_, _, degree_depth))) = (index, degree) {
+            // OpenType: the degree's bottom is radicalDegreeBottomRaisePercent
+            // of the radical's height above the radical's bottom.
+            let height = above + below;
+            let raise = (height as i64 * self.style.radical_degree_raise as i64 / 1000) as i32;
+            let degree_bottom = bar_y + height - raise;
+            let degree_baseline = degree_bottom - degree_depth;
+            self.in_style(StyleLevel::Script, self.cramped, |c| {
+                c.node_with_x(index, script_size, degree_baseline, degree_x)
+            });
+        }
+
         self.items.push(MathItem {
             text: String::from("√"),
             x: Width(surd_x),
             // The surd's ink top meets the vinculum.
-            y: Width(bar_y + surd_above.0),
-            size: radical_size,
+            y: Width(bar_y + above),
+            size: fallback,
+            design,
+            glyph,
             stretch: 1000,
             color: None,
         });
-        let body_x = surd_x + glyph_advance;
+        let body_x = surd_x + advance;
         self.node_with_x(body, size, baseline, body_x);
+        // Start the rule at the hook's ink, overlapping it by one rule width.
+        // A text glyph has no ink data here, so it keeps the old start.
+        let rule_x = if matches!(glyph, MathGlyph::Text) {
+            body_x
+        } else {
+            (surd_x + advance - right_gap - rule).max(surd_x)
+        };
         self.rules.push(MathRule {
-            x: Width(body_x),
+            x: Width(rule_x),
             y: Width(bar_y),
-            width: Width(body_w),
+            width: Width((body_x + body_w - rule_x).max(1)),
             thickness: Width(rule),
         });
         self.cursor = body_x + body_w;
@@ -2098,17 +2364,53 @@ impl Context<'_> {
         size: Width,
         baseline: i32,
     ) {
-        let big = if self.level == StyleLevel::Display {
-            Width(scale(size, self.style.display_operator_min).max(size.0))
+        // Display operators use a design variant at least
+        // displayOperatorMinHeight tall (TeX / OpenType MATH). A font without
+        // variants keeps the old behaviour: the base glyph scaled up.
+        let display = self.level == StyleLevel::Display;
+        let needed = if display {
+            scale(size, self.style.display_operator_min).max(size.0)
         } else {
-            size
+            0
         };
-        let advance = self.metrics.advance(text, big).0;
-        let (above, below) = self
-            .metrics
-            .ink(text, big)
-            .map(|(a, d)| (a.0, d.0))
-            .unwrap_or((self.metrics.ascent(big).0, self.metrics.descent(big).0));
+        let choice = if display {
+            self.design_variant(text, needed, size)
+        } else {
+            None
+        };
+        let (advance, above, below, text_size, design, glyph) = match choice {
+            Some(design) => (
+                design.advance,
+                design.above,
+                design.below,
+                design.fallback,
+                design.design,
+                design.glyph,
+            ),
+            None => {
+                let big = if display {
+                    Width(needed.max(size.0))
+                } else {
+                    size
+                };
+                let advance = self.metrics.advance(text, big).0;
+                let (above, below) = self
+                    .metrics
+                    .ink(text, big)
+                    .map(|(a, d)| (a.0, d.0))
+                    .unwrap_or((self.metrics.ascent(big).0, self.metrics.descent(big).0));
+                (advance, above, below, big, big, MathGlyph::Text)
+            }
+        };
+        // TeXbook p 155: a large operator symbol is centred on the math axis.
+        // A word (`\lim`, `\sup`, `\inf`) is not a glyph and keeps its
+        // baseline.
+        let axis = scale(size, self.style.axis_height);
+        let op_y = if text.chars().count() == 1 {
+            -axis + (above - below) / 2
+        } else {
+            0
+        };
         if stacked && self.level == StyleLevel::Display {
             let script_size = self.script_size(size);
             let level = self.level.script();
@@ -2124,15 +2426,17 @@ impl Context<'_> {
             self.items.push(MathItem {
                 text: text.to_string(),
                 x: Width(left + (width - advance) / 2),
-                y: Width::ZERO,
-                size: big,
+                y: Width(op_y),
+                size: text_size,
+                design,
+                glyph,
                 stretch: 1000,
                 color: None,
             });
             let gap = scale(size, self.style.limit_above_gap);
             let rise = scale(size, self.style.limit_above_rise);
             if let (Some(node), Some(box_)) = (sup, sup_box) {
-                let baseline = -(above + (gap + box_.2).max(rise));
+                let baseline = op_y - (above + (gap + box_.2).max(rise));
                 self.in_style(level, self.cramped, |c| {
                     c.node_with_x(node, script_size, baseline, left + (width - box_.0) / 2)
                 });
@@ -2140,7 +2444,7 @@ impl Context<'_> {
             let gap = scale(size, self.style.limit_below_gap);
             let drop = scale(size, self.style.limit_below_drop);
             if let (Some(node), Some(box_)) = (sub, sub_box) {
-                let baseline = below + (gap + box_.1).max(drop);
+                let baseline = op_y + below + (gap + box_.1).max(drop);
                 self.in_style(level, true, |c| {
                     c.node_with_x(node, script_size, baseline, left + (width - box_.0) / 2)
                 });
@@ -2151,26 +2455,54 @@ impl Context<'_> {
             self.items.push(MathItem {
                 text: text.to_string(),
                 x: Width(left),
-                y: Width::ZERO,
-                size: big,
+                y: Width(op_y),
+                size: text_size,
+                design,
+                glyph,
                 stretch: 1000,
                 color: None,
             });
             self.cursor = left + advance;
-            let end = self.side_scripts((advance, above, below), 0, sup, sub, size, baseline);
+            let end = self.side_scripts((advance, above, below), op_y, 0, sup, sub, size, baseline);
             self.cursor = end;
         }
     }
 
     /// `\hat`, `\bar`, `\vec`, `\tilde`.
+    ///
+    /// A math face usually carries the combining accents (U+0302/U+0303/U+0304)
+    /// and not the spacing modifiers (U+02C6/U+02DC/U+00AF), so prefer the
+    /// combining form and align it by the `MATH` top accent attachments
+    /// (Typst `accent.rs`, ADR-0076).
     fn accent(&mut self, mark: &str, body: &Node, wide: bool, size: Width, baseline: i32) {
         let (width, height, _depth) = self.measure_ink(body, size);
         let body_x = self.cursor;
         self.node_with_x(body, size, baseline, body_x);
+
+        let combining = match mark {
+            "\u{2c6}" => Some("\u{302}"),
+            "\u{2dc}" => Some("\u{303}"),
+            "\u{af}" => Some("\u{304}"),
+            "\u{20d7}" => Some("\u{20d7}"),
+            _ => None,
+        };
         let mut glyph = mark;
+        if let Some(candidate) = combining {
+            if candidate
+                .chars()
+                .next()
+                .is_some_and(|character| self.metrics.math_has(character))
+            {
+                glyph = candidate;
+            }
+        }
         let mut advance = self.metrics.advance(glyph, size).0;
-        if advance <= 0 {
-            // A combining mark has no advance; use a spacing arrow for `\vec`.
+        let has_glyph = glyph.chars().next().is_some_and(|character| {
+            self.metrics.math_has(character) || self.metrics.has(character)
+        });
+        if !has_glyph {
+            // Last resort for a face with neither the combining nor the
+            // spacing mark: a drawn arrow, which every math face has.
             glyph = "→";
             advance = self.metrics.advance(glyph, size).0;
         }
@@ -2179,23 +2511,55 @@ impl Context<'_> {
             .ink(glyph, size)
             .map(|(a, d)| (a.0, d.0))
             .unwrap_or((self.metrics.ascent(size).0, self.metrics.descent(size).0));
-        let gap = scale(size, 40).max(1);
-        let y = baseline - height - gap - mark_below - scale(size, 20);
         let _ = mark_above;
+        let gap = scale(size, 60).max(1);
+        // A combining accent's ink is entirely above its own baseline, so the
+        // signed bottom is negative and the glyph's origin must move *down* to
+        // put the ink just above the base.
+        let bottom = self
+            .metrics
+            .accent_bottom(glyph, size)
+            .map(|value| value.0)
+            .unwrap_or(mark_below);
+        let y = baseline - height - gap - bottom;
+
+        let base_attach = self
+            .accent_base_text(body)
+            .and_then(|text| self.metrics.top_accent(&text, size))
+            .map(|value| value.0)
+            .unwrap_or(width / 2);
+        let accent_attach = self
+            .metrics
+            .top_accent(glyph, size)
+            .map(|value| value.0)
+            .unwrap_or(advance / 2);
+
         let stretch = if wide && advance > 0 && width > advance {
             ((width as i64 * 1000) / advance as i64).clamp(1000, 6000) as u16
         } else {
             1000
         };
-        self.items.push(MathItem {
-            text: glyph.to_string(),
-            x: Width(body_x + (width - advance) / 2),
-            y: Width(y),
+        // The renderers scale from the glyph's origin, so the attachment moves
+        // with the scale.
+        let attach = (accent_attach as i64 * stretch as i64 / 1000) as i32;
+        let mut item = MathItem::text(
+            glyph.to_string(),
+            Width(body_x + base_attach - attach),
+            Width(y),
             size,
-            stretch,
-            color: None,
-        });
+        );
+        item.stretch = stretch;
+        self.items.push(item);
         self.cursor = body_x + width;
+    }
+
+    /// The text form of a single-glyph accent base, for its attach lookup.
+    fn accent_base_text(&self, base: &Node) -> Option<String> {
+        match base {
+            Node::Letter(character) => Some(self.letter_text(*character)),
+            Node::Symbol { text, .. } if text.chars().count() == 1 => Some(text.clone()),
+            _ => None,
+        }
     }
 
     /// `\overline` / `\underline`.
@@ -2262,14 +2626,12 @@ impl Context<'_> {
             let width = advance
                 .max(sup_box.map(|b| b.0).unwrap_or(0))
                 .max(sub_box.map(|b| b.0).unwrap_or(0));
-            self.items.push(MathItem {
-                text: text.to_string(),
-                x: Width(left + (width - advance) / 2),
-                y: Width::ZERO,
+            self.items.push(MathItem::text(
+                text.to_string(),
+                Width(left + (width - advance) / 2),
+                Width::ZERO,
                 size,
-                stretch: 1000,
-                color: None,
-            });
+            ));
             let gap = scale(size, self.style.limit_above_gap);
             let rise = scale(size, self.style.limit_above_rise);
             if let (Some(node), Some(box_)) = (sup, sup_box) {
@@ -2288,16 +2650,14 @@ impl Context<'_> {
             }
             self.cursor = left + width;
         } else {
-            self.items.push(MathItem {
-                text: text.to_string(),
-                x: Width(left),
-                y: Width::ZERO,
+            self.items.push(MathItem::text(
+                text.to_string(),
+                Width(left),
+                Width::ZERO,
                 size,
-                stretch: 1000,
-                color: None,
-            });
+            ));
             self.cursor = left + advance;
-            let end = self.side_scripts((advance, above, below), 0, sup, sub, size, baseline);
+            let end = self.side_scripts((advance, above, below), 0, 0, sup, sub, size, baseline);
             self.cursor = end;
         }
     }
@@ -2321,9 +2681,11 @@ impl Context<'_> {
     }
 
     /// A base with its scripts to the right. Returns the cursor after them.
+    #[allow(clippy::too_many_arguments)]
     fn side_scripts(
         &mut self,
         base: (i32, i32, i32),
+        offset: i32,
         italic: i32,
         sup: Option<&Node>,
         sub: Option<&Node>,
@@ -2355,6 +2717,10 @@ impl Context<'_> {
         }
         let mut drop = scale(size, self.style.sub_shift);
         drop = drop.max(base.2 + scale(size, self.style.sub_drop));
+        if let Some((_, subscript_height, _)) = sub_box {
+            // TeX rule 18: a tall subscript may not rise too far into the base.
+            drop = drop.max(subscript_height - scale(size, self.style.sub_top_max));
+        }
         if let (Some((_, _, sd)), Some((_, sh, _))) = (sup_box, sub_box) {
             // With a subscript present the superscript may not float higher
             // than `sup_bottom_max_sub` above the baseline, as long as the
@@ -2374,14 +2740,14 @@ impl Context<'_> {
         let mut had_script = false;
         if let (Some(node), Some((width, _, _))) = (sup, sup_box) {
             self.in_style(level, self.cramped, |c| {
-                c.node_with_x(node, script_size, baseline - lift, x)
+                c.node_with_x(node, script_size, baseline + offset - lift, x)
             });
             end = end.max(x + width);
             had_script = true;
         }
         if let (Some(node), Some((width, _, _))) = (sub, sub_box) {
             self.in_style(level, true, |c| {
-                c.node_with_x(node, script_size, baseline + drop, x)
+                c.node_with_x(node, script_size, baseline + offset + drop, x)
             });
             end = end.max(x + width);
             had_script = true;
@@ -2435,6 +2801,7 @@ impl Context<'_> {
         self.node(base, size, baseline);
         let end = self.side_scripts(
             (base_box.0, base_box.1, base_box.2),
+            0,
             italic,
             sup,
             sub,
@@ -2546,54 +2913,87 @@ impl Context<'_> {
         self.cursor = saved.max(end);
     }
 
-    /// Delimiter size and baseline offset for a fence around `body`.
-    fn fence_geometry(&self, body: (i32, i32, i32), size: Width) -> (Width, i32) {
-        let (_, height, depth) = body;
-        let needed = (height + depth).max(1);
-        let extent = |metrics: &dyn MathMetrics, at: Width| -> i32 {
-            match metrics.ink("(", at) {
-                Some((above, below)) => (above.0 + below.0).max(1),
-                None => (metrics.ascent(at).0 + metrics.descent(at).0).max(1),
-            }
-        };
-        let unit = extent(self.metrics, size);
-        let mut delim_size = if unit < needed {
-            let estimate = size.0 as i64 * needed as i64;
-            let target = (estimate + unit as i64 - 1) / unit as i64;
-            Width(target.clamp(size.0 as i64, size.0 as i64 * 4) as i32)
-        } else {
-            size
-        };
-        let mut guard = 0;
-        while extent(self.metrics, delim_size) < needed && delim_size.0 < size.0 * 4 && guard < 64 {
-            delim_size = Width(delim_size.0 + (delim_size.0 / 64).max(1));
-            guard += 1;
-        }
-        let (ascent, descent) = self
-            .metrics
-            .ink("(", delim_size)
-            .map(|(a, d)| (a.0, d.0))
-            .unwrap_or((
-                self.metrics.ascent(delim_size).0,
-                self.metrics.descent(delim_size).0,
-            ));
-        // Align the delimiter's ink centre with the body's ink centre.
-        let baseline_off = (depth - height) / 2 - (descent - ascent) / 2;
-        (delim_size, baseline_off)
-    }
-
     /// Push one delimiter glyph at the cursor; the empty string is the null
     /// delimiter and advances nothing.
-    fn delimiter(&mut self, text: &str, size: Width, baseline: i32) {
+    ///
+    /// A fence is a design variant when the font has one (ADR-0075); its ink is
+    /// centred on the body's ink. Without variants the text glyph is grown
+    /// until it covers `needed`.
+    fn delimiter(
+        &mut self,
+        text: &str,
+        needed: i32,
+        height: i32,
+        depth: i32,
+        baseline: i32,
+        size: Width,
+    ) {
         if text.is_empty() {
             return;
         }
-        let advance = self.metrics.advance(text, size).0;
+        let choice = self.design_variant(text, needed, size);
+        let (glyph, design_size, fallback, advance, above, below) = match choice {
+            Some(design) => (
+                design.glyph,
+                design.design,
+                design.fallback,
+                design.advance,
+                design.above,
+                design.below,
+            ),
+            None => {
+                let extent = |metrics: &dyn MathMetrics, at: Width| -> i32 {
+                    match metrics.ink(text, at) {
+                        Some((above, below)) => (above.0 + below.0).max(1),
+                        None => (metrics.ascent(at).0 + metrics.descent(at).0).max(1),
+                    }
+                };
+                let unit = extent(self.metrics, size);
+                let mut delim_size = if unit < needed {
+                    let estimate = size.0 as i64 * needed as i64;
+                    let target = (estimate + unit as i64 - 1) / unit as i64;
+                    Width(target.clamp(size.0 as i64, size.0 as i64 * 4) as i32)
+                } else {
+                    size
+                };
+                let mut guard = 0;
+                while extent(self.metrics, delim_size) < needed
+                    && delim_size.0 < size.0 * 4
+                    && guard < 64
+                {
+                    delim_size = Width(delim_size.0 + (delim_size.0 / 64).max(1));
+                    guard += 1;
+                }
+                let (above, below) = self.metrics.ink(text, delim_size).unwrap_or((
+                    self.metrics.ascent(delim_size),
+                    self.metrics.descent(delim_size),
+                ));
+                let advance = self.metrics.advance(text, delim_size).0;
+                (
+                    MathGlyph::Text,
+                    delim_size,
+                    delim_size,
+                    advance,
+                    above.0,
+                    below.0,
+                )
+            }
+        };
+        // A stretched design glyph is centred on the math axis (TeXbook rule
+        // 15 / Typst). A base glyph is already axis-centred by design, so it
+        // keeps its baseline; a scaled text glyph centres on the body's ink.
+        let off = match glyph {
+            MathGlyph::Text => (depth - height) / 2 - (below - above) / 2,
+            MathGlyph::Vertical(0) => 0,
+            MathGlyph::Vertical(_) => -scale(size, self.style.axis_height) + (above - below) / 2,
+        };
         self.items.push(MathItem {
             text: text.to_string(),
             x: Width(self.cursor),
-            y: Width(baseline),
-            size,
+            y: Width(baseline + off),
+            size: fallback,
+            design: design_size,
+            glyph,
             stretch: 1000,
             color: None,
         });
@@ -2648,18 +3048,28 @@ impl Context<'_> {
         for r in 1..rows.len() {
             baselines[r] = baselines[r - 1] + descent[r - 1] + row_gap + ascent[r];
         }
-        let height = (0..rows.len())
+        let mut height = (0..rows.len())
             .map(|r| ascent[r] - baselines[r])
             .max()
             .unwrap_or(0);
-        let depth = (0..rows.len())
+        let mut depth = (0..rows.len())
             .map(|r| descent[r] + baselines[r])
             .max()
             .unwrap_or(0);
 
-        let (delim_size, baseline_off) = self.fence_geometry((total, height, depth), size);
+        // A matrix is centred on the math axis, not on its first row
+        // (TeXbook / Typst `table.rs`). Shifting every baseline keeps the row
+        // spacing and moves the block as a whole.
+        let shift = (height - depth) / 2 - scale(size, self.style.axis_height);
+        for baseline in &mut baselines {
+            *baseline += shift;
+        }
+        height -= shift;
+        depth += shift;
+
+        let needed = (height + depth).max(1);
         let (left, right) = fence_text(kind);
-        self.delimiter(left, delim_size, baseline + baseline_off);
+        self.delimiter(left, needed, height, depth, baseline, size);
         let origin = self.cursor;
 
         let mut col_x = alloc::vec![0i32; cols];
@@ -2695,7 +3105,7 @@ impl Context<'_> {
         }
         self.matrix_depth -= 1;
         self.cursor = origin + total;
-        self.delimiter(right, delim_size, baseline + baseline_off);
+        self.delimiter(right, needed, height, depth, baseline, size);
     }
 
     /// Stack lines centred on each other, as `\substack` does inside a limit.
@@ -2764,14 +3174,10 @@ impl Context<'_> {
                 baseline + depth + gap + ink_top
             };
             if self.metrics.has(glyph.chars().next().unwrap_or('\u{23de}')) {
-                self.items.push(MathItem {
-                    text: String::from(glyph),
-                    x: Width(left),
-                    y: Width(y),
-                    size: grown_size,
-                    stretch,
-                    color: None,
-                });
+                let mut item =
+                    MathItem::text(String::from(glyph), Width(left), Width(y), grown_size);
+                item.stretch = stretch;
+                self.items.push(item);
             }
             BraceGeo {
                 left,
@@ -3027,6 +3433,11 @@ fn size_for(level: StyleLevel, size: Width, style: &MathStyle) -> Width {
 fn item_ink(metrics: &dyn MathMetrics, item: &MathItem) -> (i32, i32) {
     if let Some((top, bottom)) = brace_ink(&item.text) {
         return (per_mille(item.size, top), per_mille(item.size, bottom));
+    }
+    if let MathGlyph::Vertical(index) = item.glyph {
+        if let Some(variant) = metrics.vertical_variant(&item.text, index, item.design) {
+            return (variant.above.0, variant.below.0);
+        }
     }
     match metrics.ink(&item.text, item.size) {
         Some((above, below)) => (above.0, below.0),

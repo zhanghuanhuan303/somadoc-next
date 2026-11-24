@@ -945,7 +945,8 @@ fn a_large_operator_has_a_thin_space_before_its_operand() {
 #[test]
 fn a_hat_sits_above_its_body() {
     let result = formula("\\hat{x}");
-    let hat = at(&result, "ˆ");
+    // The math face's combining circumflex, aligned by its attachment.
+    let hat = at(&result, "\u{302}");
     let x = at(&result, "x");
     assert!(hat.y.0 < 0, "the accent is above the baseline");
     assert!(hat.x.0 >= x.x.0);
@@ -993,4 +994,262 @@ fn style_commands_change_the_size_of_the_rest() {
     let result = formula("\\scriptstyle x");
     let x = at(&result, "x");
     assert_eq!(x.size.0, Width::EM.0 * 700 / 1000);
+}
+
+// ---------------------------------------------------------------------------
+// Math design variants (ADR-0075)
+// ---------------------------------------------------------------------------
+
+/// A face with vertical design variants, like every OpenType math font.
+struct VariantMetrics;
+
+impl VariantMetrics {
+    fn count(text: &str) -> u16 {
+        match text {
+            "∑" => 3,
+            "√" => 4,
+            _ => 0,
+        }
+    }
+
+    fn variant(text: &str, index: u16, size: Width) -> Option<soma_math::VerticalVariant> {
+        let count = Self::count(text);
+        if count == 0 || index >= count {
+            return None;
+        }
+        // Design heights: 0.8, 1.6, 2.4, 3.2 em.
+        let height = (i32::from(index) + 1) * 8 * size.0 / 10;
+        Some(soma_math::VerticalVariant {
+            advance: Width(size.0 / 2 + i32::from(index) * size.0 / 4),
+            above: Width(height * 3 / 4),
+            below: Width(height / 4),
+            right_gap: Width(size.0 / 8),
+        })
+    }
+}
+
+impl MathMetrics for VariantMetrics {
+    fn advance(&self, text: &str, size: Width) -> Width {
+        Width(text.chars().count() as i32 * size.0 / 2)
+    }
+    fn ascent(&self, size: Width) -> Width {
+        Width(size.0 * 3 / 4)
+    }
+    fn descent(&self, size: Width) -> Width {
+        Width(size.0 / 4)
+    }
+    fn ink(&self, _text: &str, size: Width) -> Option<(Width, Width)> {
+        Some((Width(size.0 * 3 / 4), Width(size.0 / 4)))
+    }
+    fn vertical_variant_count(&self, text: &str) -> u16 {
+        Self::count(text)
+    }
+    fn vertical_variant(
+        &self,
+        text: &str,
+        index: u16,
+        size: Width,
+    ) -> Option<soma_math::VerticalVariant> {
+        Self::variant(text, index, size)
+    }
+}
+
+#[test]
+fn a_display_operator_uses_the_smallest_covering_design_variant() {
+    let result = layout("\\sum_{i=1}^{n}", &MathStyle::default(), &VariantMetrics).expect("layout");
+    let sum = at(&result, "∑");
+    assert_eq!(sum.variant(), Some(1), "0.8 em is too short, 1.6 em fits");
+    assert_eq!(
+        sum.design,
+        Width::EM,
+        "a variant is drawn at the design size"
+    );
+    assert_eq!(
+        sum.size.0,
+        Width::EM.0 * 16 / 10,
+        "a text renderer draws the base glyph at the variant's height"
+    );
+    assert!(sum.size.0 > sum.design.0);
+}
+
+#[test]
+fn a_text_style_operator_keeps_its_base_glyph() {
+    let style = MathStyle {
+        display: false,
+        ..MathStyle::default()
+    };
+    let result = layout("\\sum_{i=1}^{n}", &style, &VariantMetrics).expect("layout");
+    let sum = at(&result, "∑");
+    assert_eq!(sum.variant(), None);
+    assert_eq!(sum.size, sum.design);
+}
+
+#[test]
+fn an_impossible_target_uses_the_tallest_variant_without_scaling() {
+    let style = MathStyle {
+        display_operator_min: 5000,
+        ..MathStyle::default()
+    };
+    let result = layout("\\sum", &style, &VariantMetrics).expect("layout");
+    let sum = at(&result, "∑");
+    assert_eq!(
+        sum.variant(),
+        Some(2),
+        "the last variant, not an enlarged base"
+    );
+    assert_eq!(sum.design, Width::EM);
+}
+
+#[test]
+fn a_radical_uses_a_variant_and_starts_the_bar_at_its_ink() {
+    let result = layout(
+        r"\sqrt{\frac{a}{b}}",
+        &MathStyle::default(),
+        &VariantMetrics,
+    )
+    .expect("layout");
+    let surd = at(&result, "√");
+    let index = surd.variant().expect("a tall radicand selects a variant");
+    let variant = VariantMetrics::variant("√", index, Width::EM).expect("variant");
+    assert_eq!(surd.design, Width::EM);
+    assert!(surd.size.0 > surd.design.0, "the fallback is larger");
+    let bar = result.rules.last().expect("vinculum");
+    let rule = bar.thickness.0;
+    assert_eq!(
+        bar.x.0,
+        surd.x.0 + variant.advance.0 - variant.right_gap.0 - rule,
+        "the vinculum starts at the hook's ink, not at the advance: surd {:?} variant {:?} bar {:?}",
+        surd, variant, bar
+    );
+    assert!(bar.x.0 < surd.x.0 + variant.advance.0);
+}
+
+#[test]
+fn a_radical_degree_sits_in_the_nook() {
+    let result = layout(r"\sqrt[3]{x}", &MathStyle::default(), &VariantMetrics).expect("layout");
+    let surd = at(&result, "√");
+    let degree = at(&result, "3");
+    let index = surd.variant().expect("a variant");
+    let variant = VariantMetrics::variant("√", index, Width::EM).expect("variant");
+    assert!(
+        degree.y.0 > surd.y.0 - variant.above.0,
+        "the degree's baseline is below the surd's ink top: degree {:?} surd {:?}",
+        degree,
+        surd
+    );
+    assert!(degree.y.0 < surd.y.0, "and inside the radical's height");
+    assert!(degree.x.0 < surd.x.0);
+}
+
+#[test]
+fn a_fence_uses_a_variant_centred_on_the_body() {
+    // `(` has no variants in VariantMetrics, so this pins the fallback; the
+    // variant path is exercised by the radical and the operator above.
+    let result = layout(r"\left(x\right)", &MathStyle::default(), &VariantMetrics).expect("layout");
+    let open = at(&result, "(");
+    assert_eq!(open.variant(), None);
+    assert_eq!(open.size, open.design);
+}
+
+#[test]
+fn a_negative_degree_kern_does_not_move_a_plain_radical() {
+    let style = MathStyle {
+        radical_kern_before: 40,
+        radical_kern_after: -526,
+        ..MathStyle::default()
+    };
+    let plain = layout(r"\sqrt{x}", &style, &VariantMetrics).expect("layout");
+    assert_eq!(
+        at(&plain, "√").x,
+        Width::ZERO,
+        "without a degree nothing may hang left of the cursor"
+    );
+
+    let cubed = layout(r"\sqrt[3]{x}", &style, &VariantMetrics).expect("layout");
+    let surd = at(&cubed, "√");
+    let degree = at(&cubed, "3");
+    assert_eq!(
+        surd.x,
+        Width::ZERO,
+        "a negative degree kern may tuck the degree into the surd, never move \
+         the surd left of the cursor"
+    );
+    assert!(degree.x.0 > 0 && degree.x.0 < surd.x.0 + 2000);
+    assert!(
+        degree.x.0 + VariantMetrics.advance("3", degree.size).0 > surd.x.0,
+        "the degree overlaps the surd's left arm"
+    );
+
+    // With a non-negative offset the surd starts after the degree instead.
+    let wide = MathStyle {
+        radical_kern_before: 40,
+        radical_kern_after: 0,
+        ..MathStyle::default()
+    };
+    let cubed = layout(r"\sqrt[3]{x}", &wide, &VariantMetrics).expect("layout");
+    let surd = at(&cubed, "√");
+    let degree = at(&cubed, "3");
+    assert_eq!(degree.x, Width(163));
+    assert_eq!(surd.x.0, 163 + VariantMetrics.advance("3", degree.size).0);
+}
+
+// ---------------------------------------------------------------------------
+// Accent attachments (ADR-0076)
+// ---------------------------------------------------------------------------
+
+struct AccentMetrics;
+
+impl MathMetrics for AccentMetrics {
+    fn advance(&self, text: &str, size: Width) -> Width {
+        Width(text.chars().count() as i32 * size.0 / 2)
+    }
+    fn ascent(&self, size: Width) -> Width {
+        Width(size.0 * 3 / 4)
+    }
+    fn descent(&self, size: Width) -> Width {
+        Width(size.0 / 4)
+    }
+    fn ink(&self, _text: &str, size: Width) -> Option<(Width, Width)> {
+        Some((Width(size.0 * 3 / 4), Width(size.0 / 4)))
+    }
+    fn math_has(&self, character: char) -> bool {
+        matches!(character, '\u{302}' | '\u{303}' | '\u{304}' | '\u{20d7}')
+    }
+    fn top_accent(&self, text: &str, size: Width) -> Option<Width> {
+        match text.chars().next()? {
+            'x' => Some(Width(size.0 / 4)),
+            '\u{302}' => Some(Width(size.0 / 8)),
+            '\u{20d7}' => Some(Width(size.0 / 8)),
+            _ => None,
+        }
+    }
+    fn accent_bottom(&self, text: &str, size: Width) -> Option<Width> {
+        match text.chars().next()? {
+            '\u{302}' | '\u{20d7}' => Some(Width(-size.0 * 3 / 5)),
+            _ => Some(Width(size.0 / 4)),
+        }
+    }
+}
+
+#[test]
+fn a_hat_uses_the_combining_mark_and_its_attachment() {
+    let result = layout(r"\hat{x}", &MathStyle::default(), &AccentMetrics).expect("layout");
+    let hat = at(&result, "\u{302}");
+    let x = at(&result, "x");
+    assert_eq!(
+        hat.x.0,
+        x.x.0 + Width::EM.0 / 4 - Width::EM.0 / 8,
+        "the accent's attachment meets the base's"
+    );
+    // The accent's ink bottom (origin + signed bottom) sits just above the
+    // base's ink top, not a whole accent-height above it.
+    assert!(hat.y.0 > -Width::EM.0);
+    assert!(hat.y.0 + Width::EM.0 * 3 / 5 < Width::EM.0 * 3 / 4);
+}
+
+#[test]
+fn an_accent_falls_back_to_a_drawn_arrow_only_when_the_face_lacks_it() {
+    let result = layout(r"\vec{v}", &MathStyle::default(), &AccentMetrics).expect("layout");
+    assert!(result.items.iter().any(|item| item.text == "\u{20d7}"));
+    assert!(!result.items.iter().any(|item| item.text == "→"));
 }

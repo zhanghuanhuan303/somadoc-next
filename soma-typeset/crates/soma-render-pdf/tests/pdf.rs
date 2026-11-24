@@ -183,6 +183,10 @@ fn the_tiny_fixture_maps_bmp_characters() {
     assert_eq!(font.glyph(0x4E2D), 3);
     assert_eq!(font.glyph('Z' as u32), 0, "missing characters use .notdef");
     assert_eq!(font.width_1000(1), 600);
+    assert!(font.has_glyph('A' as u32));
+    assert!(!font.has_glyph('Z' as u32));
+    assert_eq!(font.advance_4096('A' as u32), Some(2458), "600/1000 em");
+    assert_eq!(font.advance_4096('Z' as u32), None);
 }
 
 #[test]
