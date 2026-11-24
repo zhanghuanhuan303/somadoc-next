@@ -1,7 +1,7 @@
 # 未做清单（Debt register）
 
-状态：**2026-11-25，TikZ 收口后**。这是全局台账，不随里程碑报告消失。
-当前：**101 条，82 条已关闭，19 条未关闭**（14 个技术债 + 1 个 web 预览 + 4 个非目标；其中 D01 需人工评审）。
+状态：**2026-11-25，Web Studio 后**。这是全局台账，不随里程碑报告消失。
+当前：**106 条，83 条已关闭，23 条未关闭**（19 个技术债 + 4 个非目标；其中 D01 需人工评审）。
 关闭一项就改成 ~~删除线~~ 并写明关闭点；新增债务必须给 ID。
 
 口径：
@@ -96,7 +96,7 @@
 | D97 | 数学装配件与横向变体未用 | 三款已装数学字体（Noto Sans Math、DejaVu Math TeX Gyre、TeX Gyre Pagella Math）的纵向 `GlyphAssembly` part 数都是 0，`soma.metrics/7` 因此只写变体列表；超过最大变体时用最大设计字形（TeX 在没有更大字形时的做法）。横向变体仍未读：`\overbrace` 在该字体没有横向构造时退回规则拼装（Noto 的 U+23DE 正是如此） | 极端高的根式/括号不能继续加高；横向大括号/宽重音仍是拉伸或规则拼装，不是字体设计件 | 有字体真的提供装配件，或横向变体出现视觉需求时，加 `soma.metrics/8` | 否 |
 | D98 | 重音不用 `MathKernInfo` 与扁平重音 | **部分关闭（ADR-0076）**：顶部重音锚点（`MathTopAccentAttachment`）与组合重音已读，`\hat`/`\bar`/`\tilde`/`\vec` 不再画 `.notdef`；仍未读 `MathKernInfo`、`flattenedAccentBaseHeight` 与扁平重音变体，宽重音只用横向 `stretch` | 宽重音/高基底的细节与 LaTeX 仍有差距 | 与横向变体（D97）一起做，加 `soma.metrics/8` | 否 |
 | D94 | ~~emergency 阶段没有候选窗口~~ | **已关闭（ADR-0072）**：`line_length_bounds` 以前在 `allow_emergency` 时直接返回 `(1, n)`；现在过宽方向也有界——两个旗标同时打开时按 `emergency_stretch` 界住，否则按满 shrink（`tolerance_eff = min(tolerance, 1000)`，顺带修掉 `emergency_tolerance = 10.0` 让窗口算式失效的问题）。混排 2000 atoms @20 em：候选 1 255 320 → 30 316，Chromium 40.5 ms → 2.5 ms，断点序列与语料基线逐字不变 | — | ✅ 已关闭 | 否 |
-| D95 | 浏览器 preview 与 PDF 不同字节 | 网页端度量来自 `canvas.measureText`（唯一能保证「所见即所排」的来源），而 PDF 用的是 `.smt` 表；两者宽度差 1–2%，断点可能不同。`faithful` 模式（wasm 内解析 `.smt`）可对齐 PDF，但需要一次表下载与字符集裁剪 | 「网页上看到的就是印出来的」目前不成立 | 先做 preview（ABI 已允许换度量源）；faithful 按真实需求再做，需要 `.smt` 子集工具 | 否 |
+| D95 | ~~浏览器 preview 与 PDF 不同字节~~ | **已关闭（页面几何部分，ADR-0093）**：Studio 把整个引擎编进 wasm，浏览器与 Axum 都跑 `soma-studio-core`、同一份 `.smt` 表与同一棵 `PagedLayout`；`/api/verify` 与 `scripts/studio.sh` 锁 canonical 哈希相等。剩余差异只是字形墨迹，单独记为 D101 | — | ✅ 已关闭 | 否 |
 | D96 | ~~内嵌度量表是 v1，没有墨迹~~ | **已关闭（ADR-0073/0074）**：内嵌 `noto-cjk.smt` 重新生成到 `soma.metrics/5`，含 4 个 CJK 面（标点墨迹）与 1 个数学面（35 个 MATH 常数 + 2,901 个字形墨迹）；CFF 没有 `glyf`，改用「覆盖区间拆成连续 run 的 block」来压缩 advance，8.4 万 → **28.8 万字节**（逐条写是 110 万）。语料重新基线：断点/页数一行未动，`fitness_jumps` 3 → 8、`jitter_p95` 377 不变 | 默认路径的行末标点现在也贴边 | ✅ 已关闭 | 否 |
 | D89 | ~~列表没有悬挂缩进~~ | **已关闭（ADR-0058）**：内核 `ParagraphStyle.hang`（默认 0，行为不变）；模板里写负的 `first-indent` 即悬挂缩进，记号落在文字列左侧 1.2em，续行回到文字列 | — | ✅ 已关闭 | 否 |
 | D80 | ~~索引按码位排序~~ | **已关闭（ADR-0061）**：`soma-collate` 内置 27,584 个码位的拼音序表；模板 `index.sort: codepoint\|pinyin`（默认 codepoint，canonical 字节不变） | — | ✅ 已关闭 | 否 |
@@ -120,6 +120,11 @@
 | D57 | ~~`Line` 序列化上提到 kernel~~ | **已关闭（无动作）**：`Line::write_canonical` 已是唯一 writer，页面结果复用；没有第二个消费者需要抽取 | — | ✅ 已关闭 | 否 |
 | D99 | TikZ 只做核心绘图语言 | **ADR-0092 已交付**：路径/节点/坐标/网格/裁剪与三种后端的矢量绘制；仍不包含 `plot`、`decorations`、`graphs`、`matrix`、`pic`、`clip`、patterns、shadings、3D、`positioning` 库；箭头是几何 barbs 而非 `arrows.meta` 字形；没有旋转选项；节点文字不能 `\\` 换行 | 复杂 TikZ 图会走可见的源码回退，而不是画错 | 有真实文档用到对应库时按 ADR 扩子集 | 否 |
 | D100 | 字对 kerning 未接入 | `Metrics::kerning` 仍是默认返回 0 的钩子，断行与渲染都没有调用点；度量表也不带 pair kerning | 拉丁紧密字对的宽度与真实字体有偏差（中文不受影响） | 有真实拉丁排版需求时生成 pair 表并接进 atom 宽度 | 否 |
+| D101 | 字形墨迹与引擎度量不同源 | Studio 的页盒、断点与坐标来自 `.smt`，浏览器用自己的字体文件成形；同一字体下差异应 <5‰，缺字体时由标题栏探针报 `不一致`。探针是诊断，不进入断行或渲染 | 极端字体（合成粗体、hinting 差异大）的墨迹可能与 PDF 有可见差别 | 需要把模板字体子集化并内嵌网页字体时再做 | 否 |
+| D102 | `Line` 只导出总 `cost` | 检视页能显示 ratio、裁剪、边界偏差与总代价，但逐项代价（badness、short-last、line 等）没有进入 canonical 或 UI；`inspect-detail` 显示 `—` | 标定时看不到某一行为什么贵 | 有调试/教学需求时加一个非 canonical 的 trace 导出层 | 否 |
+| D103 | atom 没有源文偏移 | 行→源文映射是块级精确、行级尽力；点击行只能定位到块，不能精确选中该行的源文片段 | 编辑器无法做行级双向高亮 | 编辑器需要行级选中或诊断时，给 atom 加源文 span 索引 | 否 |
+| D104 | Studio 构建在主线程 | 打字后 220 ms 防抖构建；提案里的「>800 atoms 走 Worker」没有实现。需要可序列化的 `AppBuild` 与第二个 wasm 二进制 | 超大文档（4k+ atoms）输入时可能掉帧 | 真实项目实测超预算时再做 | 否 |
+| D105 | Studio 没有单文件静态导出 | 项目文件、字体与 PDF 依赖 Axum；`web/` 的 K-P slice 仍是唯一 server-free 嵌入件 | 不能把一个离线 HTML 直接分享给他人 | 有离线分享/静态托管需求时做 | 否 |
 
 ## 3. 非目标（不是债务）
 
@@ -164,4 +169,5 @@
 | PDF 输出 | **已完成（ADR-0034/ADR-0039）**：TrueType 稀疏子集与 CID-keyed CFF、Identity-H、书签树、PageLabels；边界见 D82/D85 |
 | 全量补课 | **已完成（ADR-0059–0063）**：关闭 D09、D24、D37、D53、D80、D81 |
 | 遗留清账 | **已完成（ADR-0064–0067）**：关闭 D12、D70；D24/D69/D81 补齐（Word 样式与图片、HTML `colgroup`、索引页码区间） |
-| 未排期 | D01、D32、D51、D60、D61、D62、D63、D65、D66、D67、D95、D97、D98、D99、D100、N3–N6 |
+| Web Studio | **已完成（ADR-0093/0094）**：`soma-studio-core/-ui/-` 三个 crate、S1–S10、字体探针、SSE 重载、CSP；关闭 D95，新增 D101–D105 |
+| 未排期 | D01、D32、D51、D60、D61、D62、D63、D65、D66、D67、D97、D98、D99、D100、D101–D105、N3–N6 |

@@ -7,7 +7,7 @@ use soma_doc::meta::DocumentMeta;
 use soma_doc::node::NodeMeta;
 use soma_doc::{Block, Document, FootnoteDef, Text};
 use soma_layout::{layout, FOOTNOTE_MARKER};
-use soma_render_html::{render, render_page};
+use soma_render_html::{render, render_fragments, render_page, PAGE_STYLE};
 use soma_template::{parse_template, resolve, StyledDoc, Template};
 
 const TEMPLATE: &str = r#"
@@ -171,6 +171,30 @@ fn html_is_escaped() {
         "{visible}"
     );
     assert!(!visible.contains("< b"));
+}
+
+#[test]
+fn page_fragments_join_to_the_same_document() {
+    let document = document();
+    let styled = styled(&document);
+    let pages = layout(
+        &document,
+        &styled,
+        &SyntheticMetrics::default(),
+        &BreakConfig::default(),
+    )
+    .expect("layout");
+    let html = render(&pages, styled.table(), &pages.text);
+    let fragments = render_fragments(&pages, styled.table(), &pages.text);
+    let mut joined = String::from("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">\n<style>");
+    joined.push_str(PAGE_STYLE);
+    joined.push_str("</style></head><body>\n");
+    for fragment in &fragments {
+        assert_eq!(fragment.style, PAGE_STYLE);
+        joined.push_str(&fragment.body);
+    }
+    joined.push_str("</body></html>\n");
+    assert_eq!(html, joined);
 }
 
 #[test]

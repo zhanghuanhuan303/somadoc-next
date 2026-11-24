@@ -73,15 +73,14 @@ fn the_block_top_is_offset_by_the_formula_baseline() {
     let math = block.math.as_ref().expect("math box");
     let item = &math.items[0];
 
-    let left = layout.page.margin_left.0 + block.x.0 + item.x.0;
-    let top =
-        layout.page.margin_top.0 + block.y.0 + math.baseline.0 + item.y.0 - item.size.0 / 8 * 7;
+    let left = item.x.0;
+    let top = math.baseline.0 + item.y.0 - item.size.0 / 8 * 7;
     assert!(
-        html.contains(&format!("left:{};", em(left)))
-            && html.contains(&format!("top:{};", em(top))),
+        html.contains(&format!("left:{};", pct(left, block.width.0)))
+            && html.contains(&format!("top:{};", pct(top, block.height.0))),
         "expected left {} top {} in {html}",
-        em(left),
-        em(top)
+        pct(left, block.width.0),
+        pct(top, block.height.0)
     );
 }
 
@@ -94,11 +93,11 @@ fn fraction_bars_become_divs() {
     let rule = &math.rules[0];
 
     assert_eq!(html.matches("class=\"math-rule\"").count(), 1);
-    let left = layout.page.margin_left.0 + block.x.0 + rule.x.0;
-    let top = layout.page.margin_top.0 + block.y.0 + math.baseline.0 + rule.y.0;
+    let left = rule.x.0;
+    let top = math.baseline.0 + rule.y.0;
     assert!(
-        html.contains(&format!("left:{};", em(left)))
-            && html.contains(&format!("top:{};", em(top))),
+        html.contains(&format!("left:{};", pct(left, block.width.0)))
+            && html.contains(&format!("top:{};", pct(top, block.height.0))),
         "the bar is painted at the layout coordinates"
     );
 }
@@ -122,4 +121,11 @@ fn em(value: i32) -> String {
         absolute / 4096,
         (absolute % 4096) * 1000 / 4096
     )
+}
+
+fn pct(value: i32, total: i32) -> String {
+    let scaled = value as i64 * 1_000_000 / total as i64;
+    let sign = if scaled < 0 { "-" } else { "" };
+    let absolute = scaled.abs();
+    format!("{}{}.{:04}%", sign, absolute / 10_000, absolute % 10_000)
 }

@@ -1,0 +1,23 @@
+[package]
+name = "soma-studio-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Shared build pipeline and API types for Soma Studio (native + wasm)."
+
+[dependencies]
+soma-core = { path = "../soma-core" }
+soma-doc = { path = "../soma-doc" }
+soma-engine = { path = "../soma-engine" }
+soma-html = { path = "../soma-html" }
+soma-hyphen = { path = "../soma-hyphen" }
+soma-latex = { path = "../soma-latex" }
+soma-layout = { path = "../soma-layout" }
+soma-md = { path = "../soma-md" }
+soma-metrics = { path = "../soma-metrics" }
+soma-render-html = { path = "../soma-render-html" }
+soma-rules = { path = "../soma-rules" }
+soma-template = { path = "../soma-template" }
+soma-docx = { path = "../soma-docx" }
+serde = { version = "1", features = ["derive"] }

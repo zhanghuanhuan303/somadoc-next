@@ -1,0 +1,30 @@
+[package]
+name = "soma-studio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Soma Studio server: Axum file/font/PDF boundary for the all-Rust wasm workbench."
+
+[[bin]]
+name = "soma-studio"
+path = "src/main.rs"
+
+[dependencies]
+soma-studio-core = { path = "../soma-studio-core" }
+soma-core = { path = "../soma-core" }
+soma-doc = { path = "../soma-doc" }
+soma-layout = { path = "../soma-layout" }
+soma-metrics = { path = "../soma-metrics" }
+soma-md = { path = "../soma-md" }
+soma-render-pdf = { path = "../soma-render-pdf" }
+soma-template = { path = "../soma-template" }
+
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
+tower-http = { version = "0.6", features = ["fs"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+mime_guess = "2"

@@ -111,6 +111,8 @@ only).
 | [0090](0090-code-block-panel.md) | Code blocks are full-measure panels: template `background`/`padding-*`, geometry resolved before pagination | Accepted |
 | [0091](0091-syntax-highlighting.md) | A dependency-free line lexer emits `SyntaxClass`; colors come from the template `syntax:` palette | Accepted |
 | [0092](0092-tikz-vector-subsystem.md) | TikZ is a vector subsystem: `soma-tikz` parses the core PGF drawing language into integer paths on `MathBox.paths`; unsupported syntax fails loudly | Accepted |
+| [0093](0093-web-studio.md) | Web Studio is all-Rust wasm (Leptos CSR) plus an Axum I/O boundary; the whole engine runs in the browser and canonical hashes must match | Accepted |
+| [0094](0094-html-geometry-percent.md) | HTML geometry is percentage-based relative to the page/block frame; inline sizes are ratios, not nested em | Accepted |
 
 ## Rules
 

@@ -1,0 +1,41 @@
+[package]
+name = "soma-studio-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Soma Studio workbench: Leptos CSR frontend with the whole engine in wasm."
+
+[[bin]]
+name = "soma-studio-ui"
+path = "src/main.rs"
+
+[dependencies]
+soma-studio-core = { path = "../soma-studio-core" }
+soma-core = { path = "../soma-core" }
+soma-doc = { path = "../soma-doc" }
+soma-layout = { path = "../soma-layout" }
+soma-render-html = { path = "../soma-render-html" }
+soma-template = { path = "../soma-template" }
+
+leptos = { version = "0.8", features = ["csr"] }
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "=0.4.79"
+js-sys = "=0.3.106"
+web-sys = { version = "=0.3.106", features = [
+  "Window", "Document", "Element", "HtmlElement", "HtmlTextAreaElement",
+  "HtmlInputElement", "HtmlSelectElement", "HtmlButtonElement", "ShadowRoot",
+  "ShadowRootInit", "ShadowRootMode", "Event", "MouseEvent", "KeyboardEvent",
+  "PointerEvent", "InputEvent", "EventTarget", "DomRect", "DomTokenList",
+  "ScrollIntoViewOptions", "ScrollBehavior", "ScrollLogicalPosition", "NodeList",
+  "Location", "Storage", "Blob", "Url", "HtmlAnchorElement", "HtmlStyleElement",
+  "CssStyleDeclaration", "console", "MediaQueryList", "UrlSearchParams",
+  "FontFaceSet", "EventSource", "MessageEvent", "PointerEventInit",
+  "EventInit", "HtmlCanvasElement", "CanvasRenderingContext2d", "TextMetrics"
+] }
+gloo-net = "0.6"
+gloo-timers = { version = "0.4", features = ["futures"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+pulldown-cmark = "0.13"
+console_error_panic_hook = "0.1"

@@ -118,6 +118,15 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   consumes. `scripts/web.sh` verifies zero imports, size, native/wasm parity,
   timing, memory stability and the fallback policy. See
   [`web/README.md`](web/README.md).
+- Soma Studio (ADR-0093, ADR-0094): the **whole engine runs in the browser**
+  (`soma-studio-ui`, Leptos CSR) and Axum is only an I/O boundary
+  (`soma-studio`) for files, fonts, native verification and PDF. The UI has
+  source/proof/inspect/verify views, Shadow-DOM pages, tabs, a command palette,
+  a theme system, a local-rules assistant, and a font-consistency probe. Both
+  sides call `soma-studio-core`; canonical hashes must match, which closes the
+  page-geometry half of D95. Typing rebuilds after a 220 ms debounce and IME
+  composition defers the build. `scripts/studio.sh` locks S1–S10. See
+  [`docs/studio.md`](docs/studio.md).
 - Code blocks (`ADR-0055`): each source line keeps its own spaces and is laid
   out on the block's atom table — indentation survives, nothing reflows, and a
   line that is too long overflows instead of wrapping.
@@ -317,6 +326,9 @@ crates/
   soma-demo/   # static HTML renderer consuming LayoutResult
   soma-web/     # C ABI slice for the browser (rules + K-P, no imports)
   soma-wasm/   # native/WASI fixture for cross-target byte verification
+  soma-studio-core/ # shared Studio build: parse, layout, fragments, probes, DTOs
+  soma-studio-ui/   # Leptos CSR workbench; the whole engine compiled to wasm
+  soma-studio/      # Axum boundary: files, assets, fonts, verify, PDF, SSE
 tools/dry-run-panel/ # simulated blind-test panel generator (not human data)
 tools/
   metrics-gen/ # offline OTF/TTC -> soma.metrics/7 (numbers + ink)
@@ -338,6 +350,7 @@ scripts/
   demo.sh      # target/demo.html
   wasm-hash.sh # native vs wasm32-wasip1 canonical bytes
   kp-verify.sh # K-P closure: gates + bench budget + length policy
+  studio.sh    # S1–S10: browser self-test, CSP, PDF pages, SSE reloads, font probe
 web/
   soma-kp.js       # ES module: compile / measure / break / render (no dependencies)
   soma-kp.wasm     # built slice (32.7 KB gzip, zero imports) — rebuilt by scripts/web.sh
@@ -402,6 +415,14 @@ For the visual demo and evaluation harness:
 scripts/demo.sh            # writes target/demo.html
 scripts/web.sh             # build the browser slice + W1-W6 gates
 scripts/web-bundle.sh      # -> target/soma-kp-standalone.html (open it, no server)
+
+# Soma Studio (all-Rust wasm UI + Axum boundary)
+(cd crates/soma-studio-ui && trunk build --release)
+cargo run -p soma-studio -- --input examples/book/full.tex \
+  --template examples/templates/plex.yaml --metrics examples/templates/out/plex.smt \
+  --font ~/.fonts/IBMPlexSansSC_Regular.ttf --font-bold ~/.fonts/IBMPlexSansSC_Bold.ttf \
+  --port 7070
+scripts/studio.sh          # S1–S10 (starts its own server)
 (cd . && python3 -m http.server 8000)   # or browse /web/demo.html
 scripts/wasm-hash.sh       # native vs wasm32-wasip1 canonical bytes
 scripts/bench.sh           # 100..4,000 atoms, P50/P95, budget check
@@ -414,9 +435,10 @@ cargo run -p soma-eval --release -- blind preferences.csv
 
 ```sh
 scripts/gates.sh
+scripts/studio.sh   # S1-S10 for the web workbench (needs chromium)
 ```
 
-The gate runs format, clippy, 917 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 923 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-highlight`, `soma-template`,
 `soma-layout`, `soma-tikz`, `soma-md`, `soma-render-html`, `soma-render-svg`, and
 `soma-render-pdf`, a

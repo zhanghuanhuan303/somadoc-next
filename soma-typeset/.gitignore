@@ -1,5 +1,6 @@
 /target
 *.wasm
+crates/soma-studio-ui/dist/
 # ... except the shipped browser slice, which must work from a fresh clone.
 !web/soma-kp.wasm
 corpus/blind/kit/

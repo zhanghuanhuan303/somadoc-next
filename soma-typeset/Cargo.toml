@@ -25,6 +25,9 @@ members = [
     "crates/soma-cli",
     "crates/soma-wasm",
     "crates/soma-web",
+    "crates/soma-studio-core",
+    "crates/soma-studio",
+    "crates/soma-studio-ui",
 ]
 
 [workspace.package]

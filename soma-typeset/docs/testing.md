@@ -173,7 +173,7 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `images.rs` (svg) | 3 | a resolved figure is a `data:` URI in both renderers, no source path leaks, no assets keeps the placeholder |
 | `math.rs` (html) | 4 | formula preview spans, placeholder fallback |
 | `inline_math.rs` (html) | 2 | inline preview positions, marker never drawn |
-| `a5_render.rs` | 6 | absolute positions, escaping, no re-breaking |
+| `a5_render.rs` | 7 | absolute positions, escaping, no re-breaking, page fragments join |
 | `capabilities.rs` (md) | 9 | Gate C matrix, degradation promise, docs parity |
 | `safety.rs` (render) | 3 | Gate C: no scripts, links, images, or URLs |
 | `pipeline.rs` (md) | 3 | Markdown -> DocIR -> pages -> HTML |
@@ -197,11 +197,13 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `languages.rs` (highlight) | 12 | Rust/C/C++/shell/Markdown/LaTeX/Python/JS/TS/JSON/YAML/TOML/HTML/CSS/SQL and friends: class spans per line |
 | `abi.rs` (web) | 8 | the C ABI slice: compile/measure/break handles, parity with the native kernel, fallback policy |
 | `soma-md` unit | 1 | frontend-internal projection helper |
-| render-pdf unit | 28 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing, TikZ path fill state |
+| `render-pdf` unit | 28 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing, TikZ path fill state |
+| `studio.rs` (studio-core) | 3 | fragments follow pages and join the full document, probe samples come from layout faces, build determinism |
+| `soma-studio-ui` unit | 2 | assistant markdown escapes raw HTML and rejects `javascript:`/`data:` destinations |
 
-Total: **917 tests passed** (`cargo test --workspace`), plus **1 ignored**
-(`perturbation.rs`, run with `--ignored`). Counting that ignored test and the
-one `soma-doc` doctest, the workspace lists **918 test functions**. The standalone
+Total: **923 tests passed** (`cargo test --workspace`), plus **1 ignored**
+(`perturbation.rs`, run with `--ignored`). Counting that ignored test, the
+workspace lists **924 test functions**. The standalone
 `tools/metrics-gen` crate adds its own 4 (`cargo test --manifest-path tools/metrics-gen/Cargo.toml`).
 
 Still deferred: the human blind-test run (D01), a quality-labeled corpus
@@ -234,6 +236,11 @@ The script runs:
     renderer safety
 11. Gate V/R (`scripts/gate-r.sh`): SVG visual lock and cross-renderer atom parity
 12. Gate Q′ (`scripts/gate-q.sh`): effect scorecard and real-corpus baseline
+13. Gate S (`scripts/studio.sh`, separate): S1–S10 for the Studio — shell
+    baselines, tabs, panels, themes, page fragments and Shadow DOM, live
+    rebuilds and IME, inspect/overlay agreement, CSP and external-resource
+    checks, font probe with/without fonts, SSE `built`/`error`, PDF page count,
+    and the assistant's no-engine-write boundary
 
 CI calls the same script, so a local pass and CI pass mean the same thing.
 
@@ -246,6 +253,7 @@ CI calls the same script, so a local pass and CI pass mean the same thing.
 | Gate C | Content: capability matrix, degradation keeps text, renderer emits no active content | A5+ |
 | Gate Q | Quality claim: guard/target metrics, pre-experiment κ, 30×5 blind test, CI; may be Inconclusive | Only the public quality claim |
 | Gate D | Delivery: WASM size/latency (`scripts/web.sh` W1–W6, ADR-0071), demo, reproducible scripts, provenance | Release |
+| Gate S | Studio: shell/tabs/panels/theme, wasm/native hash equality, PDF page count, SSE reloads, font probe, CSP, assistant boundary | Web Studio |
 
 `Gate T` is the only gate that can block engineering progress. `Gate Q` must
 never be silently reported as “passed” when it is `Inconclusive`.

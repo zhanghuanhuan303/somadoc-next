@@ -90,6 +90,36 @@ soma render --input note.md --format json
 soma check --input book.md --template book.yaml
 ```
 
+## Studio: `soma-studio`
+
+`soma-studio` is the Axum I/O boundary for the web workbench; the UI itself is
+`crates/soma-studio-ui` (Leptos CSR, the whole engine in wasm). See
+[`docs/studio.md`](studio.md) for the views, URL parameters, font probe, SSE
+reload semantics, security headers and the S1–S10 gates.
+
+```sh
+cd crates/soma-studio-ui && trunk build --release && cd ../..
+cargo run -p soma-studio -- \
+  --input examples/book/full.tex \
+  --template examples/templates/plex.yaml \
+  --metrics examples/templates/out/plex.smt \
+  --font ~/.fonts/IBMPlexSansSC_Regular.ttf \
+  --font-bold ~/.fonts/IBMPlexSansSC_Bold.ttf \
+  --font-sans ~/.fonts/IBMPlexSansSC_Regular.ttf \
+  --font-sans-bold ~/.fonts/IBMPlexSansSC_Bold.ttf \
+  --font-mono /usr/share/fonts/noto/NotoSansMono-Regular.ttf \
+  --font-mono-bold /usr/share/fonts/noto/NotoSansMono-Bold.ttf \
+  --font-math /usr/share/texmf-dist/fonts/opentype/public/newcomputermodern/NewCMMath-Regular.otf \
+  --font-fallback ~/.fonts/IBMPlexSansSC_Regular.ttf \
+  --port 7070
+```
+
+It accepts the same template, engine, metrics and font flags as `soma`, plus
+`--port`, `--dist`, `--open`, and `--no-watch`. It has no `--format`: the
+browser renders the proof from the engine's page fragments, and PDF export is
+`POST /api/pdf` (button in the breadcrumb). The server never re-breaks the
+document for the proof.
+
 ## Exit codes
 
 | Code | Meaning |
