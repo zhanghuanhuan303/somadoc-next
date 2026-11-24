@@ -10,7 +10,9 @@ use crate::ai::AiDock;
 use crate::api;
 use crate::inspect::InspectPane;
 use crate::proof::ProofPane;
-use crate::shell::{self, Breadcrumb, DragCtx, Palette, Sidebar, Statusbar, Tabs, Titlebar};
+use crate::shell::{
+    self, Breadcrumb, Drag, DragCtx, DragKind, Palette, Sidebar, Statusbar, Tabs, Titlebar,
+};
 use crate::source::SourcePane;
 use crate::state::{self, persist, use_studio, Aux, Mode, Studio};
 use crate::verify::VerifyPane;
@@ -75,6 +77,7 @@ pub fn App() -> impl IntoView {
                     <div class="content">
                         <Loading/>
                         <EmptyWorkspace/>
+                        <EmptyPanes/>
                         <Workspace/>
                         <VerifyPane/>
                         <AuxPage/>
@@ -135,17 +138,93 @@ fn EmptyWorkspace() -> impl IntoView {
 }
 
 #[component]
+fn EmptyPanes() -> impl IntoView {
+    let studio = use_studio();
+    let source_visible =
+        move || studio.source_open.get() && matches!(studio.mode.get(), Mode::Split | Mode::Source);
+    let proof_visible = move || {
+        studio.proof_open.get()
+            && matches!(studio.mode.get(), Mode::Split | Mode::Proof)
+            && studio.aux.get().is_none()
+    };
+    let visible = move || {
+        studio.project.get().is_some()
+            && studio.tabs.with(|tabs| !tabs.is_empty())
+            && studio.aux.get().is_none()
+            && studio.mode.get() != Mode::Verify
+            && studio.mode.get() != Mode::Inspect
+            && !source_visible()
+            && !proof_visible()
+    };
+    view! {
+        <div class="empty-state" id="empty-panes" hidden=move || { !visible() }>
+            <div class="mark">"S"</div>
+            <strong>"面板都已关闭"</strong>
+            <span>"重新打开源文或校样；也可以用左侧「视图」或 ⌘K。"</span>
+            <div class="empty-actions">
+                <button class="primary" on:click=move |_| state::set_mode(studio, Mode::Split)>"并排显示"</button>
+                <button class="ghost" on:click=move |_| state::set_mode(studio, Mode::Source)>"只要源文"</button>
+                <button class="ghost" on:click=move |_| state::set_mode(studio, Mode::Proof)>"只要校样"</button>
+            </div>
+        </div>
+    }
+}
+
+#[component]
 fn Workspace() -> impl IntoView {
     let studio = use_studio();
+    let drag = crate::shell::use_drag();
+    let source_visible =
+        move || studio.source_open.get() && matches!(studio.mode.get(), Mode::Split | Mode::Source);
     let proof_visible = move || {
-        matches!(studio.mode.get(), Mode::Proof | Mode::Inspect) && studio.aux.get().is_none()
+        studio.proof_open.get()
+            && matches!(studio.mode.get(), Mode::Split | Mode::Proof | Mode::Inspect)
+            && studio.aux.get().is_none()
     };
     let has_tab = move || studio.tabs.with(|tabs| !tabs.is_empty());
+    let panes_empty = move || {
+        studio.mode.get() != Mode::Verify
+            && studio.mode.get() != Mode::Inspect
+            && !source_visible()
+            && !proof_visible()
+    };
+    let splitter_visible = move || source_visible() && proof_visible();
+    let split_start = move |event: PointerEvent| {
+        event.prevent_default();
+        let Some(target) = event
+            .current_target()
+            .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+        else {
+            return;
+        };
+        let Some(parent) = target.parent_element() else {
+            return;
+        };
+        let Some(source) = parent.query_selector(".source-pane").ok().flatten() else {
+            return;
+        };
+        drag.drag.set(Some(Drag {
+            kind: DragKind::Split,
+            start_x: event.client_x() as f64,
+            start_w: source.get_bounding_client_rect().width() as i32,
+            span: parent.get_bounding_client_rect().width(),
+        }));
+    };
     view! {
         <div class="workspace"
-            hidden=move || { studio.project.get().is_none() || !has_tab() || studio.aux.get().is_some() || studio.mode.get() == Mode::Verify }>
+            hidden=move || {
+                studio.project.get().is_none()
+                    || !has_tab()
+                    || studio.aux.get().is_some()
+                    || studio.mode.get() == Mode::Verify
+                    || panes_empty()
+            }>
             <SourcePane/>
-            <section class="pane" hidden=move || { !proof_visible() }>
+            <div class="split-resizer" id="split-resizer"
+                hidden=move || !splitter_visible()
+                on:pointerdown=split_start
+                on:dblclick=move |_| { studio.split.set(0.46); persist(studio); }></div>
+            <section class="pane" id="proof-pane" hidden=move || !proof_visible()>
                 <div class="pane-head">
                     <span>"校样"</span>
                     <span class="badge">"引擎盒树 · 与 PDF 同页"</span>
@@ -157,6 +236,8 @@ fn Workspace() -> impl IntoView {
                             }).unwrap_or_else(|| String::from("—"))
                         })}
                     </span>
+                    <button class="icon-btn small" title="关闭校样面板" aria-label="关闭校样面板"
+                        on:click=move |_| { studio.proof_open.set(false); persist(studio); }>"×"</button>
                 </div>
                 <div class="pane-body" style="overflow:hidden">
                     <ProofPane/>
@@ -315,6 +396,7 @@ fn apply_url_params(studio: Studio) {
     }
     if let Some(mode) = params.get("mode") {
         match mode.as_str() {
+            "split" => state::set_mode(studio, Mode::Split),
             "source" => state::set_mode(studio, Mode::Source),
             "proof" => state::set_mode(studio, Mode::Proof),
             "inspect" => state::set_mode(studio, Mode::Inspect),

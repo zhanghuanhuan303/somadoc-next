@@ -120,13 +120,15 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   [`web/README.md`](web/README.md).
 - Soma Studio (ADR-0093, ADR-0094): the **whole engine runs in the browser**
   (`soma-studio-ui`, Leptos CSR) and Axum is only an I/O boundary
-  (`soma-studio`) for files, fonts, native verification and PDF. The UI has
-  source/proof/inspect/verify views, Shadow-DOM pages, tabs, a command palette,
-  a theme system, a local-rules assistant, and a font-consistency probe. Both
-  sides call `soma-studio-core`; canonical hashes must match, which closes the
+  (`soma-studio`) for files, fonts, native verification and PDF. The default
+  workspace is a closable left-source/right-proof split; inspect and verify are
+  sidebar views. It has Shadow-DOM pages, tabs, a command palette, a theme
+  system, a local-rules assistant, and a font-consistency probe. Both sides
+  call `soma-studio-core`; canonical hashes must match, which closes the
   page-geometry half of D95. Typing rebuilds after a 220 ms debounce and IME
-  composition defers the build. `scripts/studio.sh` locks S1–S10. See
-  [`docs/studio.md`](docs/studio.md).
+  composition defers the build. A missing `--font` falls back to a system CJK
+  face via fontconfig, so PDF export still produces text. `scripts/studio.sh`
+  locks S1–S10. See [`docs/studio.md`](docs/studio.md).
 - Code blocks (`ADR-0055`): each source line keeps its own spaces and is laid
   out on the block's atom table — indentation survives, nothing reflows, and a
   line that is too long overflows instead of wrapping.

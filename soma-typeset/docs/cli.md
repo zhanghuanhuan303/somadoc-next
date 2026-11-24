@@ -115,10 +115,16 @@ cargo run -p soma-studio -- \
 ```
 
 It accepts the same template, engine, metrics and font flags as `soma`, plus
-`--port`, `--dist`, `--open`, and `--no-watch`. It has no `--format`: the
-browser renders the proof from the engine's page fragments, and PDF export is
-`POST /api/pdf` (button in the breadcrumb). The server never re-breaks the
-document for the proof.
+`--port`, `--dist`, `--open`, `--no-watch`, and `--no-auto-font`. It has no
+`--format`: the browser renders the proof from the engine's page fragments, and
+PDF export is `POST /api/pdf` (command palette or `⌘K`). The server never
+re-breaks the document for the proof.
+
+When font flags are omitted, the server probes fontconfig for Noto Serif/Sans
+CJK SC and Noto Sans Mono and accepts a face only if it covers CJK (or `A` for
+mono). Auto faces are referenced by family name in the proof and subset into
+the PDF, so a missing `--font` does not yield a blank export. `--no-auto-font`
+disables this discovery.
 
 ## Exit codes
 

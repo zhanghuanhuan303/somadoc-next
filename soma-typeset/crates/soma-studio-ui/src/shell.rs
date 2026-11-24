@@ -14,6 +14,7 @@ use crate::state::{
 pub enum DragKind {
     Sidebar,
     Ai,
+    Split,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -21,6 +22,8 @@ pub struct Drag {
     pub kind: DragKind,
     pub start_x: f64,
     pub start_w: i32,
+    /// Container width for a split drag; zero for the side panels.
+    pub span: f64,
 }
 
 /// Shared between the resizer handles and the window-level drag listener.
@@ -286,18 +289,10 @@ pub fn Tabs() -> impl IntoView {
 #[component]
 pub fn Breadcrumb() -> impl IntoView {
     let studio = use_studio();
-    let path = move || {
-        let doc = studio.project.with(|project| {
-            project
-                .as_ref()
-                .map(|project| project.input_relative.clone())
-                .unwrap_or_default()
-        });
-        format!("{} / {}", doc, studio.mode.get().label())
-    };
     let pages = move || studio.page_count();
     let show_pages = move || {
-        matches!(studio.mode.get(), Mode::Proof | Mode::Inspect)
+        matches!(studio.mode.get(), Mode::Split | Mode::Proof | Mode::Inspect)
+            && studio.proof_open.get()
             && studio.build.with(|build| build.is_some())
     };
     let zoom_value = move || {
@@ -322,14 +317,6 @@ pub fn Breadcrumb() -> impl IntoView {
 
     view! {
         <div class="breadcrumb" id="breadcrumb">
-            <div class="crumb"><strong>{path}</strong></div>
-            <div class="crumb-fill"></div>
-            <div class="mode-switch" role="tablist" aria-label="视图模式">
-                {Mode::ALL.into_iter().map(|mode| view! {
-                    <button class="mode-btn" class:active=move || { studio.mode.get() == mode && studio.aux.get().is_none() }
-                        on:click=move |_| state::set_mode(studio, mode)>{mode.label()}</button>
-                }).collect_view()}
-            </div>
             <div class="page-controls" hidden=move || { !show_pages() }>
                 <button class="page-btn" title="上一页" aria-label="上一页"
                     on:click=move |_| { let page = studio.page.get().saturating_sub(1); go_to_page(studio, page); }>"‹"</button>
@@ -367,6 +354,7 @@ pub fn Breadcrumb() -> impl IntoView {
                 <button class="page-btn" title="显示/隐藏检视覆盖层（⌘I）" aria-label="显示/隐藏检视覆盖层"
                     on:click=move |_| studio.overlay.update(|value| *value = !*value)>"▦"</button>
             </div>
+            <div class="crumb-fill"></div>
             <span class=move || { chip().0 } hidden=move || { chip().2 }>{move || chip().1}</span>
         </div>
     }
@@ -704,11 +692,13 @@ fn begin_drag(event: PointerEvent, kind: DragKind, studio: crate::state::Studio,
     let start_w = match kind {
         DragKind::Sidebar => studio.sidebar_width.get_untracked(),
         DragKind::Ai => studio.ai_width.get_untracked(),
+        DragKind::Split => 0,
     };
     drag.drag.set(Some(Drag {
         kind,
         start_x: event.client_x() as f64,
         start_w,
+        span: 0.0,
     }));
 }
 
@@ -753,6 +743,13 @@ pub fn apply_drag(studio: crate::state::Studio, drag: Option<Drag>, event: &Poin
             studio
                 .ai_width
                 .set((drag.start_w as f64 - delta).clamp(320.0, 900.0) as i32);
+        }
+        DragKind::Split => {
+            if drag.span > 0.0 {
+                studio
+                    .split
+                    .set(((drag.start_w as f64 + delta) / drag.span).clamp(0.18, 0.82));
+            }
         }
     }
 }

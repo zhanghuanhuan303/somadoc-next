@@ -44,7 +44,8 @@ Options:
 | `--template`, `-t` | Template YAML. Omitted: the built-in Plex reference. |
 | `--engine` | `soma.engine/1` YAML. Omitted: the preset defaults. |
 | `--metrics` | Metrics table. Omitted: the embedded `soma.metrics/7` table. The browser fetches the same bytes from `/api/metrics`. |
-| `--font`, `--font-bold`, `--font-sans`, `--font-sans-bold`, `--font-mono`, `--font-mono-bold`, `--font-math`, `--font-fallback` | Optional font files for PDF and for `@font-face` in the proof. `path#index` selects a TTC face. Math is bundled when omitted. |
+| `--font`, `--font-bold`, `--font-sans`, `--font-sans-bold`, `--font-mono`, `--font-mono-bold`, `--font-math`, `--font-fallback` | Optional font files for PDF and for `@font-face` in the proof. `path#index` selects a TTC face. Math is bundled when omitted. When a body face is omitted, the server probes fontconfig (`fc-match`) for Noto Serif/Sans CJK SC and Noto Sans Mono; a face must cover `中` (or `A` for mono) to be accepted. Auto faces are referenced by family name in the proof and subset into the PDF, so a missing `--font` does not produce a blank export. |
+| `--no-auto-font` | Disable fontconfig discovery; only explicit font flags are used. |
 | `--dist` | UI build directory (default `crates/soma-studio-ui/dist`). |
 | `--port` | Default 7070. |
 | `--open` | Open the browser after binding. |
@@ -57,13 +58,19 @@ The server prints a warning when `dist/index.html` is missing; run
 
 | View | What it is |
 |---|---|
+| **分栏** (Split, default) | Source on the left, proof on the right, with a draggable splitter. Either pane can be closed with its `×`; the sidebar 「视图 → 分栏」 restores both. The ratio and open state persist in `localStorage`. |
 | **源文** (Source) | A `<textarea>` with a synced gutter. Typing schedules a build 220 ms after the last keystroke; IME composition defers the build until `compositionend`. `⌘S` saves, `⌘↵` rebuilds now. |
 | **校样** (Proof) | Each page is a Shadow DOM root containing the exact HTML fragment of the engine's `PagedLayout`, scaled by the UI's zoom. The page CSS is scoped inside the shadow root; UI tokens never leak into the document. |
 | **检视** (Inspect) | The exported line facts for the current page: ratio, adjustment, trim, boundary deviation, cost, flags. Clicking a row selects the same line in the overlay. Per-term cost is not exported (D102); the detail bar shows `—`. |
 | **校验** (Verify) | wasm vs native: canonical hash, parameter hash, page count and line count per page. A mismatch is a red state. |
 
+Pane close buttons sit in each pane head; closing the last pane shows an empty-pane
+state with “并排显示 / 只要源文 / 只要校样”. The source pane head intentionally
+omits the file name and format badge: the tab already carries the file, and the
+breadcrumb is now a proof toolbar (page, zoom, overlay, verify chip).
+
 URL parameters (handy for screenshots and links):
-`mode=source|proof|inspect|verify`, `page=N` (1-based), `theme=dark|light`,
+`mode=split|source|proof|inspect|verify`, `page=N` (1-based), `theme=dark|light`,
 `zoom=0.5…2`, `events=off` (disable SSE for headless capture),
 `selftest=1` (run the browser gate). `only=s9font` restricts the self-test to
 the missing-font assertion.
@@ -146,9 +153,9 @@ directory; `examples/` is not modified.
 
 | Gate | What it locks |
 |---|---|
-| S1 | 38/34/29/24 chrome; side head, tab bar and AI header share a 34 px baseline; the status bar spans the window; one navigation tree. |
+| S1 | 38/30/29/24 chrome; side head, tab bar and AI header share a 30 px baseline; default split pane; the status bar spans the window; one navigation tree. |
 | S2 | Three files open as three tabs; reopening does not duplicate; closing the active tab selects the right neighbour; closing all shows the empty workspace; `+` opens the palette. |
-| S3 | Sidebar 180–380, AI 320–900, persistence, double-click reset, collapse; closed AI dock has no content width. |
+| S3 | Sidebar 180–380, AI 320–900, persistence, double-click reset, collapse; closed AI dock has no content width; closing/reopening the source and proof panes. |
 | S4 | Theme persists, both toggles work, and `studio.css` contains no hex values (tokens only). |
 | S5 | `page slots == fragments == page_count`; consecutive `data-page`; one Shadow `.page` per slot; PDF page count equals native. |
 | S6 | Typing rebuilds after the debounce and changes the hash; IME composition does not rebuild until it ends. |

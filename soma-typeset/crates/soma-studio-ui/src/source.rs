@@ -140,14 +140,24 @@ pub fn SourcePane() -> impl IntoView {
         })
     };
 
+    let visible =
+        move || studio.source_open.get() && matches!(studio.mode.get(), Mode::Split | Mode::Source);
+    let width_style = move || {
+        if studio.mode.get() == Mode::Split && studio.proof_open.get() {
+            format!("flex:0 0 {:.3}%;", studio.split.get() * 100.0)
+        } else {
+            String::from("flex:1 1 0;")
+        }
+    };
     view! {
-        <section class="pane" hidden=move || { studio.mode.get() != Mode::Source }>
+        <section class="pane source-pane" id="source-pane" hidden=move || { !visible() }
+            style=width_style>
             <div class="pane-head">
-                <span>"源文"</span>
-                <span class="badge">{move || studio.project.with(|project| project.as_ref().map(|project| project.format.as_str()).unwrap_or("—"))}</span>
-                <div class="fill"></div>
                 <span class="badge" id="source-cursor">{move || cursor.get()}</span>
+                <div class="fill"></div>
                 <button class="mini" on:click=move |_| state::save_active(studio)>"保存"</button>
+                <button class="icon-btn small" title="关闭源文面板" aria-label="关闭源文面板"
+                    on:click=move |_| { studio.source_open.set(false); state::persist(studio); }>"×"</button>
             </div>
             <div class="pane-body" style="overflow:hidden">
                 {move || if docx() {

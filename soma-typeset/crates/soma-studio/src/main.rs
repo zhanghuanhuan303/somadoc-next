@@ -46,6 +46,7 @@ struct Options {
     dist: PathBuf,
     open: bool,
     watch: bool,
+    auto_fonts: bool,
 }
 
 #[derive(Clone, Default)]
@@ -92,7 +93,7 @@ async fn main() {
             std::process::exit(2);
         }
     };
-    let fonts = match load_fonts(&specs) {
+    let fonts = match load_fonts(&specs, options.auto_fonts) {
         Ok(fonts) => fonts,
         Err(error) => {
             eprintln!("soma-studio: {error}");
@@ -183,6 +184,7 @@ usage:
               [--font-mono <file[#index]>] [--font-mono-bold <file[#index]>]
               [--font-math <file[#index]>] [--font-fallback <file[#index]>]
               [--port 7070] [--dist <dir>] [--open] [--no-watch]
+              [--no-auto-font]
 
 The UI is built with `trunk build` in crates/soma-studio-ui; Axum serves dist/.
 ";
@@ -196,6 +198,7 @@ fn parse_args(args: Vec<String>) -> Result<(Options, FontSpecs), String> {
     let mut dist = None;
     let mut open = false;
     let mut watch = true;
+    let mut auto_fonts = true;
     let mut specs = FontSpecs::default();
 
     let mut index = 0;
@@ -228,6 +231,7 @@ fn parse_args(args: Vec<String>) -> Result<(Options, FontSpecs), String> {
             "--dist" => dist = Some(PathBuf::from(value()?)),
             "--open" => open = true,
             "--no-watch" => watch = false,
+            "--no-auto-font" => auto_fonts = false,
             "-h" | "--help" => {
                 print!("{USAGE}");
                 std::process::exit(0);
@@ -259,6 +263,7 @@ fn parse_args(args: Vec<String>) -> Result<(Options, FontSpecs), String> {
         dist,
         open,
         watch,
+        auto_fonts,
     };
     Ok((options, specs))
 }
@@ -282,26 +287,108 @@ fn open_browser(url: &str) {
 
 /* -------------------------------------------------------------------- fonts */
 
-fn load_fonts(specs: &FontSpecs) -> Result<BTreeMap<String, FontEntry>, String> {
+fn load_fonts(specs: &FontSpecs, auto_fonts: bool) -> Result<BTreeMap<String, FontEntry>, String> {
     let mut fonts = BTreeMap::new();
-    let mut add = |role: &str, spec: Option<&String>, weight: &str| -> Result<(), String> {
-        let Some(spec) = spec else {
-            return Ok(());
-        };
-        let entry = load_font_entry(role, spec, weight)?;
-        fonts.insert(role.to_string(), entry);
-        Ok(())
-    };
-    add("serif", specs.serif.as_ref(), "normal")?;
-    add("serif-bold", specs.serif_bold.as_ref(), "bold")?;
-    add("sans", specs.sans.as_ref(), "normal")?;
-    add("sans-bold", specs.sans_bold.as_ref(), "bold")?;
-    add("mono", specs.mono.as_ref(), "normal")?;
-    add("mono-bold", specs.mono_bold.as_ref(), "bold")?;
-    add("fallback", specs.fallback.as_ref(), "normal")?;
+    insert_font(&mut fonts, "serif", specs.serif.as_ref(), "normal")?;
+    insert_font(&mut fonts, "serif-bold", specs.serif_bold.as_ref(), "bold")?;
+    insert_font(&mut fonts, "sans", specs.sans.as_ref(), "normal")?;
+    insert_font(&mut fonts, "sans-bold", specs.sans_bold.as_ref(), "bold")?;
+    insert_font(&mut fonts, "mono", specs.mono.as_ref(), "normal")?;
+    insert_font(&mut fonts, "mono-bold", specs.mono_bold.as_ref(), "bold")?;
+    insert_font(&mut fonts, "fallback", specs.fallback.as_ref(), "normal")?;
+
+    // No explicit body face: use a system CJK face so a PDF is never blank
+    // just because the caller forgot --font. The browser gets the family name
+    // (no URL), so it draws with the installed face; the PDF backend still
+    // subsets the file it embeds.
+    if auto_fonts && !fonts.contains_key("serif") {
+        if let Some(entry) = auto_entry(
+            "serif",
+            "Noto Serif CJK SC",
+            "Noto Serif CJK SC",
+            "normal",
+            '中',
+        )?
+        .or(auto_entry(
+            "serif",
+            "Noto Sans CJK SC",
+            "Noto Sans CJK SC",
+            "normal",
+            '中',
+        )?) {
+            fonts.insert(String::from("serif"), entry);
+        }
+    }
+    if auto_fonts && !fonts.contains_key("serif-bold") {
+        if let Some(entry) = auto_entry(
+            "serif-bold",
+            "Noto Serif CJK SC:style=Bold",
+            "Noto Serif CJK SC",
+            "bold",
+            '中',
+        )? {
+            fonts.insert(String::from("serif-bold"), entry);
+        }
+    }
+    if auto_fonts && !fonts.contains_key("sans") {
+        if let Some(entry) = auto_entry(
+            "sans",
+            "Noto Sans CJK SC",
+            "Noto Sans CJK SC",
+            "normal",
+            '中',
+        )? {
+            fonts.insert(String::from("sans"), entry);
+        }
+    }
+    if auto_fonts && !fonts.contains_key("sans-bold") {
+        if let Some(entry) = auto_entry(
+            "sans-bold",
+            "Noto Sans CJK SC:style=Bold",
+            "Noto Sans CJK SC",
+            "bold",
+            '中',
+        )? {
+            fonts.insert(String::from("sans-bold"), entry);
+        }
+    }
+    if auto_fonts && !fonts.contains_key("mono") {
+        if let Some(entry) = auto_entry("mono", "Noto Sans Mono", "Noto Sans Mono", "normal", 'A')?
+        {
+            fonts.insert(String::from("mono"), entry);
+        }
+    }
+    if auto_fonts && !fonts.contains_key("mono-bold") {
+        if let Some(entry) = auto_entry(
+            "mono-bold",
+            "Noto Sans Mono:style=Bold",
+            "Noto Sans Mono",
+            "bold",
+            'A',
+        )? {
+            fonts.insert(String::from("mono-bold"), entry);
+        }
+    }
+    if auto_fonts && !fonts.contains_key("fallback") {
+        let body_covers_cjk = fonts
+            .get("serif")
+            .map(|entry| font_has_glyph(entry, '中'))
+            .unwrap_or(false);
+        if !body_covers_cjk {
+            if let Some(entry) = auto_entry(
+                "fallback",
+                "Noto Sans CJK SC",
+                "Noto Sans CJK SC",
+                "normal",
+                '中',
+            )? {
+                fonts.insert(String::from("fallback"), entry);
+            }
+        }
+    }
 
     if let Some(spec) = specs.math.as_ref() {
-        add("math", Some(spec), "normal")?;
+        insert_font(&mut fonts, "math", Some(spec), "normal")?;
     } else {
         fonts.insert(
             String::from("math"),
@@ -319,6 +406,66 @@ fn load_fonts(specs: &FontSpecs) -> Result<BTreeMap<String, FontEntry>, String> 
         );
     }
     Ok(fonts)
+}
+
+fn insert_font(
+    fonts: &mut BTreeMap<String, FontEntry>,
+    role: &str,
+    spec: Option<&String>,
+    weight: &str,
+) -> Result<(), String> {
+    let Some(spec) = spec else {
+        return Ok(());
+    };
+    fonts.insert(role.to_string(), load_font_entry(role, spec, weight)?);
+    Ok(())
+}
+
+/// Resolve a family with fontconfig. The returned spec carries `#index`, which
+/// `load_font_entry` already understands for TTC faces.
+fn auto_font(query: &str) -> Option<String> {
+    let output = std::process::Command::new("fc-match")
+        .args(["-f", "%{file}#%{index}", query])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let spec = String::from_utf8(output.stdout).ok()?;
+    let spec = spec.trim();
+    let (path, _) = split_font_spec(spec).ok()?;
+    std::path::Path::new(path)
+        .is_file()
+        .then(|| spec.to_string())
+}
+
+fn auto_entry(
+    role: &str,
+    query: &str,
+    display: &str,
+    weight: &str,
+    required: char,
+) -> Result<Option<FontEntry>, String> {
+    let Some(spec) = auto_font(query) else {
+        return Ok(None);
+    };
+    let Ok(mut entry) = load_font_entry(role, &spec, weight) else {
+        return Ok(None);
+    };
+    if !font_has_glyph(&entry, required) {
+        return Ok(None);
+    }
+    // A system family is referenced by name; do not serve a 20 MB TTC to the
+    // browser. The PDF still embeds a glyph subset of the same file.
+    entry.info.family = display.to_string();
+    entry.info.url.clear();
+    Ok(Some(entry))
+}
+
+fn font_has_glyph(entry: &FontEntry, character: char) -> bool {
+    soma_render_pdf::PdfFont::from_bytes(entry.bytes.clone(), entry.index)
+        .map(|font| font.has_glyph(character as u32))
+        .unwrap_or(false)
 }
 
 fn load_font_entry(role: &str, spec: &str, weight: &str) -> Result<FontEntry, String> {

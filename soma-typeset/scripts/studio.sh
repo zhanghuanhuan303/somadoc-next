@@ -200,7 +200,7 @@ if command -v chromium >/dev/null 2>&1; then
     target/debug/soma-studio \
         --input "$WORK/main.md" \
         --template "$WORK/template.yaml" \
-        $METRICS_ARGS \
+        $METRICS_ARGS --no-auto-font \
         --no-watch --port "$FONTLESS_PORT" > "$WORK/fontless.log" 2>&1 &
     FONTLESS_PID=$!
     for _ in 1 2 3 4 5 6 7 8 9 10; do

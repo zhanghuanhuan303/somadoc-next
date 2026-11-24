@@ -213,7 +213,7 @@
 }
 .tab-scroll::-webkit-scrollbar { display: none; }
 .tab {
-  height: 29px;
+  height: 25px;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -228,7 +228,7 @@
 }
 .tab:hover { background: var(--panel-2); color: var(--ink-2); }
 .tab.active {
-  height: 30px;
+  height: 26px;
   top: 1px;
   position: relative;
   background: var(--bg);
@@ -272,10 +272,10 @@
 .tab:hover .tab-close, .tab.active .tab-close { display: grid; }
 .tab-close:hover { background: var(--elevated); color: var(--ink); }
 .tab-add {
-  width: 26px;
-  height: 26px;
-  flex: 0 0 26px;
-  margin-bottom: 3px;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  margin-bottom: 2px;
   border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;
@@ -1128,6 +1128,8 @@ table.compact td.num, table.compact th.num {
 }
 .empty-state strong { font-size: 15px; color: var(--ink); font-weight: 700; }
 .empty-state span { font-size: 11.5px; }
+.empty-actions { display: flex; gap: 8px; margin-top: 8px; }
+.empty-actions .primary, .empty-actions .ghost { height: 28px; padding: 0 12px; }
 .toasts {
   position: fixed;
   right: 16px;

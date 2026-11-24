@@ -13,6 +13,8 @@ use crate::{api, engine, engine::SourceInput};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
+    /// Source on the left, proof on the right. The default.
+    Split,
     Source,
     Proof,
     Inspect,
@@ -20,10 +22,17 @@ pub enum Mode {
 }
 
 impl Mode {
-    pub const ALL: [Mode; 4] = [Mode::Source, Mode::Proof, Mode::Inspect, Mode::Verify];
+    pub const ALL: [Mode; 5] = [
+        Mode::Split,
+        Mode::Source,
+        Mode::Proof,
+        Mode::Inspect,
+        Mode::Verify,
+    ];
 
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Split => "split",
             Self::Source => "source",
             Self::Proof => "proof",
             Self::Inspect => "inspect",
@@ -33,6 +42,7 @@ impl Mode {
 
     pub const fn label(self) -> &'static str {
         match self {
+            Self::Split => "分栏",
             Self::Source => "源文",
             Self::Proof => "校样",
             Self::Inspect => "检视",
@@ -132,6 +142,8 @@ pub struct Studio {
     pub overlay: RwSignal<bool>,
     pub selection: RwSignal<Selection>,
     pub cursor_node: RwSignal<i64>,
+    pub source_open: RwSignal<bool>,
+    pub proof_open: RwSignal<bool>,
     pub theme: RwSignal<String>,
     pub sidebar_open: RwSignal<bool>,
     pub sidebar_width: RwSignal<i32>,
@@ -173,13 +185,15 @@ impl Studio {
             verify: RwSignal::new(None),
             verify_error: RwSignal::new(None),
             verify_seq: RwSignal::new(0),
-            mode: RwSignal::new(Mode::Proof),
+            mode: RwSignal::new(Mode::Split),
             page: RwSignal::new(0),
             zoom: RwSignal::new(1.0),
             fit: RwSignal::new(true),
             overlay: RwSignal::new(false),
             selection: RwSignal::new(Selection::default()),
             cursor_node: RwSignal::new(-1),
+            source_open: RwSignal::new(true),
+            proof_open: RwSignal::new(true),
             theme: RwSignal::new(String::from("dark")),
             sidebar_open: RwSignal::new(true),
             sidebar_width: RwSignal::new(216),
@@ -353,8 +367,18 @@ fn reload_server_build(studio: Studio) {
 pub fn set_mode(studio: Studio, mode: Mode) {
     studio.mode.set(mode);
     studio.aux.set(None);
-    if mode == Mode::Inspect {
-        studio.overlay.set(true);
+    match mode {
+        Mode::Split => {
+            studio.source_open.set(true);
+            studio.proof_open.set(true);
+        }
+        Mode::Source => studio.source_open.set(true),
+        Mode::Proof => studio.proof_open.set(true),
+        Mode::Inspect => {
+            studio.proof_open.set(true);
+            studio.overlay.set(true);
+        }
+        Mode::Verify => {}
     }
 }
 
@@ -733,6 +757,20 @@ pub fn init_preferences(studio: Studio) {
     if let Some(open) = storage.get_item("soma.ai_open").ok().flatten() {
         studio.ai_open.set(open == "1");
     }
+    if let Some(open) = storage.get_item("soma.source_open").ok().flatten() {
+        studio.source_open.set(open != "0");
+    }
+    if let Some(open) = storage.get_item("soma.proof_open").ok().flatten() {
+        studio.proof_open.set(open != "0");
+    }
+    if let Some(split) = storage
+        .get_item("soma.split")
+        .ok()
+        .flatten()
+        .and_then(|value| value.parse::<f64>().ok())
+    {
+        studio.split.set(split.clamp(0.18, 0.82));
+    }
 }
 
 pub fn set_theme(studio: Studio, theme: &str) {
@@ -784,6 +822,26 @@ pub fn persist(studio: Studio) {
             "0"
         },
     );
+    let _ = storage.set_item(
+        "soma.source_open",
+        if studio.source_open.get_untracked() {
+            "1"
+        } else {
+            "0"
+        },
+    );
+    let _ = storage.set_item(
+        "soma.proof_open",
+        if studio.proof_open.get_untracked() {
+            "1"
+        } else {
+            "0"
+        },
+    );
+    let _ = storage.set_item(
+        "soma.split",
+        &format!("{:.4}", studio.split.get_untracked()),
+    );
 }
 
 fn storage() -> Option<web_sys::Storage> {
@@ -834,6 +892,9 @@ fn install_fonts(project: &ProjectPayload) {
     let mut css = String::new();
     let mut roles: std::collections::BTreeMap<&str, String> = std::collections::BTreeMap::new();
     for font in &project.fonts {
+        // System faces discovered by the server have no URL; reference them by
+        // name so the proof uses the same family as the PDF.
+        roles.insert(font.role.as_str(), font.family.clone());
         if font.url.is_empty() {
             continue;
         }
@@ -854,7 +915,6 @@ fn install_fonts(project: &ProjectPayload) {
             font.weight,
             font.style
         ));
-        roles.insert(font.role.as_str(), font.family.clone());
     }
     if !roles.is_empty() {
         // `tokens.css` defines the fallback families on `html[data-theme=…]`,

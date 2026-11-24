@@ -88,6 +88,7 @@ pub fn AiDock() -> impl IntoView {
                         kind: DragKind::Ai,
                         start_x: event.client_x() as f64,
                         start_w: studio.ai_width.get_untracked(),
+                        span: 0.0,
                     }));
                 }
                 on:dblclick=move |_| {

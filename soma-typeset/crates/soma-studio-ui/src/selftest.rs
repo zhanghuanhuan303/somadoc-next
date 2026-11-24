@@ -170,6 +170,19 @@ fn click_selector(document: &Document, selector: &str) -> bool {
     }
 }
 
+fn click_nav(document: &Document, label: &str) -> bool {
+    match query_all(document, ".nav-item")
+        .into_iter()
+        .find(|element| text(element).contains(label))
+    {
+        Some(element) => {
+            click(&element);
+            true
+        }
+        None => false,
+    }
+}
+
 fn pointer(element: &Element, kind: &str, x: f64) {
     let init = PointerEventInit::new();
     init.set_client_x(x as i32);
@@ -232,7 +245,7 @@ fn s1(document: &Document) -> String {
         height(&statusbar),
     );
     let ok_heights = approx(heights.0, 38.0, 0.75)
-        && approx(heights.1, 34.0, 0.75)
+        && approx(heights.1, 30.0, 0.75)
         && approx(heights.2, 29.0, 0.75)
         && approx(heights.3, 24.0, 0.75);
 
@@ -240,8 +253,8 @@ fn s1(document: &Document) -> String {
     let ai_head = query(document, ".ai-header");
     let chrome_ok = match (side_head, ai_head) {
         (Some(side), Some(ai)) => {
-            approx(height(&side), 34.0, 0.75)
-                && approx(height(&ai), 34.0, 0.75)
+            approx(height(&side), 30.0, 0.75)
+                && approx(height(&ai), 30.0, 0.75)
                 && approx(bottom(&side), bottom(&tabs), 0.75)
                 && approx(bottom(&ai), bottom(&tabs), 0.75)
         }
@@ -254,14 +267,20 @@ fn s1(document: &Document) -> String {
         .map(|inner| approx(width(&statusbar), inner, 1.0))
         .unwrap_or(false);
     let navs = query_all(document, ".nav").len();
+    let split_ok = query(document, "#source-pane")
+        .map(|element| !element.has_attribute("hidden"))
+        .unwrap_or(false)
+        && query(document, "#proof-pane")
+            .map(|element| !element.has_attribute("hidden"))
+            .unwrap_or(false);
 
     let detail = format!(
-        "chrome {:.0}/{:.0}/{:.0}/{:.0} · 34px 同底 {chrome_ok} · 状态栏全宽 {full_width} · 导航树 {navs}",
+        "chrome {:.0}/{:.0}/{:.0}/{:.0} · 30px 同底 {chrome_ok} · 状态栏全宽 {full_width} · 导航树 {navs} · 默认分栏 {split_ok}",
         heights.0, heights.1, heights.2, heights.3
     );
     result(
         "S1",
-        ok_heights && chrome_ok && full_width && navs == 1,
+        ok_heights && chrome_ok && full_width && navs == 1 && split_ok,
         detail,
     )
 }
@@ -449,6 +468,82 @@ async fn s3(document: &Document, _studio: Studio) -> String {
     )
     .await;
     let ai_closed = closed;
+
+    let source_before = query(document, "#source-pane")
+        .map(|element| width(&element))
+        .unwrap_or(0.0);
+    let split_dragged = match query(document, "#split-resizer") {
+        Some(resizer) => {
+            let rect = resizer.get_bounding_client_rect();
+            let x = rect.left() + rect.width() / 2.0;
+            pointer(&resizer, "pointerdown", x);
+            pointer_window("pointermove", x + 80.0);
+            pointer_window("pointerup", x + 80.0);
+            TimeoutFuture::new(80).await;
+            let dragged = query(document, "#source-pane")
+                .map(|element| width(&element))
+                .unwrap_or(0.0)
+                > source_before + 40.0;
+            fire(&resizer, "dblclick");
+            TimeoutFuture::new(80).await;
+            let reset = query(document, "#source-pane")
+                .map(|element| approx(width(&element), source_before, 3.0))
+                .unwrap_or(false);
+            (dragged, reset)
+        }
+        None => (false, false),
+    };
+
+    click_selector(document, "#source-pane [aria-label='关闭源文面板']");
+    let source_closed = wait_for(
+        || {
+            query(document, "#source-pane")
+                .map(|element| element.has_attribute("hidden"))
+                .unwrap_or(false)
+                && query(document, "#proof-pane")
+                    .map(|element| !element.has_attribute("hidden"))
+                    .unwrap_or(false)
+        },
+        20,
+    )
+    .await;
+    let reopened = click_nav(document, "分栏")
+        && wait_for(
+            || {
+                query(document, "#source-pane")
+                    .map(|element| !element.has_attribute("hidden"))
+                    .unwrap_or(false)
+                    && query(document, "#proof-pane")
+                        .map(|element| !element.has_attribute("hidden"))
+                        .unwrap_or(false)
+            },
+            20,
+        )
+        .await;
+    click_selector(document, "#proof-pane [aria-label='关闭校样面板']");
+    let proof_closed = wait_for(
+        || {
+            query(document, "#proof-pane")
+                .map(|element| element.has_attribute("hidden"))
+                .unwrap_or(false)
+                && query(document, "#source-pane")
+                    .map(|element| !element.has_attribute("hidden"))
+                    .unwrap_or(false)
+        },
+        20,
+    )
+    .await;
+    click_nav(document, "分栏");
+    wait_for(
+        || {
+            query(document, "#proof-pane")
+                .map(|element| !element.has_attribute("hidden"))
+                .unwrap_or(false)
+        },
+        20,
+    )
+    .await;
+
     let ai_state = query(document, "#ai-dock")
         .map(|element| {
             format!(
@@ -460,7 +555,8 @@ async fn s3(document: &Document, _studio: Studio) -> String {
         .unwrap_or_default();
 
     let detail = format!(
-        "侧栏 216 {default_ok} · 拖 {dragged_ok}/存 {persisted} · 夹 180..380 {min_ok}/{max_ok} · 复位 {reset_ok} · 折叠 {collapsed}/{expanded} · AI 420 {ai_default} · 拖 {ai_drag_ok} · 夹 320..900 {ai_min_ok}/{ai_max_ok} · 复位 {ai_reset_ok} · 关 0 {ai_closed} ({ai_state})"
+        "侧栏 216 {default_ok} · 拖 {dragged_ok}/存 {persisted} · 夹 180..380 {min_ok}/{max_ok} · 复位 {reset_ok} · 折叠 {collapsed}/{expanded} · AI 420 {ai_default} · 拖 {ai_drag_ok} · 夹 320..900 {ai_min_ok}/{ai_max_ok} · 复位 {ai_reset_ok} · 关 0 {ai_closed} ({ai_state}) · 分栏 拖 {:?} 复位 {:?} · 面板 关源文 {source_closed}/重开 {reopened}/关校样 {proof_closed}",
+        split_dragged.0, split_dragged.1
     );
     result(
         "S3",
@@ -477,7 +573,12 @@ async fn s3(document: &Document, _studio: Studio) -> String {
             && ai_min_ok
             && ai_max_ok
             && ai_reset_ok
-            && ai_closed,
+            && ai_closed
+            && split_dragged.0
+            && split_dragged.1
+            && source_closed
+            && reopened
+            && proof_closed,
         detail,
     )
 }
