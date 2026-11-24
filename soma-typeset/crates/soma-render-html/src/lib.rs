@@ -556,8 +556,14 @@ fn style_attributes(style: Option<&ComputedStyle>, base: Width) -> String {
         return format!("font-size:{};", em(base));
     };
     let mut out = format!("font-size:{};", em(style.font_size));
-    if style.line_height.0 > 0 {
-        out.push_str(&format!("line-height:{};", em(style.line_height)));
+    if style.line_height.0 > 0 && style.font_size.0 > 0 {
+        // CSS resolves `em` on line-height against this element's own font
+        // size, while the layout's line height is in page em. Emit the ratio
+        // (line height / font size), or a 2.5em heading gets a 2.5x too tall
+        // line box and overlaps the next block.
+        let leading =
+            style.line_height.0 as i64 * i64::from(UNITS_PER_EM) / style.font_size.0 as i64;
+        out.push_str(&format!("line-height:{};", em(Width(leading as i32))));
     }
     if let Some(family) = &style.family {
         let family = if family.to_ascii_lowercase().contains("mono")

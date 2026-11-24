@@ -857,7 +857,10 @@ fn install_fonts(project: &ProjectPayload) {
         roles.insert(font.role.as_str(), font.family.clone());
     }
     if !roles.is_empty() {
-        css.push_str(":root{");
+        // `tokens.css` defines the fallback families on `html[data-theme=…]`,
+        // whose specificity beats a plain `:root`. Match that specificity and
+        // come later in the cascade so the installed faces win.
+        css.push_str("html[data-theme],:root{");
         for (role, family) in &roles {
             let fallback = match *role {
                 "mono" => "monospace",

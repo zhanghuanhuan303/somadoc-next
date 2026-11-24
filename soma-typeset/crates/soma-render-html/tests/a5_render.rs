@@ -1,7 +1,7 @@
 //! A5 renderer: absolute positions, escaping, no re-breaking.
 
 use soma_core::{BreakConfig, SyntheticMetrics};
-use soma_doc::block::Paragraph;
+use soma_doc::block::{Heading, Paragraph};
 use soma_doc::inline::FootnoteRef;
 use soma_doc::meta::DocumentMeta;
 use soma_doc::node::NodeMeta;
@@ -113,6 +113,48 @@ fn renders_pages_with_absolute_positions() {
     assert!(html.contains("em;"));
     assert!(!html.contains("<br"), "the renderer must not re-break");
     assert!(!html.to_lowercase().contains("<script"));
+}
+
+#[test]
+fn heading_line_height_is_a_ratio_of_its_font() {
+    const HEADING_TEMPLATE: &str = r#"
+name: heading
+page:
+  size: A5
+  margin: 10mm
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+      align: justify
+  - selector:
+      element: heading
+    declarations:
+      font-size: 2em
+      line-height: 1.2
+"#;
+    let mut document = Document::new(DocumentMeta::new());
+    document.push_block(Block::Heading(Heading::new(
+        NodeMeta::synthesized(),
+        1,
+        vec![Text::new(NodeMeta::synthesized(), "标题").into()],
+    )));
+    document.renumber();
+    let template = parse_template(HEADING_TEMPLATE).expect("template");
+    let styled = resolve(&document, &template).expect("styles");
+    let pages = layout(
+        &document,
+        &styled,
+        &SyntheticMetrics::default(),
+        &BreakConfig::default(),
+    )
+    .expect("layout");
+    let html = render(&pages, styled.table(), &pages.text);
+    assert!(html.contains("font-size:2.000em"), "{html}");
+    assert!(html.contains("line-height:1.199em"), "{html}");
+    assert!(!html.contains("line-height:2.400em"), "{html}");
 }
 
 #[test]

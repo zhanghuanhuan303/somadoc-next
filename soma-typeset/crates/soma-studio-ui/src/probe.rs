@@ -25,10 +25,12 @@ pub struct ProbeReport {
     /// `ok`, `warn` or `bad`, used as a CSS class.
     pub class: &'static str,
     pub detail: String,
+    /// The sample with the largest deviation, for the tooltip.
+    pub worst: String,
 }
 
 impl ProbeReport {
-    fn new(p95: i32, samples: usize, missing: bool) -> Self {
+    fn new(p95: i32, samples: usize, missing: bool, worst: String) -> Self {
         let (label, class) = if missing || p95 > 20 {
             ("不一致", "bad")
         } else if p95 >= 5 {
@@ -37,6 +39,9 @@ impl ProbeReport {
             ("字体一致", "ok")
         };
         let mut detail = format!("p95 {p95}‰ · {samples} 个样本");
+        if !worst.is_empty() {
+            detail.push_str(&format!(" · 最大偏差 {worst}"));
+        }
         if missing {
             detail.push_str(" · 缺少模板字体");
         }
@@ -48,6 +53,7 @@ impl ProbeReport {
             label,
             class,
             detail,
+            worst,
         }
     }
 }
@@ -92,12 +98,16 @@ pub async fn measure(studio: Studio) -> Option<ProbeReport> {
 
     let mut deviations = Vec::new();
     let mut missing = false;
+    let mut worst = (0, String::new());
     for sample in &samples {
         let Some(family) = family_for(&fonts, &sample.role, sample.bold) else {
             missing = true;
             continue;
         };
         let spec = format!("100px {}", css_string(family));
+        // An @font-face that nothing has drawn yet is not loaded by
+        // `fonts.ready`; `measureText` would silently use a fallback face.
+        let _ = JsFuture::from(font_set.load(&spec)).await;
         if !font_set.check(&spec).unwrap_or(false) {
             missing = true;
             continue;
@@ -114,15 +124,28 @@ pub async fn measure(studio: Studio) -> Option<ProbeReport> {
         let per_em = measured / 100.0 * 4096.0;
         let deviation =
             ((per_em - sample.advance as f64).abs() / sample.advance as f64 * 1000.0).round();
-        deviations.push(deviation.min(100_000.0) as i32);
+        let deviation = deviation.min(100_000.0) as i32;
+        deviations.push(deviation);
+        if deviation > worst.0 {
+            worst = (
+                deviation,
+                format!(
+                    "{} {} 期望{} 实测{}",
+                    sample.text,
+                    sample.role,
+                    sample.advance,
+                    per_em.round()
+                ),
+            );
+        }
     }
     if deviations.is_empty() {
-        return Some(ProbeReport::new(0, samples.len(), true));
+        return Some(ProbeReport::new(0, samples.len(), true, String::new()));
     }
     deviations.sort_unstable();
     let rank = ((deviations.len() as f64) * 0.95).ceil() as usize;
     let p95 = deviations[rank.saturating_sub(1).min(deviations.len() - 1)];
-    Some(ProbeReport::new(p95, deviations.len(), missing))
+    Some(ProbeReport::new(p95, deviations.len(), missing, worst.1))
 }
 
 /// The CSS family for a metrics role. A missing `fallback` uses the body

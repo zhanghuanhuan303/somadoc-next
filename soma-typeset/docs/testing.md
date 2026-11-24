@@ -173,7 +173,7 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `images.rs` (svg) | 3 | a resolved figure is a `data:` URI in both renderers, no source path leaks, no assets keeps the placeholder |
 | `math.rs` (html) | 4 | formula preview spans, placeholder fallback |
 | `inline_math.rs` (html) | 2 | inline preview positions, marker never drawn |
-| `a5_render.rs` | 7 | absolute positions, escaping, no re-breaking, page fragments join |
+| `a5_render.rs` | 8 | absolute positions, escaping, no re-breaking, page fragments join, block line-height ratio |
 | `capabilities.rs` (md) | 9 | Gate C matrix, degradation promise, docs parity |
 | `safety.rs` (render) | 3 | Gate C: no scripts, links, images, or URLs |
 | `pipeline.rs` (md) | 3 | Markdown -> DocIR -> pages -> HTML |
@@ -201,9 +201,9 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `studio.rs` (studio-core) | 3 | fragments follow pages and join the full document, probe samples come from layout faces, build determinism |
 | `soma-studio-ui` unit | 2 | assistant markdown escapes raw HTML and rejects `javascript:`/`data:` destinations |
 
-Total: **923 tests passed** (`cargo test --workspace`), plus **1 ignored**
+Total: **924 tests passed** (`cargo test --workspace`), plus **1 ignored**
 (`perturbation.rs`, run with `--ignored`). Counting that ignored test, the
-workspace lists **924 test functions**. The standalone
+workspace lists **925 test functions**. The standalone
 `tools/metrics-gen` crate adds its own 4 (`cargo test --manifest-path tools/metrics-gen/Cargo.toml`).
 
 Still deferred: the human blind-test run (D01), a quality-labeled corpus

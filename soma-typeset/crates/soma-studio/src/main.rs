@@ -872,6 +872,11 @@ async fn check_origin(
         HeaderName::from_static("referrer-policy"),
         HeaderValue::from_static("no-referrer"),
     );
+    // `trunk` writes fixed asset names; revalidate so a rebuilt UI is never
+    // masked by a stale wasm module. API responses already say `no-store`.
+    headers
+        .entry(header::CACHE_CONTROL)
+        .or_insert(HeaderValue::from_static("no-cache"));
     response
 }
 

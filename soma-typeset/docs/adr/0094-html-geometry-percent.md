@@ -34,6 +34,11 @@ but Web Studio uses it as the proof surface, so it must be faithful.
   from the block emits `font-size: <atom/block>em`, not the absolute size.
   Line-height is emitted as a ratio of the atom's own font. The block keeps
   the absolute size.
+- **Block line-height is a ratio of the block's font.** The layout's line
+  height is in page em; writing it as `line-height: 3.125em` on a `2.5em`
+  heading resolves against the heading's own size and makes the line box 2.5×
+  too tall, so it overlaps the next block. The renderer emits
+  `line_height / font_size` instead.
 - Footnote numbers and page-level rules use the page frame.
 
 The renderer gains `PageFragment` (`style` + page body) and

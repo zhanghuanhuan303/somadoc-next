@@ -786,12 +786,52 @@ async fn s9(document: &Document, studio: Studio) -> String {
     } else {
         !class.contains("bad") && (label.contains("一致") || label.contains("接近"))
     };
+    let computed_family = shadow_host(document, 1)
+        .and_then(|shadow| shadow.query_selector(".block").ok().flatten())
+        .and_then(|element| {
+            web_sys::window().and_then(|window| window.get_computed_style(&element).ok().flatten())
+        })
+        .map(|style| style.get_property_value("font-family").unwrap_or_default())
+        .unwrap_or_default();
+    let expected_family = studio
+        .project
+        .with(|project| {
+            project.as_ref().and_then(|project| {
+                project
+                    .fonts
+                    .iter()
+                    .find(|font| font.role == "sans")
+                    .or_else(|| project.fonts.iter().find(|font| font.role == "serif"))
+                    .map(|font| font.family.clone())
+            })
+        })
+        .unwrap_or_default();
+    let proof_font_ok = expected_family.is_empty()
+        || computed_family
+            .to_lowercase()
+            .contains(&expected_family.to_lowercase());
+    let var_of = |element: &Element| {
+        web_sys::window()
+            .and_then(|window| window.get_computed_style(element).ok().flatten())
+            .map(|style| style.get_property_value("--soma-sans").unwrap_or_default())
+            .unwrap_or_default()
+    };
+    let root_var = document
+        .document_element()
+        .map(|element| var_of(&element))
+        .unwrap_or_default();
+    let host_var = shadow_host(document, 1)
+        .map(|shadow| var_of(&shadow.host()))
+        .unwrap_or_default();
     let pages = query_all(document, ".page-slot").len();
-    let detail = format!("字体 {fonts} · {label} · {class} · {title} · 页 {pages} · 探针 {ready}");
+    let detail = format!(
+        "字体 {fonts} · {label} · {class} · {title} · 页 {pages} · 探针 {ready} · 校样字体 {computed_family}（期望 {expected_family}） · var root={root_var} host={host_var}"
+    );
     result(
         "S9",
         ready
             && verdict_ok
+            && proof_font_ok
             && pages > 0
             && report.map(|report| report.samples > 0).unwrap_or(false),
         detail,

@@ -154,7 +154,17 @@ pub fn download(name: &str, bytes: &[u8]) -> Result<(), String> {
         .map_err(|_| String::from("下载链接类型不对"))?;
     anchor.set_href(&url);
     anchor.set_download(name);
+    let _ = anchor.set_attribute("style", "display:none");
+    if let Some(body) = document.body() {
+        let _ = body.append_child(&anchor);
+    }
     anchor.click();
-    let _ = web_sys::Url::revoke_object_url(&url);
+    anchor.remove();
+    // Revoking immediately can cancel the download before the browser starts
+    // writing it; keep the object URL alive for a moment.
+    gloo_timers::callback::Timeout::new(1_000, move || {
+        let _ = web_sys::Url::revoke_object_url(&url);
+    })
+    .forget();
     Ok(())
 }
