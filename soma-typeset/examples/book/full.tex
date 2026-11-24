@@ -201,4 +201,64 @@ A line of English prose is set here so that a long word such as internationaliza
 
 索引条目的文字可以带排序键：显示“排版”，按“paiban”排序；也可以带 see/see also。页码合并只处理页码，不处理文字；一个词条的文字在索引里只出现一次，页码列表挂在它下面。\index{页码区间}
 
+\newpage
+
+\section{数学排版附录}
+
+这一节把常见公式放进同一份书籍版心，检查数学面、变量、根式、上下标与极限的实际效果。公式默认使用 New Computer Modern Math，与参考样张的数学面一致。
+
+\subsection{分数与根式}
+
+\[
+\frac{a}{b}, \quad \sqrt{x}, \quad \sqrt[n]{x}
+\]
+
+\subsection{上下标}
+
+\[
+x^2, \quad x_i, \quad x_{i,j}^{2n}, \quad e^{-x^2}
+\]
+
+\subsection{求和、积分与极限}
+
+\[
+\sum_{i=1}^{n} i = \frac{n(n+1)}{2}
+\]
+
+\[
+\int_{0}^{\infty} e^{-x^2} dx = \frac{\sqrt{\pi}}{2}
+\]
+
+\[
+\lim_{x \to 0} \frac{\sin x}{x} = 1
+\]
+
+\[
+\prod_{k=1}^{n} k = n!
+\]
+
+\subsection{矩阵、分段与符号}
+
+\[
+\left( \begin{matrix} a & b \\ c & d \end{matrix} \right)
+\qquad
+f(x) = \begin{cases} x^2, & x \ge 0 \\ -x, & x < 0 \end{cases}
+\]
+
+\[
+\alpha, \beta, \gamma, \delta, \epsilon, \theta, \lambda, \mu, \pi, \sigma, \phi, \omega
+\]
+
+\[
+\Delta, \Gamma, \Theta, \Lambda, \Pi, \Sigma, \Phi, \Omega
+\]
+
+\subsection{重音与装饰}
+
+\[
+\hat{x}, \quad \bar{x}, \quad \vec{v}, \quad \tilde{n}, \quad \overline{a+b}, \quad \binom{n}{k}
+\]
+
+编号公式、对齐与宏仍在第四章演示；这里只增加公式类型，不改变模板。
+
 \end{document}
