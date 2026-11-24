@@ -46,13 +46,16 @@ pub fn Titlebar() -> impl IntoView {
                 .unwrap_or_else(|| String::from("未打开文档"))
         })
     };
-    let engine = move || {
-        if studio.building.get() {
-            ("dot warn", "排版中")
-        } else if studio.build_error.get().is_some() {
-            ("dot bad", "构建失败")
-        } else {
-            ("dot ok", "引擎就绪")
+    let verify = move || {
+        let Some(wasm) = studio.summary() else {
+            return (String::from("—"), "idle", true);
+        };
+        match studio.verify.get() {
+            None => (String::from("校验中"), "idle", false),
+            Some(native) if native.hash == wasm.hash && native.params_hash == wasm.params_hash => {
+                (String::from("wasm = native"), "ok", false)
+            }
+            Some(_) => (String::from("不同哈希"), "bad", false),
         }
     };
 
@@ -69,16 +72,15 @@ pub fn Titlebar() -> impl IntoView {
                 <span>"搜索或运行命令"</span><kbd>"⌘ K"</kbd>
             </button>
             <div class="title-right">
-                <span class=move || format!("font-probe {}", studio.font_probe.get().map(|probe| probe.class).unwrap_or("idle"))
-                    id="font-probe"
-                    title=move || studio.font_probe.get().map(|probe| probe.detail).unwrap_or_else(|| String::from("字体探针等待构建"))
-                    aria-label="字体一致性诊断">
-                    {move || studio.font_probe.get().map(|probe| probe.label).unwrap_or("字体 —")}
-                </span>
-                <span class="engine-state" title="引擎状态">
-                    <span class=move || { engine().0 } id="engine-dot"></span>
-                    <span id="engine-label">{move || engine().1}</span>
-                </span>
+                <span class=move || format!("verify-chip {}", verify().1)
+                    id="verify-chip"
+                    hidden=move || verify().2
+                    title="wasm 与 native 的 canonical 哈希一致"
+                    aria-label="校验状态">{move || verify().0}</span>
+                <button class="mini title-action" title="并排显示源文与校样" aria-label="并排显示源文与校样"
+                    on:click=move |_| state::set_mode(studio, Mode::Split)>"◫ 分栏"</button>
+                <button class="mini title-action" title="导出 PDF（服务端）" aria-label="导出 PDF（服务端）"
+                    on:click=move |_| export_pdf(studio)>"⤓ PDF"</button>
                 <button class="icon-btn" title="切换主题" aria-label="切换主题"
                     on:click=move |_| toggle_theme(studio)>{move || if studio.theme.get() == "dark" { "☀" } else { "☾" }}</button>
                 <button class="icon-btn" title="排版助手（⌘J）" aria-label="排版助手"
@@ -370,6 +372,12 @@ pub fn Statusbar() -> impl IntoView {
             <span class="status-item mono" id="status-hash">{move || summary().map(|summary| format!("p:{}", &summary.params_hash[..8])).unwrap_or_else(|| String::from("—"))}</span>
             <span class="status-item optional" id="status-doc">{move || summary().map(|summary| format!("{} 页 · {} 行", summary.pages, summary.lines)).unwrap_or_default()}</span>
             <span class="status-item optional" id="status-layout">{move || summary().map(|summary| format!("{} ms", summary.elapsed_ms)).unwrap_or_default()}</span>
+            <span class=move || format!("font-probe status-item {}", studio.font_probe.get().map(|probe| probe.class).unwrap_or("idle"))
+                id="font-probe"
+                title=move || studio.font_probe.get().map(|probe| probe.detail).unwrap_or_else(|| String::from("字体探针等待构建"))
+                aria-label="字体一致性诊断">
+                {move || studio.font_probe.get().map(|probe| probe.label).unwrap_or("字体 —")}
+            </span>
             <div class="status-fill"></div>
             <span class="status-item status-mode" id="status-mode">{move || studio.mode.get().label()}</span>
             <span class="status-item optional" id="status-tabs">{move || format!("{} 个标签", studio.tabs.with(|tabs| tabs.len()))}</span>

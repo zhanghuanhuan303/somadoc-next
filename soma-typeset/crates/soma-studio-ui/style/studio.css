@@ -82,6 +82,29 @@
   color: var(--faint);
   white-space: nowrap;
 }
+.verify-chip {
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 9.5px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.verify-chip.ok { color: var(--green); border-color: var(--green); background: var(--green-soft); }
+.verify-chip.bad { color: var(--red); border-color: var(--red); background: var(--red-soft); }
+.title-action {
+  height: 22px;
+  padding: 0 7px;
+  font-size: 10px;
+  background: transparent;
+  border-color: var(--line);
+  color: var(--muted);
+}
+.title-action:hover { background: var(--panel-2); border-color: var(--accent-line); color: var(--ink); }
+.statusbar .font-probe { height: 18px; line-height: 16px; padding: 0 6px; font-size: 9.5px; }
 .font-probe {
   font-size: 10.5px;
   line-height: 18px;
@@ -393,6 +416,11 @@
   font-weight: 700;
 }
 .pane-head .fill { flex: 1; }
+.proof-controls { display: flex; align-items: center; gap: 4px; margin-left: 4px; }
+.proof-controls .page-btn, .proof-controls .page-input, .proof-controls .zoom-select { height: 21px; }
+@media (max-width: 1500px) {
+  .proof-controls .zoom-select { display: none; }
+}
 .pane-head .badge {
   font-family: var(--mono);
   font-size: 9.5px;
@@ -514,34 +542,12 @@ table.compact td.num, table.compact th.num {
 
 /* Editor ----------------------------------------------------------------- */
 .editor-wrap { position: relative; height: 100%; min-height: 0; background: var(--bg); }
-.gutter {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 46px;
-  padding: 10px 8px 10px 0;
-  overflow: hidden;
-  text-align: right;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  /* Match the textarea's 12.5px / 1.7 line box exactly. */
-  line-height: 21.25px;
-  color: var(--faint);
-  background: var(--side);
-  border-right: 1px solid var(--line);
-  user-select: none;
-  font-variant-numeric: tabular-nums;
-  white-space: pre;
-  z-index: 2;
-  pointer-events: none;
-}
 .source-input {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  padding: 10px 14px 10px 58px;
+  padding: 10px 14px;
   border: 0;
   outline: 0;
   resize: none;
@@ -551,8 +557,10 @@ table.compact td.num, table.compact th.num {
   font-size: 12.5px;
   line-height: 1.7;
   tab-size: 4;
-  white-space: pre;
-  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .source-input:focus { background: var(--bg); }
 .source-readonly { opacity: .85; }

@@ -10,9 +10,7 @@ use crate::ai::AiDock;
 use crate::api;
 use crate::inspect::InspectPane;
 use crate::proof::ProofPane;
-use crate::shell::{
-    self, Breadcrumb, Drag, DragCtx, DragKind, Palette, Sidebar, Statusbar, Tabs, Titlebar,
-};
+use crate::shell::{self, Drag, DragCtx, DragKind, Palette, Sidebar, Statusbar, Tabs, Titlebar};
 use crate::source::SourcePane;
 use crate::state::{self, persist, use_studio, Aux, Mode, Studio};
 use crate::verify::VerifyPane;
@@ -73,7 +71,6 @@ pub fn App() -> impl IntoView {
                 <Sidebar/>
                 <main class="main">
                     <Tabs/>
-                    <Breadcrumb/>
                     <div class="content">
                         <Loading/>
                         <EmptyWorkspace/>
@@ -227,7 +224,43 @@ fn Workspace() -> impl IntoView {
             <section class="pane" id="proof-pane" hidden=move || !proof_visible()>
                 <div class="pane-head">
                     <span>"校样"</span>
-                    <span class="badge">"引擎盒树 · 与 PDF 同页"</span>
+                    <div class="proof-controls" hidden=move || studio.build.with(|build| build.is_none())>
+                        <button class="page-btn" title="上一页" aria-label="上一页"
+                            on:click=move |_| { let page = studio.page.get().saturating_sub(1); state::go_to_page(studio, page); }>"‹"</button>
+                        <input class="page-input" inputmode="numeric" aria-label="页码" title="页码"
+                            prop:value=move || { (studio.page.get() + 1).to_string() }
+                            on:change=move |event| {
+                                if let Ok(value) = event_target_value(&event).parse::<usize>() {
+                                    state::go_to_page(studio, value.saturating_sub(1));
+                                }
+                            }/>
+                        <span class="faint">{move || format!("/ {}", studio.page_count())}</span>
+                        <button class="page-btn" title="下一页" aria-label="下一页"
+                            on:click=move |_| { let page = (studio.page.get() + 1).min(studio.page_count().saturating_sub(1)); state::go_to_page(studio, page); }>"›"</button>
+                        <select class="zoom-select" aria-label="缩放" title="缩放"
+                            prop:value=move || if studio.fit.get() { String::from("fit") } else { format!("{}", studio.zoom.get()) }
+                            on:change=move |event| {
+                                let value = event_target_value(&event);
+                                if value == "fit" {
+                                    studio.fit.set(true);
+                                } else if let Ok(zoom) = value.parse::<f64>() {
+                                    studio.fit.set(false);
+                                    studio.zoom.set(zoom);
+                                }
+                            }>
+                            <option value="fit">"适应宽度"</option>
+                            <option value="0.5">"50%"</option>
+                            <option value="0.75">"75%"</option>
+                            <option value="1">"100%"</option>
+                            <option value="1.25">"125%"</option>
+                            <option value="1.5">"150%"</option>
+                            <option value="2">"200%"</option>
+                        </select>
+                        <button class="page-btn" title="适应宽度" aria-label="适应宽度"
+                            on:click=move |_| studio.fit.set(true)>"⤢"</button>
+                        <button class="page-btn" title="显示/隐藏检视覆盖层（⌘I）" aria-label="显示/隐藏检视覆盖层"
+                            on:click=move |_| studio.overlay.update(|value| *value = !*value)>"▦"</button>
+                    </div>
                     <div class="fill"></div>
                     <span class="badge">
                         {move || studio.build.with(|build| {

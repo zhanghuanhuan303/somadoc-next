@@ -683,8 +683,12 @@ pub fn export_pdf(studio: Studio) {
     let Some(project) = studio.project.get_untracked() else {
         return;
     };
+    if studio.build.with_untracked(|build| build.is_none()) {
+        toast(studio, "还没有可导出的构建", "bad");
+        return;
+    }
     if !project.pdf {
-        toast(studio, "服务端没有配置 PDF 字体（用 --font 启动）", "bad");
+        toast(studio, "服务端没有配置 PDF 字体", "bad");
         return;
     }
     let request = BuildRequest {
@@ -698,10 +702,17 @@ pub fn export_pdf(studio: Studio) {
     };
     spawn_local(async move {
         match api::pdf(&request).await {
-            Ok(bytes) => match api::download("soma-studio.pdf", &bytes) {
-                Ok(()) => toast(studio, "PDF 已导出", "ok"),
-                Err(error) => toast(studio, error, "bad"),
-            },
+            Ok(bytes) if bytes.is_empty() => {
+                toast(studio, "服务端返回了空 PDF", "bad");
+            }
+            Ok(bytes) => {
+                let pages = studio.summary().map(|summary| summary.pages).unwrap_or(0);
+                let kb = bytes.len().div_ceil(1024);
+                match api::download("soma-studio.pdf", &bytes) {
+                    Ok(()) => toast(studio, format!("PDF 已导出 · {pages} 页 · {kb} KB"), "ok"),
+                    Err(error) => toast(studio, error, "bad"),
+                }
+            }
             Err(error) => toast(studio, error, "bad"),
         }
     });

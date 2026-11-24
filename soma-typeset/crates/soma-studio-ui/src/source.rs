@@ -1,9 +1,10 @@
 //! Source editor and DocIR mapping.
 //!
-//! A `<textarea>` keeps the editor dependency-free and IME-correct. The gutter
-//! is a synced scroll container. Node selection is exact at block level: the
-//! canonical DocIR carries byte spans, and the atom stream has no source
-//! offsets yet (D103), so a line falls back to its block.
+//! A `<textarea>` keeps the editor dependency-free and IME-correct. It soft-
+//! wraps at the pane width; line numbers were dropped because a wrapped visual
+//! line no longer maps one-to-one to a logical line. Node selection is exact at
+//! block level: the canonical DocIR carries byte spans, and the atom stream has
+//! no source offsets yet (D103), so a line falls back to its block.
 
 use gloo_timers::future::TimeoutFuture;
 use leptos::html;
@@ -16,29 +17,9 @@ use crate::state::{self, use_studio, Mode, Studio};
 pub fn SourcePane() -> impl IntoView {
     let studio = use_studio();
     let textarea = NodeRef::<html::Textarea>::new();
-    let gutter = NodeRef::<html::Div>::new();
     let cursor = RwSignal::new(String::from("1:1"));
     let input_seq = RwSignal::new(0u64);
     let composing = RwSignal::new(false);
-
-    let numbers = Memo::new(move |_| {
-        let source = studio.source.get();
-        let count = source.lines().count().max(1);
-        let mut text = String::with_capacity(count * 4);
-        for line in 1..=count {
-            if line > 1 {
-                text.push('\n');
-            }
-            text.push_str(&line.to_string());
-        }
-        text
-    });
-
-    let on_scroll = move |_| {
-        if let (Some(input), Some(gutter)) = (textarea.get(), gutter.get()) {
-            gutter.set_scroll_top(input.scroll_top());
-        }
-    };
 
     // Keep the DOM value in sync with programmatic changes (tab switch, file
     // open) without resetting the caret on every keystroke: on input the two
@@ -171,7 +152,6 @@ pub fn SourcePane() -> impl IntoView {
                 } else {
                     view! {
                         <div class="editor-wrap">
-                            <div class="gutter" node_ref=gutter aria-hidden="true">{move || numbers.get()}</div>
                             <textarea
                                 class="source-input"
                                 id="source-editor"
@@ -179,10 +159,9 @@ pub fn SourcePane() -> impl IntoView {
                                 spellcheck="false"
                                 autocapitalize="off"
                                 autocomplete="off"
-                                wrap="off"
+                                wrap="soft"
                                 aria-label="源文编辑器"
                                 on:input=on_input
-                                on:scroll=on_scroll
                                 on:keyup=move |_| update_cursor()
                                 on:click=move |_| update_cursor()
                                 on:select=move |_| update_cursor()

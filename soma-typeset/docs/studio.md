@@ -59,15 +59,25 @@ The server prints a warning when `dist/index.html` is missing; run
 | View | What it is |
 |---|---|
 | **分栏** (Split, default) | Source on the left, proof on the right, with a draggable splitter. Either pane can be closed with its `×`; the sidebar 「视图 → 分栏」 restores both. The ratio and open state persist in `localStorage`. |
-| **源文** (Source) | A `<textarea>` with a synced gutter. Typing schedules a build 220 ms after the last keystroke; IME composition defers the build until `compositionend`. `⌘S` saves, `⌘↵` rebuilds now. |
+| **源文** (Source) | A soft-wrapping `<textarea>`; a long line wraps at the pane width instead of scrolling horizontally. Typing schedules a build 220 ms after the last keystroke; IME composition defers the build until `compositionend`. `⌘S` saves, `⌘↵` rebuilds now. |
 | **校样** (Proof) | Each page is a Shadow DOM root containing the exact HTML fragment of the engine's `PagedLayout`, scaled by the UI's zoom. The page CSS is scoped inside the shadow root; UI tokens never leak into the document. |
 | **检视** (Inspect) | The exported line facts for the current page: ratio, adjustment, trim, boundary deviation, cost, flags. Clicking a row selects the same line in the overlay. Per-term cost is not exported (D102); the detail bar shows `—`. |
 | **校验** (Verify) | wasm vs native: canonical hash, parameter hash, page count and line count per page. A mismatch is a red state. |
 
 Pane close buttons sit in each pane head; closing the last pane shows an empty-pane
 state with “并排显示 / 只要源文 / 只要校样”. The source pane head intentionally
-omits the file name and format badge: the tab already carries the file, and the
-breadcrumb is now a proof toolbar (page, zoom, overlay, verify chip).
+omits the file name and format badge: the tab already carries the file. The
+page/zoom/overlay controls live in the proof pane head, and the `wasm = native`
+verification chip plus the “分栏” and “PDF” actions live in the title bar; there
+is no global breadcrumb row.
+
+The title bar also carries `⤓ PDF` and `◫ 分栏`; PDF export works with the
+proof closed, and the toast reports the page count and file size. A downloaded
+PDF is never zero-length by construction (the UI rejects an empty response).
+
+Line numbers are intentionally not shown: with soft wrap, one logical line can
+occupy several visual rows, and a one-number-per-logical-line gutter would drift.
+The pane head keeps the `line:column` cursor badge.
 
 URL parameters (handy for screenshots and links):
 `mode=split|source|proof|inspect|verify`, `page=N` (1-based), `theme=dark|light`,
@@ -153,7 +163,7 @@ directory; `examples/` is not modified.
 
 | Gate | What it locks |
 |---|---|
-| S1 | 38/30/29/24 chrome; side head, tab bar and AI header share a 30 px baseline; default split pane; the status bar spans the window; one navigation tree. |
+| S1 | 38/30/24 chrome (no breadcrumb row); side head, tab bar and AI header share a 30 px baseline; default split pane; title-bar `wasm = native` chip; the status bar spans the window; one navigation tree. |
 | S2 | Three files open as three tabs; reopening does not duplicate; closing the active tab selects the right neighbour; closing all shows the empty workspace; `+` opens the palette. |
 | S3 | Sidebar 180–380, AI 320–900, persistence, double-click reset, collapse; closed AI dock has no content width; closing/reopening the source and proof panes. |
 | S4 | Theme persists, both toggles work, and `studio.css` contains no hex values (tokens only). |
@@ -175,5 +185,8 @@ directory; `examples/` is not modified.
   server-free artifact.
 - **Inspect shows total cost only** (D102), and line text is best-effort
   because atoms carry no source offsets (D103).
+- **PDF compatibility:** Firefox/pdf.js and Poppler render the CJK TrueType
+  subset correctly; Ghostscript currently maps some CJK glyphs to the wrong
+  shapes (D106). The PDF is not blank in the browser or in `pdftoppm`.
 - **AI is local rules only.** It reads the exported line facts and proposes
   template YAML; it does not call a network model.

@@ -45,6 +45,7 @@ async fn run(studio: Studio, only: Option<String>) {
             emit(&document, &lines);
             return;
         }
+        let _ = wait_for(|| studio.verify.with(|verify| verify.is_some()), 80).await;
         if !studio.ai_open.get_untracked() {
             click_selector(&document, "[aria-label='排版助手']");
             TimeoutFuture::new(120).await;
@@ -170,19 +171,6 @@ fn click_selector(document: &Document, selector: &str) -> bool {
     }
 }
 
-fn click_nav(document: &Document, label: &str) -> bool {
-    match query_all(document, ".nav-item")
-        .into_iter()
-        .find(|element| text(element).contains(label))
-    {
-        Some(element) => {
-            click(&element);
-            true
-        }
-        None => false,
-    }
-}
-
 fn pointer(element: &Element, kind: &str, x: f64) {
     let init = PointerEventInit::new();
     init.set_client_x(x as i32);
@@ -232,22 +220,13 @@ fn s1(document: &Document) -> String {
     let Some(tabs) = query(document, ".tabs") else {
         return result("S1", false, "缺少 tabs");
     };
-    let Some(breadcrumb) = query(document, ".breadcrumb") else {
-        return result("S1", false, "缺少 breadcrumb");
-    };
     let Some(statusbar) = query(document, ".statusbar") else {
         return result("S1", false, "缺少 statusbar");
     };
-    let heights = (
-        height(&titlebar),
-        height(&tabs),
-        height(&breadcrumb),
-        height(&statusbar),
-    );
+    let heights = (height(&titlebar), height(&tabs), height(&statusbar));
     let ok_heights = approx(heights.0, 38.0, 0.75)
         && approx(heights.1, 30.0, 0.75)
-        && approx(heights.2, 29.0, 0.75)
-        && approx(heights.3, 24.0, 0.75);
+        && approx(heights.2, 24.0, 0.75);
 
     let side_head = query(document, ".side-head");
     let ai_head = query(document, ".ai-header");
@@ -273,14 +252,17 @@ fn s1(document: &Document) -> String {
         && query(document, "#proof-pane")
             .map(|element| !element.has_attribute("hidden"))
             .unwrap_or(false);
+    let verify_ok = query(document, "#verify-chip")
+        .map(|element| !element.has_attribute("hidden") && text(&element).contains("wasm = native"))
+        .unwrap_or(false);
 
     let detail = format!(
-        "chrome {:.0}/{:.0}/{:.0}/{:.0} · 30px 同底 {chrome_ok} · 状态栏全宽 {full_width} · 导航树 {navs} · 默认分栏 {split_ok}",
-        heights.0, heights.1, heights.2, heights.3
+        "chrome {:.0}/{:.0}/{:.0} · 30px 同底 {chrome_ok} · 状态栏全宽 {full_width} · 导航树 {navs} · 默认分栏 {split_ok} · 校验徽标 {verify_ok}",
+        heights.0, heights.1, heights.2
     );
     result(
         "S1",
-        ok_heights && chrome_ok && full_width && navs == 1 && split_ok,
+        ok_heights && chrome_ok && full_width && navs == 1 && split_ok && verify_ok,
         detail,
     )
 }
@@ -507,7 +489,7 @@ async fn s3(document: &Document, _studio: Studio) -> String {
         20,
     )
     .await;
-    let reopened = click_nav(document, "分栏")
+    let reopened = click_selector(document, "[aria-label='并排显示源文与校样']")
         && wait_for(
             || {
                 query(document, "#source-pane")
@@ -533,7 +515,7 @@ async fn s3(document: &Document, _studio: Studio) -> String {
         20,
     )
     .await;
-    click_nav(document, "分栏");
+    click_selector(document, "[aria-label='并排显示源文与校样']");
     wait_for(
         || {
             query(document, "#proof-pane")
@@ -720,6 +702,8 @@ async fn s6(document: &Document, studio: Studio) -> String {
         .unwrap_or_default();
     let mut value = editor.value();
     value.push_str("\n\nLive probe paragraph with 中英 mixed 文本。\n");
+    value.push_str("自动换行 ");
+    value.push_str(&"长".repeat(180));
     editor.set_value(&value);
     fire(editor.as_ref(), "input");
     let rebuilt = wait_for(
@@ -739,6 +723,8 @@ async fn s6(document: &Document, studio: Studio) -> String {
         .build
         .with(|build| build.as_ref().map(|build| build.elapsed_ms).unwrap_or(0));
     let changed = !before_hash.is_empty() && before_hash != after_hash;
+    TimeoutFuture::new(80).await;
+    let wrap_ok = editor.scroll_width() <= editor.client_width() + 1;
 
     let comp_seq = studio.build_seq.get_untracked();
     fire(editor.as_ref(), "compositionstart");
@@ -752,9 +738,13 @@ async fn s6(document: &Document, studio: Studio) -> String {
     let rebuilt_after = wait_for(|| studio.build_seq.get_untracked() > comp_seq, 60).await;
 
     let detail = format!(
-        "输入重建 {rebuilt} · 哈希变 {changed} · {elapsed} ms · 组合静默 {quiet} · 组合后重建 {rebuilt_after}"
+        "输入重建 {rebuilt} · 哈希变 {changed} · {elapsed} ms · 自动换行 {wrap_ok} · 组合静默 {quiet} · 组合后重建 {rebuilt_after}"
     );
-    result("S6", rebuilt && changed && quiet && rebuilt_after, detail)
+    result(
+        "S6",
+        rebuilt && changed && wrap_ok && quiet && rebuilt_after,
+        detail,
+    )
 }
 
 /* ---------------------------------------------------------------------- S7 */
