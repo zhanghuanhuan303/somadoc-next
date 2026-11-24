@@ -122,12 +122,12 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
   本图集不是发布说明，而是<strong>当期状态的可追溯切片</strong>：每个数字都有出处，
   每个优势都带边界，每个未完成项都显式登记。</p>
   <dl class="meta">
-    <div><dt>构建</dt><dd><code>main@fed241c</code>（代码基线：Math v2 与 article 默认版式已并入；图集为其后的纯文档追加）</dd></div>
-    <div><dt>日期</dt><dd>2026-11-21</dd></div>
-    <div><dt>规模</dt><dd>21 个 crate · 59,923 行 Rust · 70 份 ADR · 770 个测试</dd></div>
+    <div><dt>构建</dt><dd><code>main@c7ee52a</code>（数据快照：TikZ 子系统与 Plex 默认版式已并入）</dd></div>
+    <div><dt>日期</dt><dd>2026-11-25</dd></div>
+    <div><dt>规模</dt><dd>24 个 crate · 72,641 行 Rust · 92 份 ADR · 917 个测试（另 1 个 ignored）</dd></div>
     <div><dt>环境</dt><dd>Linux x86_64 · Rust 1.99 · <code>wasm32-wasip1</code> · A4 / 10pt 基准</dd></div>
-    <div><dt>字体</dt><dd>思源宋体（正文）· MiSans（标题/代码）· FandolKai（救援）· DejaVu Math TeX Gyre（数学）</dd></div>
-    <div><dt>数据源</dt><dd><code>docs/*.md</code> · <code>docs/adr/0001–0070</code> · <code>scripts/gates.sh</code> · <code>corpus/zh</code> · <code>examples/book/out</code></dd></div>
+    <div><dt>字体</dt><dd>默认模板 IBM Plex Sans SC（正文/标题/代码）· 数学 New Computer Modern Math · 书稿样张 MiSans/Noto</dd></div>
+    <div><dt>数据源</dt><dd><code>docs/*.md</code> · <code>docs/adr/0001–0092</code> · <code>scripts/gates.sh</code> · <code>corpus/zh</code> · <code>examples/book/out</code></dd></div>
   </dl>
 </header>
 
@@ -139,10 +139,10 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
 排版质量用<strong>自己的代价模型</strong>与<strong>暴力参考解</strong>对齐，而不是拿别人的引擎当 oracle。<label for="mn0" class="margin-toggle">⊕</label><input type="checkbox" id="mn0" class="margin-toggle"><span class="marginnote">本图集沿用「图集」而不是「报告」的写法：先给数字与图，再给口径与出处；读者可以从任一数据点回到对应的脚本、ADR 或语料行。</span></p>
 
 <div class="counters">
-  <div class="counter"><b>770</b><span>测试 / 0 失败</span></div>
+  <div class="counter"><b>917</b><span>测试 / 0 失败</span></div>
   <div class="counter"><b>12</b><span>门禁检查 / 全绿</span></div>
-  <div class="counter"><b>70</b><span>ADR / 冻结架构</span></div>
-  <div class="counter"><b>21</b><span>crate / 59,923 行</span></div>
+  <div class="counter"><b>92</b><span>ADR / 冻结架构</span></div>
+  <div class="counter"><b>24</b><span>crate / 72,641 行</span></div>
 </div>
 
 <table>
@@ -152,11 +152,11 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
     <tr><td>行内断行</td><td><b>K-P 全局最优</b>；代价 = 行数 + badness + 边界偏差 + 裁剪 + 短末行 + 高度</td><td>加法权重，每项先归一化；暴力枚举（n≤16）为最优性参考；<code>K-P ≤ Greedy-C</code> 为硬不变量</td></tr>
     <tr><td>分页</td><td>逐行垂直 K-P，脚注参与页面高度迭代，<code>keep-with-next</code> 为硬约束</td><td>末页免费；贪心保留为显式策略与回退</td></tr>
     <tr><td>中文规则</td><td>禁则/挤压/悬挂、标点类、行边裁剪上限、连字符断词、注音</td><td>规则表带 <code>ruleId</code>；未核实规则只能产生软约束</td></tr>
-    <tr><td>数学</td><td>TeX 8 类原子与间距表；字体 MATH 常数 + 字形墨迹；D/T/S/SS 与 cramped</td><td><code>soma.metrics/5</code>；35 个常数、2089 个字形墨迹（DejaVu Math）</td></tr>
+    <tr><td>数学</td><td>TeX 8 类原子与间距表；字体 MATH 常数 + 字形墨迹 + 纵向变体</td><td><code>soma.metrics/7</code>；41 个常数、4,283 个数学字形、490 条纵向变体（New Computer Modern Math）</td></tr>
     <tr><td>确定性</td><td>全整数（1/4096 em），canonical JSON，native 与 <code>wasm32-wasip1</code> 同哈希</td><td>无 <code>f32</code>；哈希覆盖 param/rules/metrics/template/engine</td></tr>
-    <tr><td>语料基线</td><td><span class="mono">ALL,48,599,1213,0,0,3,0,0,3,486,1580,377,9</span></td><td>Gate Q′；12 份中文文档；0 过度压缩、0 紧急回退、3 处续排、0 孤行/寡行</td></tr>
-    <tr><td>K-P 性能</td><td>混排 2000 atoms p95 <b>20.23 ms</b>；4000 atoms <b>79.0 ms</b>；纯中文 2000 atoms 0.24 ms</td><td>本机 release，D91；预算 ≤2000 atoms 20 ms、≤4000 atoms 80 ms；混排擦边</td></tr>
-    <tr><td>成品</td><td>math-v2 2 页 · article 5 页 · full 12 页 · brief 12 页 · song 13 页</td><td>同一份 <code>examples/book</code> 源码 + 一份纯 YAML 模板</td></tr>
+    <tr><td>语料基线</td><td><span class="mono">ALL,48,599,1213,0,0,3,0,0,6,809,1404,428,9</span></td><td>Gate Q′；12 份中文文档；0 过度压缩、0 紧急回退、3 处续排、0 孤行/寡行</td></tr>
+    <tr><td>K-P 性能</td><td>混排 2000 atoms p95 <b>1.12 ms</b>；4000 atoms <b>2.26 ms</b>；纯中文 2000 atoms 0.22 ms</td><td>本机 release，预算 ≤2000 atoms 20 ms、≤4000 atoms 80 ms，<code>bench --check</code> PASS</td></tr>
+    <tr><td>成品</td><td>math-v2 2 页 · article 5 页 · full 14 页 · brief 12 页 · song 13 页</td><td>同一份 <code>examples/book</code> 源码 + 一份纯 YAML 模板</td></tr>
   </tbody>
 </table>
 
@@ -165,7 +165,7 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
   <ol>
     <li><b>「可复现」指同输入同字节</b>：canonical JSON 的字段顺序、整数舍入、迭代顺序都固定；跨目标只比较同一 schema 的字节。</li>
     <li><b>「优于贪心」是同一代价模型下的最优性</b>：K-P 与 Greedy-C 读同一套代价；我们不拿 TeX/Typst 的输出当 oracle。</li>
-    <li><b>「对标 LaTeX」是版式口径，不是实现移植</b>：默认版式按 <code>article</code> 10pt 实测值设置；数学按 TeXbook 附录 G 与字体 MATH 表实现，clean-room。</li>
+    <li><b>「对标 LaTeX」是版式口径，不是实现移植</b>：默认版式是 Plex 参考页（ADR-0088），LaTeX <code>article</code> 归档为可选项；数学按 TeXbook 附录 G 与字体 MATH 表实现，clean-room。</li>
   </ol>
 </div>
 </section>
@@ -267,11 +267,11 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
     <text x="770" y="60">4 个前端</text>
     <text x="770" y="89">13 块 / 17 行内</text>
     <text x="770" y="118">纯 YAML</text>
-    <text x="770" y="147">D91</text>
+    <text x="770" y="147">预算 PASS</text>
     <text x="770" y="176">D92</text>
     <text x="770" y="205" fill="#7a5a20">ParamOnly</text>
-    <text x="770" y="234" fill="#7a5a20">D93</text>
-    <text x="770" y="263">CFF 无墨迹</text>
+    <text x="770" y="234" fill="#7a5a20">D97 / D98</text>
+    <text x="770" y="263">CFF/TTF</text>
     <text x="770" y="292">目录 / 索引</text>
     <text x="770" y="321">4 个后端</text>
     <text x="770" y="350">同哈希</text>
@@ -280,8 +280,8 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
 </svg>
 <figcaption><b>图 1 · 能力地图。</b>圆点是能力成熟度（四档：可用 / 成熟 / 有 golden / 全门禁），
 虚线是到「全门禁」的差额；右栏是每域最关键的一条证据或一个未关闭债务。
-两个尚未满档的域是「中文规则」（硬规则 8 条 <code>Verified</code>，行边裁剪的比例仍是 <code>ParamOnly</code> 待标定）
-与「数学」（M1–M7 已落地，定界符字体变体与重音锚点留作 D93）；其余域满档，各自的已知债务见 §7。</figcaption>
+两个尚未满档的域是「中文规则」（硬规则 8 条 <code>Verified</code>，行边裁剪比例已按实测复核并维持）
+与「数学」（M1–M7 已落地，装配件/横向变体与重音 kern 留作 D97/D98）；其余域满档，各自的已知债务见 §7。</figcaption>
 </figure>
 
 <table>
@@ -291,12 +291,12 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
     <tr><td>语法前端</td><td>Markdown（含 GFM 表格、嵌套列表、setext）、HTML（语义白名单 + colgroup）、LaTeX（宏/计数器/环境子集）、Word（OOXML 读入）</td><td><code>soma-md</code>/<code>soma-html</code>/<code>soma-latex</code>/<code>soma-docx</code>；LaTeX 不做参考文献与交叉引用</td></tr>
     <tr><td>DocIR</td><td>13 块 / 17 行内；语义，无物理样式；<code>soma.doc/2</code></td><td>Gate A 禁止物理样式字段；表格/公式/脚注/索引/注音都有节点</td></tr>
     <tr><td>模板 / 样式</td><td>纯 YAML；<code>within</code> 选择器；页母版；封面；目录；编号；<code>soma.template/9</code></td><td><code>soma-template</code>；属性白名单在 <code>Property</code>/<code>PROPERTY_ORDER</code></td></tr>
-    <tr><td>盒树 / 行内 K-P</td><td>原子 + 边界；行边裁剪；强制断行；缩放/升部/降部；<code>soma.pages/10</code></td><td>内核冻结（ADR-0007）；只允许默认 0 的扩展</td></tr>
+    <tr><td>盒树 / 行内 K-P</td><td>原子 + 边界；行边裁剪；强制断行；缩放/升部/降部；<code>soma.pages/11</code></td><td>内核冻结（ADR-0007）；只允许默认 0 的扩展</td></tr>
     <tr><td>分页 / 脚注</td><td>逐行垂直 K-P；脚注迭代；widow/orphan；续排带；章节起始母版</td><td><code>soma-layout</code>；D92 记垂直页 badness 的 body 参照问题</td></tr>
     <tr><td>中文规则</td><td>标点类、禁则、挤压、悬挂、行边裁剪、连字符、注音、句读</td><td><code>soma-rules</code>；规则表带 <code>ruleId</code> 与来源；未核实规则只能软约束</td></tr>
-    <tr><td>数学</td><td>TeX 8 类 + 8×8 间距；分数/根式/上下标/大算符/定界符/重音；行内 Rel/Bin 断行</td><td>ADR-0070；<code>soma.metrics/5</code>；D93 留变体与重音锚点</td></tr>
-    <tr><td>字体 / 度量</td><td>字体指纹、度量表生成、逐字选面、救援面、CFF/TTF</td><td><code>tools/metrics-gen</code>；<code>soma.metrics/5</code>；CFF 无字形纵向墨迹</td></tr>
-    <tr><td>长文档</td><td>目录/图目录/表目录、拼音索引（子条目、see/see also、页码区间）、PDF 书签、前置页页码</td><td><code>examples/book</code> 12–13 页成品；索引按 Unicode 码位或拼音</td></tr>
+    <tr><td>数学</td><td>TeX 8 类 + 8×8 间距；分数/根式/上下标/大算符/定界符/重音；行内 Rel/Bin 断行</td><td>ADR-0070；<code>soma.metrics/7</code>；D97/D98 留装配件/横向变体与重音 kern</td></tr>
+    <tr><td>字体 / 度量</td><td>字体指纹、度量表生成、逐字选面、救援面、CFF/TTF</td><td><code>tools/metrics-gen</code>；<code>soma.metrics/7</code>；CFF 无字形纵向墨迹</td></tr>
+    <tr><td>长文档</td><td>目录/图目录/表目录、拼音索引（子条目、see/see also、页码区间）、PDF 书签、前置页页码</td><td><code>examples/book</code> 11–14 页成品；索引按 Unicode 码位或拼音</td></tr>
     <tr><td>渲染后端</td><td>PDF（TrueType/CFF 子集、标签树、链接、图片、Bookmarks、PageLabels）、HTML、SVG、JSON</td><td><code>soma-render-*</code>；PDF 不依赖 <code>soma-metrics</code></td></tr>
     <tr><td>确定性</td><td>1/4096 em 整数；无浮点；canonical JSON；native 与 wasm 同哈希</td><td><code>scripts/wasm-hash.sh</code>；Gate A/C</td></tr>
     <tr><td>工具链 / 门禁</td><td>12 项检查：fmt、clippy、tests、wasm check、wasm hash、demo、依赖边界、clean-room、Gate A/C/V-R/Q′</td><td><code>scripts/gates.sh</code>；语料 <code>corpus/zh</code></td></tr>
@@ -393,7 +393,7 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
 <h2><span class="num">§4</span>质量与性能 · 可重跑的数字</h2>
 
 <h3>4.1 测试分布</h3>
-<p>770 个测试按层分布。布局与内核占大头，因为这两层的失败最难从输出看出来：
+<p>917 个测试按层分布。布局与内核占大头，因为这两层的失败最难从输出看出来：
 一个错误的 tie-break 只会让某一段的断点不同，不会让 PDF 报错。</p>
 
 <figure class="wide">
@@ -406,39 +406,39 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
     <text x="170" y="145">渲染 PDF/HTML/SVG</text>
     <text x="170" y="171">数学</text>
     <text x="170" y="197">文档 IR</text>
-    <text x="170" y="223">规则层</text>
-    <text x="170" y="249">度量 / 字体</text>
+    <text x="170" y="223">度量 / 断词 / 着色 / TikZ</text>
+    <text x="170" y="249">规则层</text>
   </g>
   <g fill="#2f5d50">
     <rect x="182" y="30" width="600" height="14"/>
-    <rect x="182" y="56" width="338" height="14"/>
-    <rect x="182" y="82" width="327" height="14"/>
-    <rect x="182" y="108" width="284" height="14"/>
-    <rect x="182" y="134" width="197" height="14"/>
-    <rect x="182" y="160" width="152" height="14"/>
-    <rect x="182" y="186" width="138" height="14"/>
-    <rect x="182" y="212" width="87" height="14"/>
-    <rect x="182" y="238" width="42" height="14"/>
+    <rect x="182" y="56" width="405" height="14"/>
+    <rect x="182" y="82" width="338" height="14"/>
+    <rect x="182" y="108" width="235" height="14"/>
+    <rect x="182" y="134" width="180" height="14"/>
+    <rect x="182" y="160" width="158" height="14"/>
+    <rect x="182" y="186" width="160" height="14"/>
+    <rect x="182" y="212" width="140" height="14"/>
+    <rect x="182" y="238" width="78" height="14"/>
   </g>
   <g font-family="SFMono-Regular,Menlo,monospace" font-size="9" fill="#3b4642">
-    <text x="790" y="41">213</text>
-    <text x="528" y="67">120</text>
-    <text x="517" y="93">116</text>
-    <text x="474" y="119">101</text>
-    <text x="387" y="145">70</text>
-    <text x="342" y="171">54</text>
-    <text x="328" y="197">49</text>
-    <text x="277" y="223">31</text>
-    <text x="232" y="249">15</text>
+    <text x="790" y="41">240</text>
+    <text x="595" y="67">162</text>
+    <text x="528" y="93">135</text>
+    <text x="425" y="119">94</text>
+    <text x="370" y="145">72</text>
+    <text x="348" y="171">63</text>
+    <text x="350" y="197">64</text>
+    <text x="330" y="223">56</text>
+    <text x="268" y="249">31</text>
   </g>
   <line x1="182" y1="266" x2="826" y2="266" stroke="#e3dfd0"/>
   <g font-family="SFMono-Regular,Menlo,monospace" font-size="8" fill="#6d7772">
     <text x="182" y="276">0</text>
-    <text x="760" y="276">213 测试 / 组</text>
+    <text x="760" y="276">240 测试 / 组</text>
   </g>
 </svg>
-<figcaption><b>图 3 · 测试分布。</b>按 crate 单独跑 <code>cargo test -p &lt;crate&gt; --all-targets</code> 汇总得 769，
-加 1 个 doctest 为 770，与 <code>cargo test --workspace</code> 一致。分布用于看重心，不作门禁。</figcaption>
+<figcaption><b>图 3 · 测试分布。</b>按 crate 单独跑 <code>cargo test -p &lt;crate&gt; --all-targets</code> 汇总得 917（其中 1 个 ignored），
+加 1 个 doctest 共 918 个测试函数；<code>cargo test --workspace</code> 报告 917 passed / 1 ignored。分布用于看重心，不作门禁。</figcaption>
 </figure>
 
 <h3>4.2 门禁</h3>
@@ -488,36 +488,36 @@ ALL,48,599,1213,0,0,3,0,0,3,486,1580,377,9
   </g>
   <!-- bars: width = time / budget * 644 -->
   <g fill="#1f4e79">
-    <rect x="182" y="40" width="8" height="12"/>
-    <rect x="182" y="80" width="20" height="12"/>
-    <rect x="182" y="120" width="651" height="12"/>
-    <rect x="182" y="160" width="636" height="12"/>
+    <rect x="182" y="40" width="7" height="12"/>
+    <rect x="182" y="80" width="17" height="12"/>
+    <rect x="182" y="120" width="36" height="12"/>
+    <rect x="182" y="160" width="18" height="12"/>
   </g>
   <!-- budget line at 100% -->
   <line x1="826" y1="30" x2="826" y2="180" stroke="#b98b6a" stroke-width="1.2" stroke-dasharray="4 3"/>
   <g font-family="SFMono-Regular,Menlo,monospace" font-size="9" fill="#3b4642">
-    <text x="196" y="50">0.24 ms · 1% 预算</text>
-    <text x="208" y="90">0.62 ms · 3%</text>
-    <text x="196" y="130" fill="#eef3ea">20.23 ms · 101%（越线 1.2%）</text>
-    <text x="196" y="170" fill="#eef3ea">79.0 ms · 99%</text>
+    <text x="196" y="50">0.22 ms · 1% 预算</text>
+    <text x="206" y="90">0.53 ms · 3%</text>
+    <text x="225" y="130">1.12 ms · 6%</text>
+    <text x="207" y="170">2.26 ms · 3%</text>
   </g>
   <text x="826" y="196" text-anchor="end" font-family="SFMono-Regular,Menlo,monospace" font-size="9" fill="#7a5a1b">预算 100%</text>
-  <text x="182" y="222" font-family="SFMono-Regular,Menlo,monospace" font-size="8.5" fill="#6d7772">本机 release · D91 记录；预算：≤2000 atoms 20 ms、≤4000 atoms 80 ms</text>
-  <text x="182" y="238" font-family="SFMono-Regular,Menlo,monospace" font-size="8.5" fill="#6d7772">纯中文与标点密集几乎免费；混排的整数除法是主要成本</text>
+  <text x="182" y="222" font-family="SFMono-Regular,Menlo,monospace" font-size="8.5" fill="#6d7772">本机 release · bench --check PASS；预算：≤2000 atoms 20 ms、≤4000 atoms 80 ms</text>
+  <text x="182" y="238" font-family="SFMono-Regular,Menlo,monospace" font-size="8.5" fill="#6d7772">纯中文与标点密集几乎免费；混排 2k 为预算 6%，4k 为 3%</text>
 </svg>
-<figcaption><b>图 4 · 行内 K-P 的实测（D91）。</b>每根条是「实测 / 本档预算」，
-所以四档可以同轴比较：纯中文与标点密集几乎免费，混排 4k 为 99%，
-混排 2k 以 1.2% 越预算线。D91 的对策是除法换乘法逆元或保守剪枝，尚未排期。</figcaption>
+<figcaption><b>图 4 · 行内 K-P 的实测。</b>每根条是「实测 / 本档预算」，
+所以四档可以同轴比较：纯中文与标点密集几乎免费，混排 2k 为预算的 6%，4k 为 3%。
+D91 已关闭（ADR-0072 候选窗口），<code>bench --check</code> PASS。</figcaption>
 </figure>
 
 <h3>4.5 数学 v2</h3>
 <div class="kv">
-  <dt>度量表</dt><dd><code>soma.metrics/5</code>：35 个 MATH 常数（per-mille）+ 2,089 个字形纵向墨迹 + 斜体修正（DejaVu Math TeX Gyre）</dd>
+  <dt>度量表</dt><dd><code>soma.metrics/7</code>：41 个 MATH 常数（per-mille）+ 4,283 个数学字形 + 490 条纵向变体 + 斜体修正（New Computer Modern Math）</dd>
   <dt>间距</dt><dd>TeX 8×8 表：thin 3mu / medium 4mu / thick 5mu；<code>\nonscript</code>；Bin 归一化</dd>
   <dt>层级</dt><dd>D/T/S/SS + cramped；脚本尺寸按基础字号，不再无限缩小</dd>
   <dt>几何</dt><dd>分数 num/denom 位移与 gap；根式横线贴墨迹顶；大算符 <code>displayOperatorMinHeight</code>；定界符按墨迹选尺寸</dd>
   <dt>行内断行</dt><dd>超过半行时在 Rel/Bin <strong>前</strong>拆分，边界带数学间距与 500/700 惩罚</dd>
-  <dt>已知边界</dt><dd>D93：字体变体/装配件、顶部重音锚点未接入</dd>
+  <dt>已知边界</dt><dd>D97/D98：GlyphAssembly/横向变体、MathKernInfo 与扁平重音</dd>
 </div>
 </section>
 
@@ -525,7 +525,7 @@ ALL,48,599,1213,0,0,3,0,0,3,486,1580,377,9
 <h2><span class="num">§5</span>工程方法 · 为什么这些数字可信</h2>
 
 <h3>5.1 ADR 先于代码</h3>
-<p>70 份 ADR 不是事后文档，而是决策记录：每个非平凡选择都先写「Context / Decision /
+<p>92 份 ADR 不是事后文档，而是决策记录：每个非平凡选择都先写「Context / Decision /
 Consequences / Alternatives」，再动代码。冻结后的架构只允许由新 ADR 扩展，
 所以「为什么现在不这样做」与「以后怎么做」都能查到。</p>
 
@@ -595,15 +595,15 @@ Consequences / Alternatives」，再动代码。冻结后的架构只允许由�
 <h2><span class="num">§7</span>余项地图 · 显式边界</h2>
 
 <table>
-  <caption>表 4 · 当期未排期项（摘自 <code>docs/debt.md</code>）</caption>
+  <caption>表 4 · 当期主要未排期项（摘自 <code>docs/debt.md</code>）</caption>
   <thead><tr><th>ID</th><th>内容</th><th>影响</th><th>对策 / 触发</th></tr></thead>
   <tbody>
-    <tr><td>D91</td><td>混排 2000 atoms 性能擦边（20.23 ms vs 20 ms）</td><td>最慢一档刚好越线</td><td>除法换乘法逆元，或保守剪枝；先测 wasm</td></tr>
-    <tr><td>D92</td><td>垂直页 badness 的 body 参照取页首项高度</td><td>页首是图时留白偏大（song 第 3 页约 55 mm）</td><td>把 body 改为正文行高；会改全部分页 golden</td></tr>
-    <tr><td>D93</td><td>定界符连续缩放，不取字体变体；顶部重音锚点未接</td><td>超高括号笔画比例与 LaTeX 有差距；宽重音只居中</td><td><code>.smt</code> v6 加 <code>MathVariants</code></td></tr>
-    <tr><td>D71</td><td><code>\intertext</code>、<code>alignat</code>、<code>\tag</code> 独立列</td><td>复杂公式会降级</td><td>有真实需求时</td></tr>
-    <tr><td>D24</td><td>Word 前端只读不写</td><td>没有 .docx 导出</td><td>等真实需求（N1）</td></tr>
-    <tr><td>D74</td><td>CLI 只做单文件</td><td>无批量/watch/stdin</td><td>有自动化需求时</td></tr>
+    <tr><td>D01</td><td>Gate Q 质量宣称</td><td>没有人工评审数据，质量上限未知</td><td>30 段 × 5 评审；采集后决定是否新增 preset</td></tr>
+    <tr><td>D51 / D62 / D66</td><td>嵌套盒树 / 每母版版心 / 页级搜索窗口</td><td>嵌套布局与特殊版心仍受限</td><td>有真实版式需求时按 ADR 扩展</td></tr>
+    <tr><td>D60 / D61 / D63 / D100</td><td>tracking、斜体面、度量覆盖、kerning</td><td>长 run 与拉丁细节仍有差距</td><td>字体/表生成与内核模型一起评估</td></tr>
+    <tr><td>D97 / D98</td><td>数学装配件/横向变体、MathKernInfo 与扁平重音</td><td>超高括号与宽重音和 LaTeX 仍有差距</td><td>有字体提供装配件或视觉需求时，加 <code>soma.metrics/8</code></td></tr>
+    <tr><td>D99</td><td>TikZ 只做核心绘图语言</td><td>库级语法（plot/decorations/matrix/…）走可见源码回退</td><td>有真实文档需求时按 ADR-0092 扩子集</td></tr>
+    <tr><td>D32</td><td>canonical writer 去重</td><td>两个 writer 目前都有 golden；第三个消费者出现前维护成本可控</td><td>有真实需求时抽公共 crate</td></tr>
   </tbody>
 </table>
 
@@ -678,7 +678,7 @@ bash scripts/math.sh           # 数学 v2 样张
 bash scripts/full.sh           # 全能力 12 页
 bash scripts/brief.sh          # 交付说明
 bash scripts/song.sh           # 宋体样张
-cargo test --workspace         # 770 tests</pre>
+cargo test --workspace         # 917 tests</pre>
 </section>
 
 <section id="s9">
@@ -724,20 +724,20 @@ cargo test --workspace         # 770 tests</pre>
 
 <h3>9.4 参考</h3>
 <ul>
-  <li>架构与 ADR：<code>docs/architecture-v2.md</code>、<code>docs/adr/0001–0091</code></li>
+  <li>架构与 ADR：<code>docs/architecture-v2.md</code>、<code>docs/adr/0001–0092</code></li>
   <li>K-P 模型：<code>docs/kp-model.md</code>、<code>docs/kp-closure.md</code></li>
   <li>数学：<code>docs/math.md</code>、<code>docs/adr/0070-math-v2.md</code></li>
   <li>默认版式：<code>docs/adr/0088-plex-builtin-default.md</code>（LaTeX article 仍作为模板归档）</li>
   <li>代码块：<code>docs/adr/0089-monospace-family.md</code>、<code>0090-code-block-panel.md</code>、<code>0091-syntax-highlighting.md</code></li>
-  <li>债务：<code>docs/debt.md</code>（D91/D92/D93 为当期主要余项）</li>
+  <li>债务：<code>docs/debt.md</code>（D01、D51/D62/D66、D60/D61/D63/D100、D97/D98、D99 为当期主要余项）</li>
   <li>语料与标定：<code>corpus/zh</code>、<code>docs/corpus-calibration.md</code>、<code>docs/blind-test.md</code></li>
 </ul>
 </section>
 
 <footer>
-  <span>SOMA ATLAS · v1.0 · 2026-11-21</span>
-  <span>构建 main@fed241c</span>
-  <span>770 tests · 70 ADRs · 21 crates</span>
+  <span>SOMA ATLAS · v1.0 · 2026-11-25</span>
+  <span>构建 main@c7ee52a</span>
+  <span>917 tests · 92 ADRs · 24 crates</span>
   <span>本图集只描述当期状态；未排期项以 <code>docs/debt.md</code> 为准</span>
 </footer>
 

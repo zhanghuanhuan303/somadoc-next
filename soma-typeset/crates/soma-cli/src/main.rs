@@ -11,6 +11,9 @@
 //! layout and rendering are the library crates; nothing here re-implements
 //! typesetting, and the output is the same canonical result the gates hash.
 
+use std::collections::BTreeSet;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use soma_core::{BreakConfig, VerticalParams};
@@ -25,18 +28,23 @@ const USAGE: &str = "\
 soma — deterministic Chinese-first typesetting
 
 usage:
-  soma render --input <file> [--template <file>] [--engine <file>]
-              [--format html|svg|json|pdf] [--out <file>]
+  soma render --input <file|dir|-> [--from md|html|tex|docx]
+              [--template <file>] [--engine <file>]
+              [--format html|svg|json|pdf] [--out <path>]
               [--metrics <file>]
               [--font <file[#index]>] [--font-bold <file[#index]>]
               [--font-sans <file[#index]>] [--font-sans-bold <file[#index]>]
               [--font-mono <file[#index]>] [--font-mono-bold <file[#index]>]
               [--font-math <file[#index]>] [--font-fallback <file[#index]>]
-  soma check  --input <file> [--template <file>] [--engine <file>]
+  soma check  --input <file|-> [--from md|html|tex|docx]
+              [--template <file>] [--engine <file>]
+  soma --version
 
-  --input     .md / .markdown, .html / .htm, .tex / .latex, .docx
+  --input     .md / .markdown, .html / .htm, .tex / .latex, .docx;
+              a directory (batch) or '-' (stdin)
+  --from      source format for '-', or to override a file extension
   --template  pure-YAML template; omitted uses the built-in Plex design
-  --engine    soma.engine/1 configuration; omitted uses publish-v1
+  --engine    soma.engine/1 configuration; omitted uses latex-v1
   --format    html (default), svg, json (canonical page result), or pdf
   --metrics   soma.metrics table; omitted uses the embedded table.
               Generate one with tools/metrics-gen to match a PDF font.
@@ -51,7 +59,12 @@ usage:
               installed faces, then falls back to --font with a warning
   --font-fallback optional rescue face for glyphs --font lacks
   --hyphenation TeX pattern file enabling hyphenation of long Latin words
-  --out       output path; '-' or omitted writes to stdout
+  --stats     print pages, blocks, lines, canonical hash (and the chosen
+              math face for PDF) to stderr
+  --out       output path; '-' or omitted writes to stdout.
+              With --input <dir> this must be a directory: every supported
+              file directly inside it writes <stem>.<format-extension> there.
+              Batch mode is non-recursive and one-shot; there is no --watch.
 
 exit codes:
   0  success
@@ -70,9 +83,42 @@ enum Format {
     Pdf,
 }
 
-#[derive(Debug)]
+impl Format {
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Html => "html",
+            Self::Svg => "svg",
+            Self::Json => "json",
+            Self::Pdf => "pdf",
+        }
+    }
+}
+
+/// The frontend, fixed by extension or by `--from` for a stream.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SourceFormat {
+    Markdown,
+    Html,
+    Latex,
+    Docx,
+}
+
+impl SourceFormat {
+    fn from_cli(value: &str) -> Option<Self> {
+        match value {
+            "md" | "markdown" => Some(Self::Markdown),
+            "html" | "htm" => Some(Self::Html),
+            "tex" | "latex" => Some(Self::Latex),
+            "docx" => Some(Self::Docx),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 struct Options {
     input: String,
+    from: Option<SourceFormat>,
     template: Option<String>,
     engine: Option<String>,
     format: Format,
@@ -111,12 +157,17 @@ fn run(args: Vec<String>) -> Result<(), String> {
             print!("{USAGE}");
             Ok(())
         }
+        "-V" | "--version" => {
+            println!("soma {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         other => Err(format!("unknown command `{other}`\n\n{USAGE}")),
     }
 }
 
 fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String> {
     let mut input: Option<String> = None;
+    let mut from = None;
     let mut template = None;
     let mut engine = None;
     let mut format = Format::Html;
@@ -144,6 +195,12 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
         };
         match arg {
             "--input" | "-i" => input = Some(value()?),
+            "--from" => {
+                let name = value()?;
+                from = Some(SourceFormat::from_cli(&name).ok_or_else(|| {
+                    format!("unknown source format `{name}` (expected md, html, tex, or docx)")
+                })?);
+            }
             "--template" | "-t" => template = Some(value()?),
             "--engine" => engine = Some(value()?),
             "--out" | "-o" => out = Some(value()?),
@@ -174,6 +231,7 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
 
     Ok(Options {
         input: input.ok_or_else(|| format!("--input is required\n\n{USAGE}"))?,
+        from,
         template,
         engine,
         format,
@@ -194,36 +252,43 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
 
 fn render(args: &[String]) -> Result<(), String> {
     let options = parse_options(args, true)?;
-    let pipeline = pipeline(&options)?;
-    let metrics = load_metrics(&options)?;
+    if options.input != "-" && Path::new(&options.input).is_dir() {
+        return render_directory(&options);
+    }
+    render_one(&options, None)
+}
+
+fn render_one(options: &Options, label: Option<&str>) -> Result<(), String> {
+    let pipeline = pipeline(options)?;
+    let metrics = load_metrics(options)?;
     let pages = layout(
         &pipeline.document,
         &pipeline.styled,
         &pipeline.engine,
         pipeline.vertical,
         &metrics,
-        &options,
+        options,
     )?;
     let styled = &pipeline.styled;
     let document = &pipeline.document;
     let assets = FileImages::load(&options.input, &pages).with_embedded(&pipeline.media);
     match options.format {
         Format::Html => write_output(
-            &options,
+            options,
             &soma_render_html::render_with(&pages, styled.table(), &pages.text, &assets),
         )?,
         Format::Svg => write_output(
-            &options,
+            options,
             &soma_render_svg::render_with(&pages, styled.table(), &pages.text, &assets),
         )?,
         Format::Json => {
             let mut json = pages.canonical_json();
             json.push('\n');
-            write_output(&options, &json)?;
+            write_output(options, &json)?;
         }
         Format::Pdf => {
             let needs_math = pages_have_math(&pages);
-            let faces = load_pdf_fonts(&options, &metrics, needs_math)?;
+            let faces = load_pdf_fonts(options, &metrics, needs_math)?;
             let title = document.title_text();
             let author = {
                 let names: Vec<&str> = document
@@ -255,7 +320,7 @@ fn render(args: &[String]) -> Result<(), String> {
             };
             let bytes = render_pdf(&pages, styled, &pages.text, &fonts, &metadata, &assets)
                 .map_err(|error| format!("pdf: {error}"))?;
-            write_bytes(&options, &bytes)?;
+            write_bytes(options, &bytes)?;
             if options.stats {
                 match &faces.math_source {
                     MathSource::Explicit => eprintln!(
@@ -275,29 +340,154 @@ fn render(args: &[String]) -> Result<(), String> {
         }
     }
     if options.stats {
-        eprintln!(
-            "pages={} blocks={} lines={} fallbacks={} canonicalHash={:016x}",
-            pages.page_count(),
-            pages
-                .pages
-                .iter()
-                .map(|page| page.blocks.len())
-                .sum::<usize>(),
-            pages
-                .pages
-                .iter()
-                .flat_map(|page| page.blocks.iter())
-                .map(|block| block.lines_total)
-                .sum::<u32>(),
-            pages.text.fallback_count(),
-            pages.hash()
-        );
+        print_stats(label, &pages);
     }
     Ok(())
 }
 
+/// Render every supported file directly inside `--input` into `--out`.
+///
+/// Batch mode is deliberately one-shot and non-recursive: no watcher, no
+/// traversal, and no output path the user did not give. Every target is
+/// checked against the input set before the first write, so a collision
+/// (for example `a.html` read and `a.md` written as `a.html` in the same
+/// directory) is an error instead of a silent overwrite.
+fn render_directory(options: &Options) -> Result<(), String> {
+    if options.from.is_some() {
+        return Err(String::from(
+            "--from applies to one input, not to a directory",
+        ));
+    }
+    let out_argument = options.out.as_deref().filter(|path| *path != "-");
+    let Some(out_argument) = out_argument else {
+        return Err(format!(
+            "{}: --input <dir> needs --out <dir> (batch mode never overwrites sources)",
+            options.input
+        ));
+    };
+    let out_dir = PathBuf::from(out_argument);
+    if out_dir.exists() && !out_dir.is_dir() {
+        return Err(format!(
+            "{out_argument}: --out must be a directory for --input <dir>"
+        ));
+    }
+
+    let entries =
+        std::fs::read_dir(&options.input).map_err(|error| format!("{}: {error}", options.input))?;
+    let mut files = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("{}: {error}", options.input))?;
+        let path = entry.path();
+        let is_file = entry
+            .file_type()
+            .map_err(|error| format!("{}: {error}", path.display()))?
+            .is_file();
+        if is_file && supported_input(&path) {
+            files.push(path);
+        }
+    }
+    files.sort();
+    if files.is_empty() {
+        return Err(format!(
+            "{}: no supported files (md, html, tex, docx) in the directory",
+            options.input
+        ));
+    }
+
+    std::fs::create_dir_all(&out_dir).map_err(|error| format!("{out_argument}: {error}"))?;
+    let out_dir =
+        std::fs::canonicalize(&out_dir).map_err(|error| format!("{out_argument}: {error}"))?;
+    let inputs: BTreeSet<PathBuf> = files
+        .iter()
+        .filter_map(|file| std::fs::canonicalize(file).ok())
+        .collect();
+
+    let mut jobs = Vec::with_capacity(files.len());
+    let mut targets = BTreeSet::new();
+    for file in &files {
+        let stem = file
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .ok_or_else(|| format!("{}: file stem is not UTF-8", file.display()))?;
+        let target = out_dir.join(format!("{stem}.{}", options.format.extension()));
+        let canonical = std::fs::canonicalize(&target).unwrap_or_else(|_| {
+            out_dir.join(target.file_name().expect("the target has a file name"))
+        });
+        if inputs.contains(&canonical) {
+            return Err(format!(
+                "{}: output would overwrite an input file; choose a different --out directory",
+                target.display()
+            ));
+        }
+        if !targets.insert(canonical) {
+            return Err(format!(
+                "{}: two input files share this output path",
+                target.display()
+            ));
+        }
+        jobs.push((file.clone(), target));
+    }
+
+    for (file, target) in jobs {
+        let label = file
+            .to_str()
+            .ok_or_else(|| format!("{}: file name is not UTF-8", file.display()))?;
+        let mut single = options.clone();
+        single.input = label.to_string();
+        single.out = Some(
+            target
+                .to_str()
+                .ok_or_else(|| format!("{}: path is not UTF-8", target.display()))?
+                .to_string(),
+        );
+        render_one(&single, Some(label))?;
+    }
+    Ok(())
+}
+
+fn supported_input(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase()
+            .as_str(),
+        "md" | "markdown" | "html" | "htm" | "tex" | "latex" | "docx"
+    )
+}
+
+fn print_stats(label: Option<&str>, pages: &soma_layout::PagedLayout) {
+    let line = format!(
+        "pages={} blocks={} lines={} fallbacks={} canonicalHash={:016x}",
+        pages.page_count(),
+        pages
+            .pages
+            .iter()
+            .map(|page| page.blocks.len())
+            .sum::<usize>(),
+        pages
+            .pages
+            .iter()
+            .flat_map(|page| page.blocks.iter())
+            .map(|block| block.lines_total)
+            .sum::<u32>(),
+        pages.text.fallback_count(),
+        pages.hash()
+    );
+    match label {
+        Some(label) => eprintln!("{label}: {line}"),
+        None => eprintln!("{line}"),
+    }
+}
+
 fn check(args: &[String]) -> Result<(), String> {
     let options = parse_options(args, false)?;
+    if options.input != "-" && Path::new(&options.input).is_dir() {
+        return Err(format!(
+            "{}: check expects one file; directory batch mode is render-only",
+            options.input
+        ));
+    }
     let pipeline = pipeline(&options)?;
     let metrics = load_metrics(&options)?;
     let pages = layout(
@@ -340,21 +530,8 @@ struct Pipeline {
 }
 
 fn pipeline(options: &Options) -> Result<Pipeline, String> {
-    let extension = std::path::Path::new(&options.input)
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let (mut document, media) = if extension == "docx" {
-        let bytes =
-            std::fs::read(&options.input).map_err(|error| format!("{}: {error}", options.input))?;
-        soma_docx::parse_docx_with_media(&bytes)
-            .map_err(|error| format!("{}: {}", options.input, error.reason))?
-    } else {
-        let source = std::fs::read_to_string(&options.input)
-            .map_err(|error| format!("{}: {error}", options.input))?;
-        (parse_document(&options.input, &source)?, Vec::new())
-    };
+    let format = source_format(&options.input, options.from)?;
+    let (mut document, media) = read_document(&options.input, format)?;
 
     enrich_image_sizes(&mut document, &options.input);
 
@@ -390,16 +567,93 @@ fn pipeline(options: &Options) -> Result<Pipeline, String> {
     })
 }
 
+/// The frontend comes from `--from` when given, otherwise from the extension.
+/// A stream has no name to inspect, so `--input -` without `--from` is an
+/// error rather than a guess (ADR-0029).
+fn source_format(input: &str, forced: Option<SourceFormat>) -> Result<SourceFormat, String> {
+    if let Some(format) = forced {
+        return Ok(format);
+    }
+    if input == "-" {
+        return Err(String::from(
+            "--input - needs --from md|html|tex|docx (a stream has no extension)",
+        ));
+    }
+    let extension = Path::new(input)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "md" | "markdown" => Ok(SourceFormat::Markdown),
+        "html" | "htm" => Ok(SourceFormat::Html),
+        "tex" | "latex" => Ok(SourceFormat::Latex),
+        "docx" => Ok(SourceFormat::Docx),
+        other => Err(format!(
+            "{input}: unsupported input `{other}` (expected md, html, tex, or docx)"
+        )),
+    }
+}
+
+/// Read the source bytes. Stdin is read as bytes so `.docx` works there too;
+/// text frontends then require valid UTF-8.
+fn read_document(
+    input: &str,
+    format: SourceFormat,
+) -> Result<(Document, Vec<soma_docx::MediaFile>), String> {
+    let label = input_label(input);
+    let bytes = if input == "-" {
+        let mut bytes = Vec::new();
+        std::io::stdin()
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("stdin: {error}"))?;
+        bytes
+    } else {
+        std::fs::read(input).map_err(|error| format!("{label}: {error}"))?
+    };
+    if format == SourceFormat::Docx {
+        return soma_docx::parse_docx_with_media(&bytes)
+            .map_err(|error| format!("{label}: {}", error.reason));
+    }
+    let source = String::from_utf8(bytes)
+        .map_err(|error| format!("{label}: input is not valid UTF-8 ({})", error.utf8_error()))?;
+    let document = match format {
+        SourceFormat::Markdown => soma_md::parse_markdown(&source),
+        SourceFormat::Html => soma_html::parse_html(&source),
+        SourceFormat::Latex => soma_latex::parse_latex(&source),
+        SourceFormat::Docx => unreachable!("handled above"),
+    };
+    Ok((document, Vec::new()))
+}
+
+fn input_label(input: &str) -> &str {
+    if input == "-" {
+        "<stdin>"
+    } else {
+        input
+    }
+}
+
+/// Images sit next to the input file. A stream has no directory, so the
+/// current directory is the only sensible base.
+fn input_base(input: &str) -> PathBuf {
+    if input == "-" {
+        PathBuf::from(".")
+    } else {
+        Path::new(input)
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
+    }
+}
+
 /// Read the intrinsic pixel size of each local image so the layout knows its
 /// aspect ratio. DocIR deliberately carries no width, but an image's own size
 /// is a fact about the asset, not a style (the same rule the Word importer
 /// follows). A missing or unsupported file is left alone: the layout keeps its
 /// aspect fallback.
 fn enrich_image_sizes(document: &mut Document, input: &str) {
-    let base = std::path::Path::new(input)
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .to_path_buf();
+    let base = input_base(input);
     enrich_blocks(&mut document.blocks, &base);
     for footnote in &mut document.footnotes {
         enrich_blocks(&mut footnote.blocks, &base);
@@ -511,22 +765,6 @@ fn load_metrics(options: &Options) -> Result<MetricsTable, String> {
             let bytes = std::fs::read(path).map_err(|error| format!("{path}: {error}"))?;
             MetricsTable::parse(&bytes).map_err(|error| format!("{path}: {error}"))
         }
-    }
-}
-
-fn parse_document(path: &str, source: &str) -> Result<Document, String> {
-    let extension = std::path::Path::new(path)
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    match extension.as_str() {
-        "md" | "markdown" => Ok(soma_md::parse_markdown(source)),
-        "html" | "htm" => Ok(soma_html::parse_html(source)),
-        "tex" | "latex" => Ok(soma_latex::parse_latex(source)),
-        other => Err(format!(
-            "{path}: unsupported input `{other}` (expected md, html, tex, or docx)"
-        )),
     }
 }
 
@@ -744,9 +982,7 @@ struct FileImages {
 
 impl FileImages {
     fn load(input: &str, pages: &soma_layout::PagedLayout) -> Self {
-        let base = std::path::Path::new(input)
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."));
+        let base = input_base(input);
         let mut files = std::collections::BTreeMap::new();
         for page in &pages.pages {
             for block in &page.blocks {

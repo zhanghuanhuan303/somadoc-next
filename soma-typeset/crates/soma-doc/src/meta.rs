@@ -23,17 +23,35 @@ impl Date {
         Self { year, month, day }
     }
 
-    /// Range check used by validation: 1 <= year <= 9999, 1 <= month <= 12,
-    /// 1 <= day <= 31. Calendar correctness (leap years) is intentionally not
-    /// modelled; the source already carries a date, and the IR must not invent
-    /// one.
+    /// Range and calendar check used by validation: 1 <= year <= 9999,
+    /// 1 <= month <= 12, and the day exists in that month under the Gregorian
+    /// calendar. The year is never invented: an impossible date is rejected so
+    /// a bad source is reported instead of propagated.
     pub const fn is_in_range(self) -> bool {
         self.year >= 1
             && self.year <= 9999
             && self.month >= 1
             && self.month <= 12
             && self.day >= 1
-            && self.day <= 31
+            && self.day <= days_in_month(self.year, self.month)
+    }
+
+    /// True when `year` is a Gregorian leap year: divisible by 4, except
+    /// centuries that are not divisible by 400.
+    const fn is_leap_year(year: i32) -> bool {
+        (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+    }
+}
+
+/// Number of days in a Gregorian month. Months outside 1..=12 yield 0 so that
+/// [`Date::is_in_range`] rejects them independently of the day.
+const fn days_in_month(year: i32, month: u8) -> u8 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if Date::is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
     }
 }
 

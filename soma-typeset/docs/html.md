@@ -28,6 +28,7 @@ let document = parse_html("<h1>标题</h1><p>正文 <strong>重点</strong>。</
 | `h1`–`h6` | `Block::Heading(level)` |
 | `p` | `Block::Paragraph` |
 | `ul` / `ol`（`start`） | `Block::List(ordered, start)` |
+| `dl` / `dt` / `dd` | `Block::List`（无序；`dt`/`dd` 按源顺序扁平为条目） |
 | `li` | `ListItem`（可含多个块） |
 | `blockquote` | `Block::BlockQuote` |
 | `pre`（`class="language-x"`） | `Block::CodeBlock(lang)` |
@@ -35,7 +36,7 @@ let document = parse_html("<h1>标题</h1><p>正文 <strong>重点</strong>。</
 | `table` / `thead` / `tbody` / `tr` / `th` / `td` | `Block::Table`（`colspan`/`rowspan`，表头前缀） |
 | `figure` + `img` + `figcaption` | `Block::Figure` + caption |
 | `div`/`section`/`article`/`main`/`header`/`footer`/`nav`/`aside` | 透明容器（子节点成为块） |
-| `strong`/`b`、`em`/`i`、`u`、`s`/`del`/`strike` | 行内容器 |
+| `strong`/`b`、`em`/`i`、`u`/`ins`、`s`/`del`/`strike` | 行内容器 |
 | `code`/`kbd`/`samp`/`var` | `Inline::Code` |
 | `a[href]` | `Inline::Link` |
 | `img[src,alt]` | `Inline::Image` 或 `Figure` |

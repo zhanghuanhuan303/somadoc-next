@@ -41,6 +41,7 @@ pub mod inline;
 pub mod meta;
 pub mod node;
 pub mod raw;
+pub mod reader;
 pub mod text;
 pub mod validate;
 
@@ -63,4 +64,5 @@ pub use meta::{
 };
 pub use node::NodeMeta;
 pub use raw::{RawCapability, RawContent};
+pub use reader::ReadError;
 pub use validate::{DocError, MAX_DEPTH};

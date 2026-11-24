@@ -84,7 +84,6 @@ pub enum TieBreak {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BreakParams {
     pub tolerance: Permille,
-    pub emergency_stretch: Width,
     pub emergency_tolerance: Permille,
     pub max_lines: Option<u32>,
     pub max_kp_atoms: Option<u32>,
@@ -123,12 +122,11 @@ impl ParamSet {
     pub fn default_v1() -> Self {
         Self {
             preset: PresetId("default-v1"),
-            model_version: 2,
+            model_version: 3,
             rules_version: 1,
             metrics_version: 0,
             break_params: BreakParams {
                 tolerance: Permille(3000),
-                emergency_stretch: Width::ZERO,
                 emergency_tolerance: Permille(10_000),
                 max_lines: None,
                 max_kp_atoms: None,
@@ -306,14 +304,6 @@ impl ParamSet {
                 });
             }
         }
-        if break_params.emergency_stretch < Width::ZERO
-            || break_params.emergency_stretch > Width::from_em(10)
-        {
-            return Err(ParamError {
-                path: "break_params.emergency_stretch",
-                reason: "must be in 0..=10em",
-            });
-        }
         if break_params.fallback.allow_forbidden && !break_params.fallback.allow_emergency {
             return Err(ParamError {
                 path: "break_params.fallback.allow_forbidden",
@@ -339,7 +329,6 @@ impl ParamSet {
         let costs = params.costs;
 
         hasher.write_u64(params.tolerance.0 as u64);
-        hasher.write_i64(params.emergency_stretch.0 as i64);
         hasher.write_u64(params.emergency_tolerance.0 as u64);
         hasher.write_option_u32(params.max_lines);
         hasher.write_option_u32(params.max_kp_atoms);

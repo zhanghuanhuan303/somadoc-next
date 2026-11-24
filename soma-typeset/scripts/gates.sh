@@ -13,7 +13,7 @@ echo "== gate: tests =="
 cargo test --workspace
 
 echo "== gate: wasm32 check =="
-cargo check -p soma-core -p soma-doc -p soma-engine -p soma-metrics -p soma-template -p soma-layout -p soma-md -p soma-render-html -p soma-render-pdf --target wasm32-unknown-unknown
+cargo check -p soma-core -p soma-doc -p soma-engine -p soma-metrics -p soma-highlight -p soma-template -p soma-layout -p soma-tikz -p soma-md -p soma-render-html -p soma-render-svg -p soma-render-pdf --target wasm32-unknown-unknown
 
 echo "== gate: wasm32-wasip1 hash =="
 bash scripts/wasm-hash.sh

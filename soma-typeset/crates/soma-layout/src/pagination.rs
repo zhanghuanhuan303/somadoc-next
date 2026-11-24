@@ -164,7 +164,13 @@ fn place_segment(
         let mut stretch: i64 = 0;
         let mut shrink: i64 = 0;
         let mut seen: Vec<usize> = Vec::new();
-        let body = items[i].height.0.max(1) as i64;
+        // D92: leftover page space is normalized by the body line, not by
+        // whatever block happens to start the page. Zero keeps the old
+        // first-item behavior for hosts with no usable body height.
+        let body = match params.body_height.0 {
+            height if height > 0 => height as i64,
+            _ => items[i].height.0.max(1) as i64,
+        };
 
         for (j, item) in items.iter().enumerate().skip(i).take(end - i) {
             if j > i {
@@ -459,7 +465,6 @@ pub(crate) fn score_pages(
         let mut used: i64 = header_reserve(&items[previous]).0 as i64;
         let mut stretch: i64 = 0;
         let mut shrink: i64 = 0;
-        let mut body = 1i64;
         for (offset, item) in items[previous..end].iter().enumerate() {
             if offset > 0 {
                 used += item.before.width.0 as i64;
@@ -469,8 +474,13 @@ pub(crate) fn score_pages(
             used += item.height.0 as i64 + item.after.width.0 as i64;
             stretch += item.after.plus.0 as i64;
             shrink += item.after.minus.0 as i64;
-            body = item.height.0.max(1) as i64;
         }
+        // Use the same denominator the DP scored with; zero keeps the old
+        // first-item fallback.
+        let body = match params.body_height.0 {
+            height if height > 0 => height as i64,
+            _ => items[previous].height.0.max(1) as i64,
+        };
         let natural = used + page_note_height(previous, end, items, notes).0 as i64;
         let mut cost = params.page_weight;
         if index != last {
@@ -702,6 +712,40 @@ mod tests {
             labels: Vec::new(),
             blocks: Vec::new(),
         }
+    }
+
+    #[test]
+    fn page_badness_uses_the_given_body_height_not_the_first_item() {
+        // A tall first item followed by three short ones. Breaking before the
+        // second item leaves 5 units free; breaking after it leaves 2 units
+        // free but pays a 400 penalty.
+        let mut items = vec![
+            item(15, false),
+            item(3, false),
+            item(3, false),
+            item(3, false),
+        ];
+        items[1].penalty = 400;
+
+        // Old behavior: the 15-unit first item normalizes the 5-unit gap, so
+        // the cheap first page wins.
+        let first_item = place_kp(
+            &items,
+            &[(0, items.len())],
+            Width(20),
+            &notes(),
+            VerticalParams::default_v1(),
+        )
+        .expect("feasible");
+        assert_eq!(first_item, vec![1, 4]);
+
+        // D92: a 3-unit body line makes the same gap costly enough that the
+        // 400 penalty is the cheaper choice.
+        let mut params = VerticalParams::default_v1();
+        params.body_height = Width(3);
+        let body_height =
+            place_kp(&items, &[(0, items.len())], Width(20), &notes(), params).expect("feasible");
+        assert_eq!(body_height, vec![2, 4]);
     }
 
     #[test]

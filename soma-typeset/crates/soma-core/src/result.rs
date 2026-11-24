@@ -90,14 +90,13 @@ impl BreakerKind {
 }
 
 /// Which fallback stage produced the result. `total_cost` is only comparable
-/// within the same stage. `ForbiddenRescue` and `Overfull` are reserved for the
-/// full ladder; the current engine emits `Normal` or `Emergency`.
+/// within the same stage. `ForbiddenRescue` is the last resort of the full
+/// ladder; the current engine emits `Normal`, `Emergency` or `ForbiddenRescue`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FallbackStage {
     Normal,
     Emergency,
     ForbiddenRescue,
-    Overfull,
 }
 
 impl FallbackStage {
@@ -106,7 +105,6 @@ impl FallbackStage {
             Self::Normal => "normal",
             Self::Emergency => "emergency",
             Self::ForbiddenRescue => "forbiddenRescue",
-            Self::Overfull => "overfull",
         }
     }
 }

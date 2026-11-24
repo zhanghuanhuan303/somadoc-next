@@ -228,7 +228,7 @@ cargo run -p tools/metrics-gen -- \
 ```
 
 `examples/book/metrics-lxgw.smt` is committed as a freely redistributable
-layout baseline (360 KB, `soma.metrics/7`, per-glyph bearings for 46,473 glyphs):
+layout baseline (391 KB, `soma.metrics/7`, per-glyph bearings for 46,473 glyphs):
 pointing `--metrics` at it reproduces the same line breaks on any machine
 without the font installed. Rendering a PDF still needs the font file itself,
 because the PDF embeds outlines.

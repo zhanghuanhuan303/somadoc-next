@@ -33,7 +33,7 @@ fn default_v1_matches_the_frozen_table() {
     let params = ParamSet::default_v1();
 
     assert_eq!(params.preset.0, "default-v1");
-    assert_eq!(params.model_version, 2);
+    assert_eq!(params.model_version, 3);
     assert_eq!(params.break_params.tolerance, Permille(3000));
     assert_eq!(params.break_params.emergency_tolerance, Permille(10_000));
     assert_eq!(params.break_params.max_lines, None);
@@ -123,10 +123,6 @@ fn override_changes_only_the_expected_field() {
     assert_eq!(tuned.metrics_version, base.metrics_version);
     assert_eq!(tuned.break_params.costs, base.break_params.costs);
     assert_eq!(tuned.break_params.fallback, base.break_params.fallback);
-    assert_eq!(
-        tuned.break_params.emergency_stretch,
-        base.break_params.emergency_stretch
-    );
     assert_eq!(
         tuned.break_params.emergency_tolerance,
         base.break_params.emergency_tolerance

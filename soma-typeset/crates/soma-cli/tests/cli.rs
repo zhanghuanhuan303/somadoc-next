@@ -1,7 +1,8 @@
 //! The CLI is a thin I/O shell: same pipeline as the gates, one command.
 
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 const BIN: &str = env!("CARGO_BIN_EXE_soma");
 
@@ -23,6 +24,35 @@ fn run(args: &[&str]) -> (bool, String, String) {
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
     )
+}
+
+fn run_with_stdin(args: &[&str], input: &[u8]) -> (bool, String, String) {
+    let mut child = Command::new(BIN)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn soma");
+    child
+        .stdin
+        .take()
+        .expect("stdin pipe")
+        .write_all(input)
+        .expect("write stdin");
+    let output = child.wait_with_output().expect("run soma");
+    (
+        output.status.success(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+fn temp_dir(name: &str) -> PathBuf {
+    let path = std::env::temp_dir().join(format!("soma-cli-{}-dir-{}", std::process::id(), name));
+    let _ = std::fs::remove_dir_all(&path);
+    std::fs::create_dir_all(&path).expect("create fixture directory");
+    path
 }
 
 #[test]
@@ -277,6 +307,131 @@ fn help_lists_the_commands() {
     assert!(ok);
     assert!(stdout.contains("soma render"));
     assert!(stdout.contains("soma check"));
+    assert!(stdout.contains("--from"));
+    assert!(stdout.contains("--stats"));
+    assert!(stdout.contains("latex-v1"));
+    assert!(stdout.contains("stdin"));
+    assert!(stdout.contains("directory"));
+    assert!(
+        stdout.contains("no --watch"),
+        "watch mode is documented as absent"
+    );
+}
+
+#[test]
+fn version_prints_the_package_version() {
+    let (ok, stdout, _stderr) = run(&["--version"]);
+    assert!(ok);
+    assert!(stdout.starts_with("soma "), "{stdout}");
+    assert!(stdout.trim().len() > 5);
+}
+
+#[test]
+fn stdin_markdown_renders_when_from_selects_the_frontend() {
+    let (ok, stdout, stderr) = run_with_stdin(
+        &["render", "--input", "-", "--from", "md"],
+        "# 标题\n\n这是正文。\n".as_bytes(),
+    );
+
+    assert!(ok, "stderr: {stderr}");
+    assert!(stdout.contains("<!DOCTYPE html>"), "stdout: {stdout}");
+    // The renderer places each CJK glyph in its own span.
+    assert!(
+        stdout.contains('标') && stdout.contains('题'),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
+fn stdin_without_from_is_a_clear_error() {
+    let (ok, _stdout, stderr) = run_with_stdin(&["render", "--input", "-"], b"");
+
+    assert!(!ok, "a stream cannot pick a frontend by extension");
+    assert!(stderr.contains("--from"), "stderr: {stderr}");
+}
+
+#[test]
+fn a_directory_renders_each_supported_file_into_the_out_directory() {
+    let dir = temp_dir("batch");
+    std::fs::write(dir.join("a.md"), "# 甲\n\n正文。\n").expect("write a.md");
+    std::fs::write(dir.join("b.html"), "<p>乙</p>").expect("write b.html");
+    std::fs::write(dir.join("ignored.txt"), "not a document").expect("write ignored.txt");
+    let nested = dir.join("nested");
+    std::fs::create_dir_all(&nested).expect("create nested directory");
+    std::fs::write(nested.join("c.md"), "# 丙\n").expect("write nested c.md");
+
+    let out = dir.join("out");
+    let (ok, stdout, stderr) = run(&[
+        "render",
+        "--input",
+        dir.to_str().unwrap(),
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+
+    assert!(ok, "stderr: {stderr}");
+    assert!(stdout.is_empty(), "batch mode writes files, not stdout");
+    let a = std::fs::read_to_string(out.join("a.html")).expect("a.html");
+    assert!(a.contains("甲"), "a.html: {a}");
+    let b = std::fs::read_to_string(out.join("b.html")).expect("b.html");
+    assert!(b.contains("乙"), "b.html: {b}");
+    assert!(
+        !out.join("ignored.html").exists(),
+        "unsupported files are skipped"
+    );
+    assert!(!out.join("c.html").exists(), "batch mode is non-recursive");
+
+    let json_out = dir.join("out-json");
+    let (ok, stdout, stderr) = run(&[
+        "render",
+        "--input",
+        dir.to_str().unwrap(),
+        "--format",
+        "json",
+        "--out",
+        json_out.to_str().unwrap(),
+    ]);
+    assert!(ok, "stderr: {stderr}");
+    assert!(stdout.is_empty());
+    let json = std::fs::read_to_string(json_out.join("a.json")).expect("a.json");
+    assert!(json.starts_with("{\"schema\":\"soma.pages/"), "{json}");
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_directory_without_out_is_an_error() {
+    let dir = temp_dir("batch-no-out");
+    std::fs::write(dir.join("a.md"), "正文。\n").expect("write a.md");
+
+    let (ok, _stdout, stderr) = run(&["render", "--input", dir.to_str().unwrap()]);
+
+    assert!(!ok);
+    assert!(stderr.contains("--out"), "stderr: {stderr}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_directory_batch_refuses_to_overwrite_an_input() {
+    let dir = temp_dir("batch-overwrite");
+    std::fs::write(dir.join("a.html"), "<p>原文</p>").expect("write a.html");
+
+    let (ok, _stdout, stderr) = run(&[
+        "render",
+        "--input",
+        dir.to_str().unwrap(),
+        "--out",
+        dir.to_str().unwrap(),
+    ]);
+
+    assert!(!ok);
+    assert!(stderr.contains("overwrite"), "stderr: {stderr}");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("a.html")).expect("a.html"),
+        "<p>原文</p>",
+        "the source is untouched"
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]

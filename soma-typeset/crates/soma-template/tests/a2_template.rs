@@ -1,8 +1,8 @@
 //! A2 template parsing: YAML subset behaviour, validation, hashing.
 
 use soma_template::{
-    parse_template, FootnoteNumbering, FrontMatterNumbering, HeadingNumbering, LineHeightSpec,
-    PageSize, Property, PropertyValue, Rational, Unit,
+    parse_template, FootnoteNumbering, FrontMatterNumbering, HeadingNumbering, LengthSpec,
+    LineHeightSpec, PageLength, PageSize, Property, PropertyValue, Rational, Unit,
 };
 
 const FULL: &str = r##"
@@ -654,9 +654,9 @@ fn plex_reference_template_matches_the_pandoc_design() {
     assert_eq!(template.name, "soma-plex");
     assert_eq!(template.page.size, PageSize::A4);
     let margin = Rational::new(254, 10).expect("non-zero denominator");
-    assert_eq!(template.page.margin_top.value, margin);
-    assert_eq!(template.page.margin_top.unit, Unit::Mm);
-    assert_eq!(template.page.margin_bottom.value, margin);
+    let expected_margin = PageLength::Length(LengthSpec::new(margin, Unit::Mm));
+    assert_eq!(template.page.margin_top, expected_margin);
+    assert_eq!(template.page.margin_bottom, expected_margin);
     assert_eq!(template.page.folio.as_deref(), Some("{page}"));
     assert!(template.cover.is_some());
     assert_eq!(template.toc.as_ref().map(|toc| toc.depth), Some(2));

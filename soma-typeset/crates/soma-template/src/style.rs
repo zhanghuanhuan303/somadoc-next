@@ -507,6 +507,23 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         ));
     }
 
+    // A typed percentage is accepted by the parser, but the template/layout
+    // contract only defines a base for page margins and `line-height`. Reject
+    // every other percentage up front, including rules no node matches, so it
+    // can never fall through as an em length.
+    for rule in &template.styles {
+        for declaration in &rule.declarations {
+            if matches!(declaration.value, PropertyValue::Percent(_)) {
+                return Err(TemplateError::new(
+                    declaration.line,
+                    declaration.column,
+                    "styles",
+                    "percentage is not supported for this property",
+                ));
+            }
+        }
+    }
+
     let mut resolver = Resolver {
         rules: &template.styles,
         body_pt,
@@ -541,13 +558,26 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
     resolver.node_style.sort_by_key(|(node, _)| *node);
 
     let (width, height) = template.page.size.dimensions();
+    let page_width = width.resolve(root.font_size, body_pt);
     let page = ResolvedPage {
-        width: width.resolve(root.font_size, body_pt),
+        width: page_width,
         height: height.resolve(root.font_size, body_pt),
-        margin_top: template.page.margin_top.resolve(root.font_size, body_pt),
-        margin_bottom: template.page.margin_bottom.resolve(root.font_size, body_pt),
-        margin_left: template.page.margin_left.resolve(root.font_size, body_pt),
-        margin_right: template.page.margin_right.resolve(root.font_size, body_pt),
+        margin_top: template
+            .page
+            .margin_top
+            .resolve(page_width, root.font_size, body_pt),
+        margin_bottom: template
+            .page
+            .margin_bottom
+            .resolve(page_width, root.font_size, body_pt),
+        margin_left: template
+            .page
+            .margin_left
+            .resolve(page_width, root.font_size, body_pt),
+        margin_right: template
+            .page
+            .margin_right
+            .resolve(page_width, root.font_size, body_pt),
         header_height: template.page.header.resolve(root.font_size, body_pt),
         footer_height: template.page.footer.resolve(root.font_size, body_pt),
     };
@@ -958,6 +988,20 @@ impl Resolver<'_> {
                     .rev()
                     .find(|declaration| declaration.property == property)
                 {
+                    // A percentage needs a base. `line-height` takes one from
+                    // the resolved font size; no other property has a defined
+                    // base in the current template/layout contract, so reject
+                    // instead of silently treating `%` as em.
+                    if matches!(declaration.value, PropertyValue::Percent(_))
+                        && property != Property::LineHeight
+                    {
+                        return Err(TemplateError::new(
+                            declaration.line,
+                            declaration.column,
+                            "styles",
+                            "percentage is not supported for this property",
+                        ));
+                    }
                     apply(&mut style, property, &declaration.value, self.body_pt);
                 }
             }

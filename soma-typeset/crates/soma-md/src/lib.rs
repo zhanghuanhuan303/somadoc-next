@@ -11,8 +11,8 @@
 //! GFM tables, thematic breaks, footnote definitions and references, ruby
 //! (`[[ruby:base|reading]]`), index markers, and backslash escapes.
 //!
-//! Not supported (recorded in `docs/debt.md`): HTML blocks, link reference
-//! definitions, and multi-line inline code.
+//! Not supported: HTML blocks and inline HTML are kept as literal text (never
+//! executed); an unterminated inline-code run stays literal text.
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
@@ -26,14 +26,16 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use soma_doc::block::{
-    BlockQuote, Cell, CodeBlock, Column, Heading, List, ListItem, Paragraph, Row, Table,
+    BlockQuote, Cell, CodeBlock, Column, Heading, List, ListItem, Paragraph, RawBlock, Row, Table,
     ThematicBreak,
 };
 use soma_doc::inline::{
-    Container, FootnoteRef, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link, Ruby,
+    Container, FootnoteRef, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link, RawInline,
+    Ruby,
 };
 use soma_doc::meta::{Author, CoverData, Date, DocumentMeta, ImageRef};
 use soma_doc::node::NodeMeta;
+use soma_doc::raw::{RawCapability, RawContent};
 use soma_doc::CellAlign;
 use soma_doc::{
     Block, Code, Document, FootnoteDef, SourceId, SourceInfo, SourceKind, SourceMap, SourceSpan,
@@ -135,6 +137,7 @@ pub fn parse_markdown_with_meta(source: &str, meta: DocumentMeta) -> Document {
     let mut footnotes = Vec::new();
 
     collect_footnote_definitions(&lines, &mut consumed, &mut footnotes);
+    let link_refs = collect_link_definitions(&lines, &mut consumed);
 
     let mut blocks = Vec::new();
     let mut index = 0usize;
@@ -185,6 +188,28 @@ pub fn parse_markdown_with_meta(source: &str, meta: DocumentMeta) -> Document {
         if is_thematic_break(text) {
             blocks.push(Block::ThematicBreak(ThematicBreak::new(node(line, 3))));
             index += 1;
+            continue;
+        }
+
+        if html_block_start(text) {
+            let start = line.offset;
+            let mut value = String::new();
+            let mut end = start;
+            while index < lines.len() && !lines[index].text.trim().is_empty() {
+                if !value.is_empty() {
+                    value.push('\n');
+                }
+                value.push_str(lines[index].text);
+                end = lines[index].offset + lines[index].text.len() as u32;
+                index += 1;
+            }
+            let fallback = value.replace('\n', " ");
+            blocks.push(Block::Raw(RawBlock::new(
+                NodeMeta::at(SourceSpan::at(SourceId(1), start, end)),
+                RawContent::new("html", value)
+                    .with_fallback(fallback)
+                    .with_capability(RawCapability::Degraded),
+            )));
             continue;
         }
 
@@ -291,6 +316,7 @@ pub fn parse_markdown_with_meta(source: &str, meta: DocumentMeta) -> Document {
 
     let mut document = Document::new(meta);
     document.source_map = source_map;
+    resolve_link_references(&mut blocks, &mut footnotes, &link_refs);
     document.blocks = blocks;
     document.footnotes = footnotes;
     document.renumber();
@@ -762,6 +788,236 @@ fn footnote_definition(text: &str) -> Option<(String, &str)> {
 }
 
 // ---------------------------------------------------------------------------
+// Link reference definitions
+// ---------------------------------------------------------------------------
+
+type LinkRef = (String, String, Option<String>);
+
+fn normalize_label(label: &str) -> String {
+    let mut out = String::new();
+    for word in label.split_whitespace() {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        for character in word.chars() {
+            out.push(character.to_ascii_lowercase());
+        }
+    }
+    out
+}
+
+fn collect_link_definitions(lines: &[Line<'_>], consumed: &mut [bool]) -> Vec<LinkRef> {
+    let mut out = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        if consumed[index] {
+            continue;
+        }
+        let text = line.text.trim_start();
+        if let Some((label, destination, title)) = link_definition(text) {
+            if !out.iter().any(|(existing, _, _)| *existing == label) {
+                out.push((label, destination, title));
+            }
+            consumed[index] = true;
+        }
+    }
+    out
+}
+
+fn link_definition(text: &str) -> Option<(String, String, Option<String>)> {
+    if !text.starts_with('[') || text.starts_with("[^") {
+        return None;
+    }
+    let rest = &text[1..];
+    let close = rest.find("]:")?;
+    let label = rest[..close].trim();
+    if label.is_empty() {
+        return None;
+    }
+    let after = rest[close + 2..].trim();
+    if after.is_empty() {
+        return None;
+    }
+    let (destination, tail) = if let Some(inner) = after.strip_prefix('<') {
+        let end = inner.find('>')?;
+        (&inner[..end], &inner[end + 1..])
+    } else {
+        let end = after.find(char::is_whitespace).unwrap_or(after.len());
+        (&after[..end], &after[end..])
+    };
+    if destination.is_empty() {
+        return None;
+    }
+    let tail = tail.trim();
+    let title = if tail.len() >= 2
+        && ((tail.starts_with('"') && tail.ends_with('"'))
+            || (tail.starts_with('(') && tail.ends_with(')')))
+    {
+        Some(String::from(&tail[1..tail.len() - 1]))
+    } else {
+        None
+    };
+    Some((normalize_label(label), String::from(destination), title))
+}
+
+fn resolve_link_references(
+    blocks: &mut Vec<Block>,
+    footnotes: &mut [FootnoteDef],
+    refs: &[LinkRef],
+) {
+    if refs.is_empty() {
+        return;
+    }
+    resolve_blocks(blocks, refs);
+    for footnote in footnotes {
+        resolve_blocks(&mut footnote.blocks, refs);
+    }
+}
+
+fn resolve_blocks(blocks: &mut Vec<Block>, refs: &[LinkRef]) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(paragraph) => {
+                let inlines = core::mem::take(&mut paragraph.inlines);
+                paragraph.inlines = resolve_inlines(inlines, refs);
+            }
+            Block::Heading(heading) => {
+                let inlines = core::mem::take(&mut heading.inlines);
+                heading.inlines = resolve_inlines(inlines, refs);
+            }
+            Block::List(list) => {
+                for item in &mut list.items {
+                    resolve_blocks(&mut item.blocks, refs);
+                }
+            }
+            Block::BlockQuote(quote) => resolve_blocks(&mut quote.blocks, refs),
+            Block::Table(table) => {
+                let caption = core::mem::take(&mut table.caption);
+                table.caption = resolve_inlines(caption, refs);
+                for row in &mut table.rows {
+                    for cell in &mut row.cells {
+                        resolve_blocks(&mut cell.blocks, refs);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn resolve_inlines(inlines: Vec<Inline>, refs: &[LinkRef]) -> Vec<Inline> {
+    let mut out = Vec::new();
+    for inline in inlines {
+        match inline {
+            Inline::Text(text) => resolve_text(text, refs, &mut out),
+            Inline::Strong(mut container) => {
+                container.children = resolve_inlines(container.children, refs);
+                out.push(Inline::Strong(container));
+            }
+            Inline::Emphasis(mut container) => {
+                container.children = resolve_inlines(container.children, refs);
+                out.push(Inline::Emphasis(container));
+            }
+            Inline::Underline(mut container) => {
+                container.children = resolve_inlines(container.children, refs);
+                out.push(Inline::Underline(container));
+            }
+            Inline::Strikethrough(mut container) => {
+                container.children = resolve_inlines(container.children, refs);
+                out.push(Inline::Strikethrough(container));
+            }
+            Inline::SmallCaps(mut container) => {
+                container.children = resolve_inlines(container.children, refs);
+                out.push(Inline::SmallCaps(container));
+            }
+            Inline::Superscript(mut container) => {
+                container.children = resolve_inlines(container.children, refs);
+                out.push(Inline::Superscript(container));
+            }
+            Inline::Subscript(mut container) => {
+                container.children = resolve_inlines(container.children, refs);
+                out.push(Inline::Subscript(container));
+            }
+            Inline::Link(mut link) => {
+                link.children = resolve_inlines(link.children, refs);
+                out.push(Inline::Link(link));
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn lookup_ref<'a>(label: &str, refs: &'a [LinkRef]) -> Option<&'a LinkRef> {
+    let wanted = normalize_label(label);
+    refs.iter().find(|(existing, _, _)| *existing == wanted)
+}
+
+fn resolve_text(text: Text, refs: &[LinkRef], out: &mut Vec<Inline>) {
+    let value = text.value;
+    let mut cursor = 0usize;
+    let mut plain_start = 0usize;
+    while cursor < value.len() {
+        let rest = &value[cursor..];
+        let image = rest.starts_with("![");
+        if !image && !rest.starts_with('[') {
+            cursor += rest.chars().next().map(char::len_utf8).unwrap_or(1);
+            continue;
+        }
+        let open = if image { 2 } else { 1 };
+        let Some(close) = rest[open..].find(']') else {
+            cursor += open;
+            continue;
+        };
+        let label_start = open;
+        let label_end = open + close;
+        let after = &rest[label_end + 1..];
+        if !after.starts_with('[') {
+            cursor += label_end + 1;
+            continue;
+        }
+        let Some(end) = after.find(']') else {
+            cursor += label_end + 1;
+            continue;
+        };
+        let reference = &after[1..end];
+        let label = if reference.trim().is_empty() {
+            &rest[label_start..label_end]
+        } else {
+            reference
+        };
+        let Some((_, destination, title)) = lookup_ref(label, refs) else {
+            cursor += label_end + 1;
+            continue;
+        };
+        if cursor > plain_start {
+            out.push(
+                Text::new(text.meta.clone(), String::from(&value[plain_start..cursor])).into(),
+            );
+        }
+        let consumed = label_end + 2 + end;
+        if image {
+            let mut source = ImageRef::new(destination.clone());
+            source.alt = Some(String::from(&rest[label_start..label_end]));
+            source.title = title.clone();
+            out.push(Inline::Image(Image::new(text.meta.clone(), source)));
+        } else {
+            let children = parse_inlines(
+                &rest[label_start..label_end],
+                text.meta.span.start + cursor as u32 + label_start as u32,
+            );
+            let mut link = Link::new(text.meta.clone(), destination.clone(), children);
+            link.title = title.clone();
+            out.push(Inline::Link(link));
+        }
+        cursor += consumed;
+        plain_start = cursor;
+    }
+    if plain_start < value.len() {
+        out.push(Text::new(text.meta, String::from(&value[plain_start..])).into());
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Inlines
 // ---------------------------------------------------------------------------
 
@@ -811,6 +1067,28 @@ pub fn parse_inlines(text: &str, offset: u32) -> Vec<Inline> {
                 }
                 plain.push(escaped);
                 cursor += 1 + escaped.len_utf8();
+                continue;
+            }
+        }
+
+        if rest.starts_with('<') {
+            if let Some(length) = html_tag_end(rest) {
+                flush!();
+                let tag = &rest[..length];
+                out.push(
+                    RawInline::new(
+                        NodeMeta::at(SourceSpan::at(
+                            SourceId(1),
+                            offset + cursor as u32,
+                            offset + cursor as u32 + length as u32,
+                        )),
+                        RawContent::new("html", tag)
+                            .with_fallback(tag)
+                            .with_capability(RawCapability::Degraded),
+                    )
+                    .into(),
+                );
+                cursor += length;
                 continue;
             }
         }
@@ -959,6 +1237,113 @@ pub fn parse_inlines(text: &str, offset: u32) -> Vec<Inline> {
 
     flush!();
     out
+}
+
+fn html_block_start(text: &str) -> bool {
+    let text = text.trim_start();
+    if text.starts_with("<!--") || text.starts_with("<?") || text.starts_with("<!") {
+        return true;
+    }
+    let Some(rest) = text.strip_prefix('<') else {
+        return false;
+    };
+    let rest = rest.strip_prefix('/').unwrap_or(rest);
+    let name: String = rest
+        .chars()
+        .take_while(|character| character.is_ascii_alphanumeric())
+        .collect();
+    if name.is_empty() || rest[name.len()..].starts_with(':') {
+        return false;
+    }
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "address"
+            | "article"
+            | "aside"
+            | "base"
+            | "basefont"
+            | "blockquote"
+            | "body"
+            | "caption"
+            | "center"
+            | "col"
+            | "colgroup"
+            | "dd"
+            | "details"
+            | "dialog"
+            | "dir"
+            | "div"
+            | "dl"
+            | "dt"
+            | "fieldset"
+            | "figcaption"
+            | "figure"
+            | "footer"
+            | "form"
+            | "frame"
+            | "frameset"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "head"
+            | "header"
+            | "hr"
+            | "html"
+            | "iframe"
+            | "legend"
+            | "li"
+            | "link"
+            | "main"
+            | "menu"
+            | "menuitem"
+            | "nav"
+            | "noframes"
+            | "ol"
+            | "optgroup"
+            | "option"
+            | "p"
+            | "param"
+            | "section"
+            | "source"
+            | "summary"
+            | "table"
+            | "tbody"
+            | "td"
+            | "tfoot"
+            | "th"
+            | "thead"
+            | "title"
+            | "tr"
+            | "track"
+            | "ul"
+    )
+}
+
+fn html_tag_end(text: &str) -> Option<usize> {
+    let rest = text.strip_prefix('<')?;
+    if rest.starts_with('!') || rest.starts_with('?') {
+        return rest.find('>').map(|index| index + 2);
+    }
+    let (prefix, rest) = match rest.strip_prefix('/') {
+        Some(rest) => (1, rest),
+        None => (0, rest),
+    };
+    let _ = prefix;
+    let name_len = rest
+        .chars()
+        .take_while(|character| character.is_ascii_alphanumeric())
+        .count();
+    if name_len == 0 {
+        return None;
+    }
+    let next = rest[name_len..].chars().next()?;
+    if !(next == '>' || next == '/' || next.is_ascii_whitespace()) {
+        return None;
+    }
+    rest.find('>').map(|index| index + 2)
 }
 
 fn link_or_image(text: &str, offset: u32) -> Option<(Inline, usize)> {

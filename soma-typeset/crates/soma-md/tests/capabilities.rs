@@ -24,7 +24,7 @@ fn capability_ids_are_unique_and_non_empty() {
 fn every_status_has_entries() {
     assert!(with_status(CapabilityStatus::Supported).count() >= 15);
     // The honest set: constructs that survive as text but lose structure.
-    assert!(with_status(CapabilityStatus::Degraded).count() >= 4);
+    assert!(with_status(CapabilityStatus::Degraded).count() >= 1);
     // Rejected is allowed to be empty: a forgiving front end keeps text.
     let _ = with_status(CapabilityStatus::Rejected).count();
 }
@@ -83,16 +83,8 @@ fn plain_text_of(source: &str) -> String {
 
 #[test]
 fn degraded_constructs_keep_their_text() {
-    let cases: &[(&str, &str, &str)] = &[
-        ("html_block", "<div>kept</div>\n", "<div>kept</div>"),
-        ("html_inline", "text <b>bold</b> end\n", "<b>bold</b>"),
-        (
-            "link_reference",
-            "[label]: https://example.com\n",
-            "[label]: https://example.com",
-        ),
-        ("multi_line_code_span", "an `open span\n", "`open span"),
-    ];
+    let cases: &[(&str, &str, &str)] =
+        &[("unterminated_code_span", "an `open span\n", "`open span")];
 
     for (syntax, source, expected) in cases {
         let capability = capability(syntax).expect("declared capability");
@@ -145,5 +137,26 @@ fn supported_constructs_produce_structure() {
 #[test]
 fn the_matrix_is_stable() {
     // Pinning the count makes an accidental silent removal visible.
-    assert_eq!(CAPABILITIES.len(), 28);
+    assert_eq!(CAPABILITIES.len(), 29);
+}
+
+#[test]
+fn inline_html_is_a_raw_inline_with_a_text_fallback() {
+    let document = soma_md::parse_markdown("text <b>bold</b> end\n");
+    let Block::Paragraph(paragraph) = &document.blocks[0] else {
+        panic!("expected a paragraph");
+    };
+    assert!(paragraph
+        .inlines
+        .iter()
+        .any(|inline| matches!(inline, soma_doc::Inline::Raw(_))));
+    assert_eq!(document.plain_text().trim(), "text <b>bold</b> end");
+}
+
+#[test]
+fn an_html_block_is_a_raw_block_with_a_text_fallback() {
+    let document = soma_md::parse_markdown("<div class=\"x\">\nkept\n</div>\n\n正文\n");
+    assert!(matches!(document.blocks[0], Block::Raw(_)));
+    assert!(document.plain_text().contains("<div class=\"x\">"));
+    assert!(document.plain_text().contains("正文"));
 }

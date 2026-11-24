@@ -30,12 +30,12 @@ pub use style::{
     StyleTable, StyledDoc, TableRules,
 };
 pub use template::{
-    parse_template, CoverSpec, Declaration, FontSlant, FontWeight, FootnoteNumbering, FootnoteSpec,
-    FrontMatterNumbering, HeadingNumbering, IndexSort, IndexSpec, MasterSpec, NumberingSpec,
-    PageSize, PageSpec, Property, PropertyValue, RuleStyle, Selector, StyleRule, SyntaxPalette,
-    TableSpec, TableWidth, Template, TocSpec, ELEMENTS, SCHEMA,
+    parse_template, parse_template_inherit, CoverSpec, Declaration, FontSlant, FontWeight,
+    FootnoteNumbering, FootnoteSpec, FrontMatterNumbering, HeadingNumbering, IndexSort, IndexSpec,
+    MasterSpec, NumberingSpec, PageSize, PageSpec, Property, PropertyValue, RuleStyle, Selector,
+    StyleRule, SyntaxPalette, TableSpec, TableWidth, Template, TocSpec, ELEMENTS, SCHEMA,
 };
-pub use units::{LengthSpec, LineHeightSpec, Rational, Unit, UNITS_PER_EM};
+pub use units::{LengthSpec, LineHeightSpec, PageLength, Percent, Rational, Unit, UNITS_PER_EM};
 
 use alloc::string::String;
 use core::fmt;

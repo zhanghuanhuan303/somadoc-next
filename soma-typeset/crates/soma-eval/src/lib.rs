@@ -153,7 +153,6 @@ impl AggregateMetrics {
             FallbackStage::Normal => self.normal += 1,
             FallbackStage::Emergency => self.emergency += 1,
             FallbackStage::ForbiddenRescue => self.forbidden_rescue += 1,
-            FallbackStage::Overfull => self.emergency += 1,
         }
         if metrics.length_limited {
             self.length_limited += 1;

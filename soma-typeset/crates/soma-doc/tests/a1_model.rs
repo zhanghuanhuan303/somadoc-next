@@ -69,6 +69,7 @@ fn canonical_output_covers_every_node_kind() {
         "image",
         "math",
         "footnoteRef",
+        "index",
         "ruby",
         "lineBreak",
     ];

@@ -158,23 +158,28 @@ pub const CAPABILITIES: &[Capability] = &[
     },
     Capability {
         syntax: "html_block",
-        status: CapabilityStatus::Degraded,
-        note: "kept as literal text, never executed",
+        status: CapabilityStatus::Supported,
+        note: "a block becomes RawBlock with text fallback; never executed",
     },
     Capability {
         syntax: "html_inline",
-        status: CapabilityStatus::Degraded,
-        note: "kept as literal text, never executed",
+        status: CapabilityStatus::Supported,
+        note: "a tag becomes RawInline with browser-text fallback; never executed",
     },
     Capability {
         syntax: "link_reference",
-        status: CapabilityStatus::Degraded,
-        note: "`[label]: url` definitions stay text",
+        status: CapabilityStatus::Supported,
+        note: "`[label]: url` definitions resolve `[text][label]` / `[text][]` links and images",
     },
     Capability {
         syntax: "multi_line_code_span",
+        status: CapabilityStatus::Supported,
+        note: "a code span may cross soft line joins; newlines normalize to spaces",
+    },
+    Capability {
+        syntax: "unterminated_code_span",
         status: CapabilityStatus::Degraded,
-        note: "an unterminated span stays literal text",
+        note: "an unterminated backtick run stays literal text",
     },
 ];
 

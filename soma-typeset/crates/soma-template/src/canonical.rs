@@ -11,7 +11,7 @@ use soma_core::Align;
 
 use crate::style::{ComputedStyle, StyledDoc};
 use crate::template::{Declaration, FontSlant, FontWeight, PropertyValue, Selector, Template};
-use crate::units::{LengthSpec, LineHeightSpec, Rational};
+use crate::units::{LengthSpec, LineHeightSpec, PageLength, Rational};
 use crate::StyleHash;
 use crate::TemplateHash;
 
@@ -85,13 +85,13 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
     out.write_str(",\"height\":")?;
     write_length_object(out, height)?;
     out.write_str(",\"marginTop\":")?;
-    write_length_object(out, template.page.margin_top)?;
+    write_page_length(out, template.page.margin_top)?;
     out.write_str(",\"marginBottom\":")?;
-    write_length_object(out, template.page.margin_bottom)?;
+    write_page_length(out, template.page.margin_bottom)?;
     out.write_str(",\"marginLeft\":")?;
-    write_length_object(out, template.page.margin_left)?;
+    write_page_length(out, template.page.margin_left)?;
     out.write_str(",\"marginRight\":")?;
-    write_length_object(out, template.page.margin_right)?;
+    write_page_length(out, template.page.margin_right)?;
     out.write_str(",\"header\":")?;
     write_length_object(out, template.page.header)?;
     out.write_str(",\"footer\":")?;
@@ -246,6 +246,22 @@ fn write_selector(out: &mut impl Write, selector: &Selector) -> fmt::Result {
         Some(level) => write!(out, "{level}")?,
         None => out.write_str("null")?,
     }
+    // Combinators are omitted when absent so selectors that predate them keep
+    // their canonical bytes.
+    if let Some(parent) = selector.parent.as_deref() {
+        out.write_str(",\"parent\":")?;
+        write_string(out, parent)?;
+    }
+    if !selector.ancestors.is_empty() {
+        out.write_str(",\"ancestors\":[")?;
+        for (index, ancestor) in selector.ancestors.iter().enumerate() {
+            if index > 0 {
+                out.write_char(',')?;
+            }
+            write_string(out, ancestor)?;
+        }
+        out.write_char(']')?;
+    }
     out.write_str("}")
 }
 
@@ -274,6 +290,11 @@ fn write_declaration(out: &mut impl Write, declaration: &Declaration) -> fmt::Re
             write_length(out, *length)?;
             out.write_char('}')?;
         }
+        PropertyValue::Percent(percent) => {
+            out.write_str("{\"type\":\"percent\",")?;
+            write_rational(out, percent.value())?;
+            out.write_char('}')?;
+        }
         PropertyValue::LineHeight(LineHeightSpec::Multiple(value)) => {
             out.write_str("{\"type\":\"multiple\",")?;
             write_rational(out, *value)?;
@@ -282,6 +303,11 @@ fn write_declaration(out: &mut impl Write, declaration: &Declaration) -> fmt::Re
         PropertyValue::LineHeight(LineHeightSpec::Length(length)) => {
             out.write_str("{\"type\":\"length\",")?;
             write_length(out, *length)?;
+            out.write_char('}')?;
+        }
+        PropertyValue::LineHeight(LineHeightSpec::Percent(percent)) => {
+            out.write_str("{\"type\":\"percent\",")?;
+            write_rational(out, percent.value())?;
             out.write_char('}')?;
         }
         PropertyValue::Align(align) => {
@@ -327,6 +353,19 @@ fn write_length_object(out: &mut impl Write, length: LengthSpec) -> fmt::Result 
     out.write_char('{')?;
     write_length(out, length)?;
     out.write_char('}')
+}
+
+/// A page margin: lengths keep the historical `{num, den, unit}` object;
+/// percentages add `"unit":"%"` and carry the fraction as `num/den`.
+fn write_page_length(out: &mut impl Write, length: PageLength) -> fmt::Result {
+    match length {
+        PageLength::Length(length) => write_length_object(out, length),
+        PageLength::Percent(percent) => {
+            out.write_char('{')?;
+            write_rational(out, percent.value())?;
+            out.write_str(",\"unit\":\"%\"}")
+        }
+    }
 }
 
 fn write_rational(out: &mut impl Write, value: Rational) -> fmt::Result {

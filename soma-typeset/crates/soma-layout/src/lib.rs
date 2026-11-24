@@ -34,7 +34,7 @@ use alloc::vec::Vec;
 use soma_core::{
     break_paragraph as break_paragraph_core, Align, BoundaryKind, BreakConfig, Cost, Decorations,
     FallbackStage, Line, Metrics, Paragraph, ParagraphStyle, PunctClass, StyleId, SyntaxClass,
-    Width,
+    VerticalParams as KernelVerticalParams, Width,
 };
 use soma_doc::{Block, Document, Inline, NodeId};
 use soma_rules::{
@@ -137,7 +137,95 @@ pub enum PaginationStrategy {
     Greedy,
 }
 
-pub use soma_core::VerticalParams;
+/// Vertical pagination parameters.
+///
+/// The kernel owns the base cost model; the layout layer adds the body line
+/// height used to normalize leftover page space (D92). A page short by one
+/// body line then costs `badness_scale` regardless of what kind of block
+/// happens to start the page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VerticalParams {
+    /// Weight applied for a page whose fill leaves no freedom. `0` keeps the
+    /// page count neutral; the DP then optimises badness only.
+    pub page_weight: i64,
+    /// Scale for the cubic page badness. A page short by one body line costs
+    /// `badness_scale` (100 by default).
+    pub badness_scale: i64,
+    /// Cost of a page that must hold one block taller than the content area.
+    pub overflow_penalty: i64,
+    /// Cost of breaking a paragraph after its first line (a one-line page foot).
+    pub club_penalty: i64,
+    /// Cost of breaking a paragraph before its last line (a one-line page head).
+    pub widow_penalty: i64,
+    /// Body line height used as the badness denominator. `Width::ZERO` means
+    /// "resolve from the document style"; a positive value overrides it.
+    pub body_height: Width,
+}
+
+impl VerticalParams {
+    pub const fn default_v1() -> Self {
+        Self {
+            page_weight: 0,
+            badness_scale: 100,
+            overflow_penalty: 1_000_000,
+            club_penalty: 10_000,
+            widow_penalty: 10_000,
+            body_height: Width::ZERO,
+        }
+    }
+
+    /// Hash of the vertical cost model in a fixed field order. The automatic
+    /// body height (`Width::ZERO`) is derived from the template, so it does not
+    /// enter the parameter hash; an explicit override does.
+    pub fn hash(&self) -> u64 {
+        let kernel = KernelVerticalParams {
+            page_weight: self.page_weight,
+            badness_scale: self.badness_scale,
+            overflow_penalty: self.overflow_penalty,
+            club_penalty: self.club_penalty,
+            widow_penalty: self.widow_penalty,
+        };
+        let mut state = kernel.hash();
+        if self.body_height.0 > 0 {
+            for byte in self.body_height.0.to_le_bytes() {
+                state ^= u64::from(byte);
+                state = state.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        state
+    }
+}
+
+impl Default for VerticalParams {
+    fn default() -> Self {
+        Self::default_v1()
+    }
+}
+
+impl From<KernelVerticalParams> for VerticalParams {
+    fn from(params: KernelVerticalParams) -> Self {
+        Self {
+            page_weight: params.page_weight,
+            badness_scale: params.badness_scale,
+            overflow_penalty: params.overflow_penalty,
+            club_penalty: params.club_penalty,
+            widow_penalty: params.widow_penalty,
+            body_height: Width::ZERO,
+        }
+    }
+}
+
+impl From<VerticalParams> for KernelVerticalParams {
+    fn from(params: VerticalParams) -> Self {
+        Self {
+            page_weight: params.page_weight,
+            badness_scale: params.badness_scale,
+            overflow_penalty: params.overflow_penalty,
+            club_penalty: params.club_penalty,
+            widow_penalty: params.widow_penalty,
+        }
+    }
+}
 
 /// What one placed box represents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,6 +268,13 @@ pub struct Mark {
     /// Line index inside the block, so a split paragraph keeps its marker on
     /// the page that holds the line.
     pub line: u32,
+    /// Section ordinal of the paragraph that carries this marker.
+    /// `section` numbering restarts at each change of this value (D56).
+    pub(crate) section: u32,
+    /// Definition index of the note this marker refers to. The note area is
+    /// numbered from these marks, not from a positional guess, so a repeated
+    /// reference cannot shift the printed note numbers.
+    pub(crate) note: Option<usize>,
 }
 
 /// One line inside a placed block. `y` is relative to the block top.
@@ -706,6 +801,30 @@ impl core::fmt::Display for LayoutError {
 /// Placeholder style used before the first resolved style is known.
 const ROOT_STYLE: StyleId = StyleId(0);
 
+/// Body line height for page badness (D92).
+///
+/// An explicit positive `body_height` wins. Otherwise the document style's
+/// resolved template line height is used; if the style or its line height is
+/// unavailable, the font's line metrics are the last fallback. `None` tells
+/// pagination to keep the old first-item height, so an exotic host without
+/// either source still paginates as before.
+fn resolved_body_height(
+    vertical: VerticalParams,
+    styled: &StyledDoc,
+    metrics: &dyn Metrics,
+) -> Option<Width> {
+    if vertical.body_height.0 > 0 {
+        return Some(vertical.body_height);
+    }
+    if let Some(style) = styled.style(ROOT_STYLE) {
+        if style.line_height.0 > 0 {
+            return Some(style.line_height);
+        }
+    }
+    let height = metrics.line_metrics(ROOT_STYLE).height();
+    (height.0 > 0).then_some(height)
+}
+
 /// Lay out a document into pages with the default strategy (vertical K-P).
 pub fn layout(
     doc: &Document,
@@ -744,6 +863,10 @@ struct Pass<'a> {
 
 /// Lay out with an explicit strategy and vertical cost model.
 ///
+/// `vertical` accepts either the layout's [`VerticalParams`] (which adds
+/// `body_height` for D92) or the kernel's parameter struct, which gets the
+/// automatic body height.
+///
 /// When the template asks for a table of contents, this runs the layout again
 /// until the entry page numbers stop moving (at most [`TOC_MAX_PASSES`]).
 /// Everything else is a single pass.
@@ -753,9 +876,17 @@ pub fn layout_with(
     metrics: &dyn Metrics,
     engine: &BreakConfig,
     strategy: PaginationStrategy,
-    vertical: VerticalParams,
+    vertical: impl Into<VerticalParams>,
 ) -> Result<PagedLayout, LayoutError> {
-    layout_with_hyphenation(doc, styled, metrics, engine, strategy, vertical, None)
+    layout_with_hyphenation(
+        doc,
+        styled,
+        metrics,
+        engine,
+        strategy,
+        vertical.into(),
+        None,
+    )
 }
 
 /// Lay out with an explicit strategy, vertical cost model, and hyphenation
@@ -767,9 +898,10 @@ pub fn layout_with_hyphenation(
     metrics: &dyn Metrics,
     engine: &BreakConfig,
     strategy: PaginationStrategy,
-    vertical: VerticalParams,
+    vertical: impl Into<VerticalParams>,
     hyphen: Option<&soma_hyphen::Patterns>,
 ) -> Result<PagedLayout, LayoutError> {
+    let vertical = vertical.into();
     let toc = styled.toc();
     let index = styled.index();
     if toc.is_none() && index.is_none() {
@@ -865,6 +997,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
         current_master: 0,
         generated: generated_base,
         section_start_pending: false,
+        current_section: 0,
         toc_depth: toc.map(|spec| spec.depth).unwrap_or(0),
         toc_entries: front.headings.clone(),
         numbering: styled.numbering().clone(),
@@ -901,7 +1034,14 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
     }
 
     let page_height = page.content_height();
-    let (vertical_items, segments) = pagination::build_stream(&items, vertical);
+    let body_height = resolved_body_height(vertical, styled, metrics);
+    // Pagination sees the resolved body height; the public parameters keep the
+    // caller's value so the automatic height stays out of `verticalHash`.
+    let pagination_vertical = VerticalParams {
+        body_height: body_height.unwrap_or(Width::ZERO),
+        ..vertical
+    };
+    let (vertical_items, segments) = pagination::build_stream(&items, pagination_vertical);
     let mut passes = 1u32;
 
     let (ends, kind) = match strategy {
@@ -910,7 +1050,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
             &segments,
             page_height,
             &builder.notes,
-            vertical,
+            pagination_vertical,
         ) {
             Some(ends) => (ends, PaginationKind::VerticalKp),
             None => (
@@ -941,7 +1081,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
         &vertical_items,
         &builder.notes,
         page_height,
-        vertical,
+        pagination_vertical,
     );
 
     // Front matter is the leading run of pages that hold only generated items
@@ -1619,6 +1759,10 @@ struct Builder<'a> {
     generated: u32,
     /// A `Section` was seen and its first content item is still unmarked.
     section_start_pending: bool,
+    /// Ordinal of the section that owns the paragraphs being compiled. It
+    /// changes at every `Block::Section`; `Mark::section` copies it so the
+    /// numbering pass can restart without re-walking the DocIR (D56).
+    current_section: u32,
     /// Heading depth the TOC includes; `0` disables collection.
     toc_depth: u8,
     /// Entries from the previous TOC pass; empty on the first pass.
@@ -2412,6 +2556,9 @@ impl Builder<'_> {
                 Block::Section(node) => {
                     let style = self.style(node.meta.id, fallback);
                     self.section_start_pending = true;
+                    // Footnote `numbering: section` restarts after the marker,
+                    // including a section that begins in the middle of a page.
+                    self.current_section = self.current_section.saturating_add(1);
                     if let Some(name) = &node.page_template {
                         let index = self.styled.master_index(name).ok_or_else(|| {
                             LayoutError::new(Some(node.meta.id), "unknown page master")
@@ -2647,7 +2794,11 @@ impl Builder<'_> {
             })
             .collect();
 
-        let marks = marker_positions(&paragraph.atoms, &result.lines);
+        let mut marks = marker_positions(&paragraph.atoms, &result.lines);
+        for (mark, note) in marks.iter_mut().zip(marker_notes.iter()) {
+            mark.note = *note;
+            mark.section = self.current_section;
+        }
         self.text.insert(
             node,
             paragraph
@@ -4287,6 +4438,8 @@ fn marker_positions(atoms: &[soma_core::Atom], lines: &[Line]) -> Vec<Mark> {
                 atom: index as u32,
                 number: 0,
                 line: line as u32,
+                section: 0,
+                note: None,
             });
         }
     }
@@ -4315,10 +4468,97 @@ fn inline_text(inlines: &[Inline]) -> String {
     out
 }
 
+/// The only glyph a truncated header/footer appends (D64).
+const MARGIN_ELLIPSIS: &str = "…";
+
+/// Paragraph shape for a margin-band line. The width is deliberately far
+/// wider than any page: measuring a candidate this way keeps the whole string
+/// on the first line, so its natural width is the string's width.
+fn margin_paragraph_style(line_height: Width) -> ParagraphStyle {
+    ParagraphStyle {
+        width: Width::from_em(1000),
+        first_indent: Width::ZERO,
+        hang: Width::ZERO,
+        tracking: Width::ZERO,
+        line_height,
+        align: soma_core::Align::Justify,
+    }
+}
+
+/// Natural width of `text` as one margin-band line.
+///
+/// Headers and footers do not wrap, so the first line is the whole candidate.
+/// Using the same breaker as the placed block means the truncation decision
+/// and the final line agree on what "measured width" is, including boundary
+/// glue and trim rules.
+fn margin_text_width(
+    metrics: &dyn Metrics,
+    engine: &BreakConfig,
+    text: &str,
+    style: StyleId,
+    line_height: Width,
+) -> Option<Width> {
+    let paragraph = paragraph_from_text(text, margin_paragraph_style(line_height), style).ok()?;
+    let result = break_paragraph(&paragraph, metrics, engine).ok()?;
+    result.lines.first().map(|line| line.natural_width)
+}
+
+/// Fit one margin-band string into the band's measure (D64).
+///
+/// Strategy: truncation, not wrapping. Keep the longest character prefix whose
+/// measured width plus `…` still fits, trim trailing spaces before the
+/// ellipsis, and return `None` when even the ellipsis is wider than the
+/// measure. `None` makes the caller omit the band text: an empty band is
+/// better than text that enters the content column.
+fn fit_margin_text(
+    metrics: &dyn Metrics,
+    engine: &BreakConfig,
+    text: &str,
+    style: StyleId,
+    line_height: Width,
+    measure: Width,
+) -> Option<String> {
+    let width = margin_text_width(metrics, engine, text, style, line_height)?;
+    if width <= measure {
+        return Some(String::from(text));
+    }
+    if margin_text_width(metrics, engine, MARGIN_ELLIPSIS, style, line_height)? > measure {
+        return None;
+    }
+
+    // Character boundaries, plus the end of the string. Binary search for the
+    // largest prefix that fits; trimming trailing whitespace keeps the width
+    // monotone (a trimmed prefix can only stay equal or grow).
+    let mut ends: Vec<usize> = text.char_indices().map(|(index, _)| index).collect();
+    ends.push(text.len());
+    let mut low = 0usize;
+    let mut high = ends.len() - 1;
+    while low < high {
+        let middle = (low + high).div_ceil(2);
+        let mut candidate = String::from(text[..ends[middle]].trim_end());
+        candidate.push_str(MARGIN_ELLIPSIS);
+        let fits = margin_text_width(metrics, engine, &candidate, style, line_height)
+            .is_some_and(|width| width <= measure);
+        if fits {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+
+    let mut out = String::from(text[..ends[low]].trim_end());
+    out.push_str(MARGIN_ELLIPSIS);
+    Some(out)
+}
+
 /// Build a header/footer line: one centered line, outside the content box.
 ///
 /// The band lives in the page margin, so it never competes with the content
-/// height and cannot change pagination.
+/// height and cannot change pagination. A band cannot wrap either: wrapping
+/// would push a second line into the first row of the content box. Long text
+/// is therefore truncated at a character boundary with an explicit `…`
+/// (D64), and the kept prefix is measured with the same breaker that places
+/// the final line.
 #[allow(clippy::too_many_arguments)]
 fn margin_block(
     builder: &mut Builder,
@@ -4340,15 +4580,35 @@ fn margin_block(
     // also becomes the body height of the K3 height cost, which a folio should
     // not perturb.
     let line_height = builder.metrics.line_metrics(style).height();
-    let paragraph_style = ParagraphStyle {
-        width: Width::from_em(1000),
-        first_indent: Width::ZERO,
-        hang: Width::ZERO,
-        tracking: Width::ZERO,
-        line_height,
-        align: soma_core::Align::Justify,
-    };
-    let paragraph = paragraph_from_text(text, paragraph_style, style).ok()?;
+    let paragraph_style = margin_paragraph_style(line_height);
+    let mut text = String::from(text);
+    let mut paragraph = paragraph_from_text(&text, paragraph_style, style).ok()?;
+    let mut result = break_paragraph(&paragraph, builder.metrics, builder.engine).ok()?;
+    if result
+        .lines
+        .first()
+        .is_none_or(|line| line.natural_width > content_width)
+    {
+        text = fit_margin_text(
+            builder.metrics,
+            builder.engine,
+            &text,
+            style,
+            line_height,
+            content_width,
+        )?;
+        paragraph = paragraph_from_text(&text, paragraph_style, style).ok()?;
+        result = break_paragraph(&paragraph, builder.metrics, builder.engine).ok()?;
+    }
+    let stage = result.fallback_stage;
+    let line = result.lines.into_iter().next()?;
+    let natural = line.natural_width;
+    if natural > content_width {
+        // `fit_margin_text` measured this exact string. Keep the guard anyway:
+        // a future measurement change must not let the band enter the content
+        // column. Printing nothing is safer than overlapping the first line.
+        return None;
+    }
     builder.text.insert(
         node,
         paragraph
@@ -4363,10 +4623,6 @@ fn margin_block(
             })
             .collect(),
     );
-    let result = break_paragraph(&paragraph, builder.metrics, builder.engine).ok()?;
-    let stage = result.fallback_stage;
-    let line = result.lines.into_iter().next()?;
-    let natural = line.natural_width;
     let x = Width((content_width.0 - natural.0).max(0) / 2);
 
     Some(PlacedBlock {
@@ -4648,11 +4904,18 @@ fn empty_line(line_height: Width, y: Width) -> PlacedLine {
 struct Numbering {
     policy: soma_template::FootnoteNumbering,
     next: u32,
+    /// Section ordinal currently owning the counter. Only `Section` policy
+    /// reads it; the other policies keep one counter as before.
+    section: u32,
 }
 
 impl Numbering {
     fn new(policy: soma_template::FootnoteNumbering) -> Self {
-        Self { policy, next: 1 }
+        Self {
+            policy,
+            next: 1,
+            section: 0,
+        }
     }
 
     fn assign(&mut self, pages: &mut [Page]) {
@@ -4660,19 +4923,29 @@ impl Numbering {
             if matches!(self.policy, soma_template::FootnoteNumbering::Page) {
                 self.next = 1;
             }
-            let mut mark_numbers = Vec::new();
+            // A mark carries the section it was compiled in. Restarting on a
+            // section change makes the counter follow `Block::Section` even
+            // when two sections share one page (D56).
+            let mut mark_numbers: Vec<(Option<usize>, u32)> = Vec::new();
             for block in page.blocks.iter_mut() {
                 for mark in block.marks.iter_mut() {
+                    if matches!(self.policy, soma_template::FootnoteNumbering::Section)
+                        && mark.section != self.section
+                    {
+                        self.section = mark.section;
+                        self.next = 1;
+                    }
                     mark.number = self.next;
-                    mark_numbers.push(self.next);
+                    mark_numbers.push((mark.note, self.next));
                     self.next += 1;
                 }
             }
 
-            // The note area is assembled in first-reference order, so the
-            // n-th distinct note takes the n-th mark's number on this page.
-            // A definition with several blocks keeps one number: only its
-            // first block prints it.
+            // The note area is assembled in first-reference order. A note's
+            // number comes from the mark that points at it, not from its
+            // position in that list: repeated references or a section restart
+            // must not shift the printed note number away from its label.
+            // A note with no visible marker gets the next free number.
             let mut notes: Vec<usize> = Vec::new();
             for note in &page.footnote_notes {
                 if !notes.contains(note) {
@@ -4680,16 +4953,19 @@ impl Numbering {
                 }
             }
             let mut note_numbers: Vec<(usize, u32)> = Vec::with_capacity(notes.len());
-            for (index, note) in notes.iter().enumerate() {
-                let number = match mark_numbers.get(index) {
-                    Some(number) => *number,
+            for note in notes {
+                let number = match mark_numbers
+                    .iter()
+                    .find(|(mark_note, _)| *mark_note == Some(note))
+                {
+                    Some((_, number)) => *number,
                     None => {
                         let number = self.next;
                         self.next += 1;
                         number
                     }
                 };
-                note_numbers.push((*note, number));
+                note_numbers.push((note, number));
             }
             let mut printed: Vec<usize> = Vec::new();
             page.footnote_numbers = page

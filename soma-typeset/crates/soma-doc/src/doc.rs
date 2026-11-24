@@ -3,7 +3,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::block::{Block, GeneratedBlock, List, ListItem, Row, Section, Table};
+use crate::block::{Block, Cell, Column, ListItem, Row};
 use crate::canonical::{self, CanonicalMode};
 use crate::hash::{self, DocHash};
 use crate::ids::SourceMap;
@@ -135,6 +135,18 @@ impl Document {
         canonical::canonical_json(self, CanonicalMode::Content)
     }
 
+    /// Read canonical JSON emitted by [`Self::canonical_json`] or
+    /// [`Self::canonical_content_json`].
+    ///
+    /// The reader mirrors the writer exactly: canonical field names and order,
+    /// integer-only numbers, and a typed error for any unknown field. It does
+    /// not run [`Self::validate`]; call that separately when the input is
+    /// untrusted. Content-mode input is accepted as written: ids are zero, the
+    /// source map is empty, and the template reference is absent.
+    pub fn from_canonical_json(input: &str) -> Result<Self, crate::reader::ReadError> {
+        crate::reader::read_document(input)
+    }
+
     /// Full hash: ids, spans, source map, template reference.
     pub fn doc_hash(&self) -> DocHash {
         hash::document_hash(self)
@@ -171,8 +183,7 @@ impl Document {
         }
         visit_blocks(&self.blocks, f);
         for definition in &self.footnotes {
-            f(&definition.meta);
-            visit_blocks(&definition.blocks, f);
+            visit_footnote_def(definition, f);
         }
     }
 
@@ -184,79 +195,137 @@ impl Document {
         }
         visit_blocks_mut(&mut self.blocks, f);
         for definition in &mut self.footnotes {
-            f(&mut definition.meta);
-            visit_blocks_mut(&mut definition.blocks, f);
+            visit_footnote_def_mut(definition, f);
         }
     }
 }
+
+// Both traversals are generated from the same structural list below. Adding a
+// node field or a block/inline variant means extending one declaration; the
+// shared and mutable walks are regenerated together, so they cannot drift
+// apart. Every field names both walker functions explicitly.
+
+/// Generate the shared and mutable walker for one enum from one variant list.
+macro_rules! define_enum_walk {
+    (
+        $ty:ident, $shared:ident, $mutable:ident,
+        { $($variant:ident => { $($field:ident => $walk:ident / $walk_mut:ident),* $(,)? }),* $(,)? }
+    ) => {
+        fn $shared(node: &$ty, f: &mut impl FnMut(&NodeMeta)) {
+            match node {
+                $(
+                    $ty::$variant(inner) => {
+                        f(&inner.meta);
+                        $( $walk(&inner.$field, f); )*
+                    }
+                )*
+            }
+        }
+
+        fn $mutable(node: &mut $ty, f: &mut impl FnMut(&mut NodeMeta)) {
+            match node {
+                $(
+                    $ty::$variant(inner) => {
+                        f(&mut inner.meta);
+                        $( $walk_mut(&mut inner.$field, f); )*
+                    }
+                )*
+            }
+        }
+    };
+}
+
+/// Generate the shared and mutable walker for one node struct from one field
+/// list. The node's own header is always visited first.
+macro_rules! define_struct_walk {
+    (
+        $ty:ty, $shared:ident, $mutable:ident,
+        { $($field:ident => $walk:ident / $walk_mut:ident),* $(,)? }
+    ) => {
+        fn $shared(node: &$ty, f: &mut impl FnMut(&NodeMeta)) {
+            f(&node.meta);
+            $( $walk(&node.$field, f); )*
+        }
+
+        fn $mutable(node: &mut $ty, f: &mut impl FnMut(&mut NodeMeta)) {
+            f(&mut node.meta);
+            $( $walk_mut(&mut node.$field, f); )*
+        }
+    };
+}
+
+define_enum_walk!(
+    Block, visit_block, visit_block_mut,
+    {
+        Paragraph => { inlines => visit_inlines / visit_inlines_mut },
+        Heading => { inlines => visit_inlines / visit_inlines_mut },
+        List => { items => visit_list_items / visit_list_items_mut },
+        BlockQuote => { blocks => visit_blocks / visit_blocks_mut },
+        CodeBlock => {},
+        MathBlock => {},
+        Figure => {
+            image => visit_image / visit_image_mut,
+            caption => visit_inlines / visit_inlines_mut,
+        },
+        Table => {
+            columns => visit_columns / visit_columns_mut,
+            caption => visit_inlines / visit_inlines_mut,
+            rows => visit_rows / visit_rows_mut,
+        },
+        ThematicBreak => {},
+        PageBreak => {},
+        Section => { title => visit_opt_inlines / visit_opt_inlines_mut },
+        Generated => { blocks => visit_blocks / visit_blocks_mut },
+        Raw => {},
+    }
+);
+
+define_enum_walk!(
+    Inline, visit_inline, visit_inline_mut,
+    {
+        Text => {},
+        Code => {},
+        Strong => { children => visit_inlines / visit_inlines_mut },
+        Emphasis => { children => visit_inlines / visit_inlines_mut },
+        Underline => { children => visit_inlines / visit_inlines_mut },
+        Strikethrough => { children => visit_inlines / visit_inlines_mut },
+        SmallCaps => { children => visit_inlines / visit_inlines_mut },
+        Superscript => { children => visit_inlines / visit_inlines_mut },
+        Subscript => { children => visit_inlines / visit_inlines_mut },
+        Link => { children => visit_inlines / visit_inlines_mut },
+        Image => {},
+        Math => {},
+        FootnoteRef => {},
+        Index => {},
+        Ruby => {},
+        LineBreak => {},
+        Raw => {},
+    }
+);
+
+define_struct_walk!(FootnoteDef, visit_footnote_def, visit_footnote_def_mut, {
+    blocks => visit_blocks / visit_blocks_mut,
+});
+
+define_struct_walk!(ListItem, visit_list_item, visit_list_item_mut, {
+    blocks => visit_blocks / visit_blocks_mut,
+});
+
+define_struct_walk!(Column, visit_column, visit_column_mut, {});
+
+define_struct_walk!(Row, visit_row, visit_row_mut, {
+    cells => visit_cells / visit_cells_mut,
+});
+
+define_struct_walk!(Cell, visit_cell, visit_cell_mut, {
+    blocks => visit_blocks / visit_blocks_mut,
+});
+
+define_struct_walk!(crate::inline::Image, visit_image, visit_image_mut, {});
 
 fn visit_blocks(blocks: &[Block], f: &mut impl FnMut(&NodeMeta)) {
     for block in blocks {
         visit_block(block, f);
-    }
-}
-
-fn visit_block(block: &Block, f: &mut impl FnMut(&NodeMeta)) {
-    f(block.meta());
-    match block {
-        Block::Paragraph(node) => visit_inlines(&node.inlines, f),
-        Block::Heading(node) => visit_inlines(&node.inlines, f),
-        Block::List(node) => visit_list(node, f),
-        Block::BlockQuote(node) => visit_blocks(&node.blocks, f),
-        Block::Figure(node) => {
-            f(&node.image.meta);
-            visit_inlines(&node.caption, f);
-        }
-        Block::Table(node) => visit_table(node, f),
-        Block::Section(node) => visit_section(node, f),
-        Block::Generated(node) => visit_generated(node, f),
-        Block::CodeBlock(_)
-        | Block::MathBlock(_)
-        | Block::ThematicBreak(_)
-        | Block::PageBreak(_)
-        | Block::Raw(_) => {}
-    }
-}
-
-fn visit_list(list: &List, f: &mut impl FnMut(&NodeMeta)) {
-    for item in &list.items {
-        f(&item.meta);
-        visit_blocks(&item.blocks, f);
-    }
-}
-
-fn visit_table(table: &Table, f: &mut impl FnMut(&NodeMeta)) {
-    for column in &table.columns {
-        f(&column.meta);
-    }
-    visit_inlines(&table.caption, f);
-    for row in &table.rows {
-        visit_row(row, f);
-    }
-}
-
-fn visit_row(row: &Row, f: &mut impl FnMut(&NodeMeta)) {
-    f(&row.meta);
-    for cell in &row.cells {
-        f(&cell.meta);
-        visit_blocks(&cell.blocks, f);
-    }
-}
-
-fn visit_section(section: &Section, f: &mut impl FnMut(&NodeMeta)) {
-    if let Some(title) = &section.title {
-        visit_inlines(title, f);
-    }
-}
-
-fn visit_generated(generated: &GeneratedBlock, f: &mut impl FnMut(&NodeMeta)) {
-    visit_blocks(&generated.blocks, f);
-}
-
-fn visit_inlines(inlines: &[Inline], f: &mut impl FnMut(&NodeMeta)) {
-    for inline in inlines {
-        f(inline.meta());
-        visit_inlines(inline.children(), f);
     }
 }
 
@@ -266,58 +335,74 @@ fn visit_blocks_mut(blocks: &mut [Block], f: &mut impl FnMut(&mut NodeMeta)) {
     }
 }
 
-fn visit_block_mut(block: &mut Block, f: &mut impl FnMut(&mut NodeMeta)) {
-    f(block.meta_mut());
-    match block {
-        Block::Paragraph(node) => visit_inlines_mut(&mut node.inlines, f),
-        Block::Heading(node) => visit_inlines_mut(&mut node.inlines, f),
-        Block::List(node) => {
-            for item in &mut node.items {
-                visit_item_mut(item, f);
-            }
-        }
-        Block::BlockQuote(node) => visit_blocks_mut(&mut node.blocks, f),
-        Block::Figure(node) => {
-            f(&mut node.image.meta);
-            visit_inlines_mut(&mut node.caption, f);
-        }
-        Block::Table(node) => {
-            for column in &mut node.columns {
-                f(&mut column.meta);
-            }
-            visit_inlines_mut(&mut node.caption, f);
-            for row in &mut node.rows {
-                f(&mut row.meta);
-                for cell in &mut row.cells {
-                    f(&mut cell.meta);
-                    visit_blocks_mut(&mut cell.blocks, f);
-                }
-            }
-        }
-        Block::Section(node) => {
-            if let Some(title) = &mut node.title {
-                visit_inlines_mut(title, f);
-            }
-        }
-        Block::Generated(node) => visit_blocks_mut(&mut node.blocks, f),
-        Block::CodeBlock(_)
-        | Block::MathBlock(_)
-        | Block::ThematicBreak(_)
-        | Block::PageBreak(_)
-        | Block::Raw(_) => {}
+fn visit_inlines(inlines: &[Inline], f: &mut impl FnMut(&NodeMeta)) {
+    for inline in inlines {
+        visit_inline(inline, f);
     }
-}
-
-fn visit_item_mut(item: &mut ListItem, f: &mut impl FnMut(&mut NodeMeta)) {
-    f(&mut item.meta);
-    visit_blocks_mut(&mut item.blocks, f);
 }
 
 fn visit_inlines_mut(inlines: &mut [Inline], f: &mut impl FnMut(&mut NodeMeta)) {
     for inline in inlines {
-        f(inline.meta_mut());
-        if let Some(children) = inline.children_mut() {
-            visit_inlines_mut(children, f);
-        }
+        visit_inline_mut(inline, f);
+    }
+}
+
+fn visit_opt_inlines(title: &Option<Vec<Inline>>, f: &mut impl FnMut(&NodeMeta)) {
+    if let Some(title) = title {
+        visit_inlines(title, f);
+    }
+}
+
+fn visit_opt_inlines_mut(title: &mut Option<Vec<Inline>>, f: &mut impl FnMut(&mut NodeMeta)) {
+    if let Some(title) = title {
+        visit_inlines_mut(title, f);
+    }
+}
+
+fn visit_list_items(items: &[ListItem], f: &mut impl FnMut(&NodeMeta)) {
+    for item in items {
+        visit_list_item(item, f);
+    }
+}
+
+fn visit_list_items_mut(items: &mut [ListItem], f: &mut impl FnMut(&mut NodeMeta)) {
+    for item in items {
+        visit_list_item_mut(item, f);
+    }
+}
+
+fn visit_columns(columns: &[Column], f: &mut impl FnMut(&NodeMeta)) {
+    for column in columns {
+        visit_column(column, f);
+    }
+}
+
+fn visit_columns_mut(columns: &mut [Column], f: &mut impl FnMut(&mut NodeMeta)) {
+    for column in columns {
+        visit_column_mut(column, f);
+    }
+}
+
+fn visit_rows(rows: &[Row], f: &mut impl FnMut(&NodeMeta)) {
+    for row in rows {
+        visit_row(row, f);
+    }
+}
+
+fn visit_rows_mut(rows: &mut [Row], f: &mut impl FnMut(&mut NodeMeta)) {
+    for row in rows {
+        visit_row_mut(row, f);
+    }
+}
+
+fn visit_cells(cells: &[Cell], f: &mut impl FnMut(&NodeMeta)) {
+    for cell in cells {
+        visit_cell(cell, f);
+    }
+}
+
+fn visit_cells_mut(cells: &mut [Cell], f: &mut impl FnMut(&mut NodeMeta)) {
+    for cell in cells {
+        visit_cell_mut(cell, f);
     }
 }

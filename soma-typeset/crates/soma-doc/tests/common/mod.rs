@@ -12,7 +12,8 @@ use soma_doc::block::{
     MathBlock, PageBreak, Paragraph, RawBlock, Row, Section, Table, ThematicBreak,
 };
 use soma_doc::inline::{
-    Container, FootnoteRef, Image, LineBreak, LineBreakKind, Link, MathInline, RawInline, Ruby,
+    Container, FootnoteRef, Image, IndexRef, LineBreak, LineBreakKind, Link, MathInline, RawInline,
+    Ruby,
 };
 use soma_doc::meta::{Author, CoverData, Date, DocumentMeta, ImageRef, MetaField, TemplateRef};
 use soma_doc::node::NodeMeta;
@@ -57,9 +58,14 @@ fn rich_meta() -> DocumentMeta {
     cover.logo = Some(ImageRef::new("logo.png").with_intrinsic(240, 120));
     cover.fields.push(MetaField::new("edition", "1"));
 
+    let mut author = Author::new("张三")
+        .with_affiliation("某出版社")
+        .with_email("zhang@example.com");
+    author.orcid = Some("0000-0002-1825-0097".into());
+
     DocumentMeta::new()
         .with_title(vec![text("中文排版")])
-        .with_author(Author::new("张三").with_affiliation("某出版社"))
+        .with_author(author)
         .with_language("zh-Hans")
         .with_date(Date::new(2026, 11, 20))
         .with_keyword("排版")
@@ -74,6 +80,8 @@ fn maximal_inline_paragraph() -> Block {
     let raw = RawContent::new("html", "<span class=\"x\">旧</span>")
         .with_fallback("旧")
         .with_capability(RawCapability::Degraded);
+    let mut link = Link::new(meta(0, 1), "https://example.com", vec![text("链接")]);
+    link.title = Some("示例".into());
 
     let inlines = vec![
         text("正文"),
@@ -90,30 +98,33 @@ fn maximal_inline_paragraph() -> Block {
         Inline::SmallCaps(Container::new(meta(0, 1), vec![text("Small")])),
         Inline::Superscript(Container::new(meta(0, 1), vec![text("2")])),
         Inline::Subscript(Container::new(meta(0, 1), vec![text("n")])),
-        Inline::Link(Link::new(
-            meta(0, 1),
-            "https://example.com",
-            vec![text("链接")],
-        )),
+        Inline::Link(link),
         Inline::Image(Image::new(
             meta(0, 1),
-            ImageRef::new("figure.png")
-                .with_alt("图")
-                .with_intrinsic(640, 480),
+            ImageRef::new("figure.png").with_alt("图"),
         )),
         Inline::Math(MathInline::new(meta(0, 3), "a^2+b^2=c^2")),
         Inline::FootnoteRef(FootnoteRef::new(meta(0, 2), "1").with_label("1")),
+        Inline::Index(IndexRef::new(meta(0, 2), "排版")),
         Inline::Ruby(Ruby::new(meta(0, 2), "漢", "かん")),
         Inline::LineBreak(LineBreak::new(meta(0, 1), LineBreakKind::Hard)),
         Inline::Raw(RawInline::new(meta(0, 1), raw)),
     ];
 
-    Block::Paragraph(Paragraph::new(meta(0, 40), inlines))
+    let attrs = Attrs::new()
+        .with_role("body")
+        .with_class("lead")
+        .with_class("first")
+        .with_anchor("intro")
+        .with_lang("zh-Hans");
+    Block::Paragraph(Paragraph::new(meta(0, 40).with_attrs(attrs), inlines))
 }
 
 fn table() -> Block {
+    // The non-zero share locks the well-formed `"align":"left","share":600`
+    // spelling; documents without a share keep their old bytes.
     let columns = vec![
-        Column::new(meta(0, 1), CellAlign::Left),
+        Column::new(meta(0, 1), CellAlign::Left).with_share(600),
         Column::new(meta(0, 1), CellAlign::Right),
     ];
     let header = Row::new(
@@ -163,8 +174,8 @@ fn table() -> Block {
     Block::Table(table)
 }
 
-/// A document containing every node kind.
-pub fn maximal_document() -> Document {
+/// A document containing every node kind, with every id still unassigned.
+pub fn maximal_document_unrenumbered() -> Document {
     let mut document = Document::new(rich_meta());
     document.source_map = source_map();
 
@@ -228,6 +239,7 @@ pub fn maximal_document() -> Document {
             meta(0, 8),
             ImageRef::new("figure.png")
                 .with_alt("架构图")
+                .with_title("架构图标题")
                 .with_intrinsic(800, 600),
         ),
     );
@@ -266,6 +278,12 @@ pub fn maximal_document() -> Document {
         ))],
     ));
 
+    document
+}
+
+/// A document containing every node kind, with ids assigned in traversal order.
+pub fn maximal_document() -> Document {
+    let mut document = maximal_document_unrenumbered();
     document.renumber();
     document
 }

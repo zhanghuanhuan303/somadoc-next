@@ -5,12 +5,17 @@
 //! document. Anything it does not recognise keeps its text and is otherwise
 //! ignored; it never drops content silently.
 //!
-//! Supported: `h1`–`h6`, `p`, `strong`/`b`, `em`/`i`, `u`, `s`/`del`/`strike`,
-//! `code`/`kbd`/`samp`/`var`, `a`, `img`, `br`, `sup`, `sub`, `ruby`/`rt`,
-//! `ul`/`ol`/`li`, `blockquote`, `pre`, `hr`, `table`/`thead`/`tbody`/`tr`/
-//! `th`/`td` (with `colspan`/`rowspan`), `figure`/`figcaption`, and the
-//! transparent containers `div`, `section`, `article`, `main`, `header`,
-//! `footer`, `nav`, `aside`, `body`, `html`.
+//! Supported: `h1`–`h6`, `p`, `strong`/`b`, `em`/`i`, `u`/`ins`,
+//! `s`/`del`/`strike`, `code`/`kbd`/`samp`/`var`, `a`, `img`, `br`, `sup`,
+//! `sub`, `ruby`/`rt`, `ul`/`ol`/`li`, `dl`/`dt`/`dd`, `blockquote`, `pre`,
+//! `hr`, `table`/`thead`/`tbody`/`tr`/`th`/`td` (with `colspan`/`rowspan`),
+//! `figure`/`figcaption`, and the transparent containers `div`, `section`,
+//! `article`, `main`, `header`, `footer`, `nav`, `aside`, `body`, `html`.
+//!
+//! A definition list has no DocIR block of its own: `dl` becomes an unordered
+//! `List` and every direct `dt`/`dd` (or one nested in a grouping `div`)
+//! becomes one `ListItem`, in source order. DocIR carries no term/definition
+//! marker, so the two kinds share the item shape and none of the text is lost.
 //!
 //! Not supported: CSS layout, scripts, frames, forms, footnotes, and HTML
 //! entities beyond the common named set plus numeric references.
@@ -57,6 +62,7 @@ pub const SUPPORTED_TAGS: &[&str] = &[
     "s",
     "del",
     "strike",
+    "ins",
     "code",
     "kbd",
     "samp",
@@ -71,6 +77,9 @@ pub const SUPPORTED_TAGS: &[&str] = &[
     "ul",
     "ol",
     "li",
+    "dl",
+    "dt",
+    "dd",
     "blockquote",
     "pre",
     "hr",
@@ -326,8 +335,8 @@ fn closes(open: &str, new: &str) -> bool {
         || (open == "li" && new == "li")
         || ((open == "td" || open == "th") && (new == "td" || new == "th" || new == "tr"))
         || (open == "tr" && new == "tr")
-        || (open == "dt" && new == "dd")
-        || (open == "dd" && new == "dt")
+        || (open == "dt" && (new == "dt" || new == "dd"))
+        || (open == "dd" && (new == "dt" || new == "dd"))
 }
 
 fn skip_raw_text(source: &str, mut pos: usize, tag: &str) -> usize {
@@ -583,6 +592,15 @@ fn build_block(element: &Element, out: &mut Vec<Block>) {
                 out.push(Block::List(List::new(meta, ordered, start, items)));
             }
         }
+        // DocIR has no definition-list block. Each term and each definition
+        // becomes one item of an unordered list; order and every block inside
+        // the item (including nested lists) survive.
+        "dl" => {
+            let items = definition_items(element);
+            if !items.is_empty() {
+                out.push(Block::List(List::unordered(meta, items)));
+            }
+        }
         "blockquote" => {
             let mut blocks = Vec::new();
             build_blocks(&element.children, &mut blocks);
@@ -606,8 +624,13 @@ fn build_block(element: &Element, out: &mut Vec<Block>) {
             }
         }
         "figure" => {
-            if let Some(figure) = build_figure(element, meta) {
+            if let Some((figure, rest)) = build_figure(element, meta) {
                 out.push(Block::Figure(figure));
+                // DocIR's Figure carries one image and one caption. Anything
+                // else in the element still becomes ordinary blocks.
+                if !rest.is_empty() {
+                    build_blocks(&rest, out);
+                }
             } else {
                 build_blocks(&element.children, out);
             }
@@ -619,24 +642,84 @@ fn build_block(element: &Element, out: &mut Vec<Block>) {
     }
 }
 
-fn build_figure(element: &Element, meta: NodeMeta) -> Option<Figure> {
+/// One item per `dt`/`dd`. HTML5 permits `<div>` groups inside `<dl>`, so the
+/// walk descends through them. Content that is not a term or definition still
+/// becomes an item instead of being dropped.
+fn definition_items(element: &Element) -> Vec<ListItem> {
+    let mut items = Vec::new();
+    collect_definition_items(&element.children, &mut items);
+    items
+}
+
+fn collect_definition_items(nodes: &[Node], items: &mut Vec<ListItem>) {
+    for node in nodes {
+        match node {
+            Node::Element(child) if child.tag == "dt" || child.tag == "dd" => {
+                let mut blocks = Vec::new();
+                build_blocks(&child.children, &mut blocks);
+                items.push(ListItem::new(element_meta(child), blocks));
+            }
+            Node::Element(child) if child.tag == "div" => {
+                collect_definition_items(&child.children, items);
+            }
+            Node::Element(_) => {
+                let mut blocks = Vec::new();
+                build_blocks(core::slice::from_ref(node), &mut blocks);
+                if !blocks.is_empty() {
+                    items.push(ListItem::new(NodeMeta::synthesized(), blocks));
+                }
+            }
+            Node::Text(text) => {
+                let value = collapse(text);
+                let value = value.trim();
+                if !value.is_empty() {
+                    items.push(ListItem::new(
+                        NodeMeta::synthesized(),
+                        vec![Block::Paragraph(Paragraph::new(
+                            NodeMeta::synthesized(),
+                            vec![Inline::Text(Text::new(
+                                NodeMeta::synthesized(),
+                                value.to_string(),
+                            ))],
+                        ))],
+                    ));
+                }
+            }
+        }
+    }
+}
+
+fn build_figure(element: &Element, meta: NodeMeta) -> Option<(Figure, Vec<Node>)> {
     let mut image: Option<Image> = None;
+    let mut image_index: Option<usize> = None;
     let mut caption: Vec<Inline> = Vec::new();
-    for child in &element.children {
+    let mut caption_index: Option<usize> = None;
+    for (index, child) in element.children.iter().enumerate() {
         match child {
             Node::Element(candidate) if candidate.tag == "img" && image.is_none() => {
                 image = build_image(candidate);
+                if image.is_some() {
+                    image_index = Some(index);
+                }
             }
             Node::Element(candidate) if candidate.tag == "figcaption" => {
                 caption = build_inlines(&candidate.children);
+                caption_index = Some(index);
             }
             _ => {}
         }
     }
     let image = image?;
+    let rest = element
+        .children
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| Some(*index) != image_index && Some(*index) != caption_index)
+        .map(|(_, node)| node.clone())
+        .collect();
     let mut figure = Figure::new(meta, image);
     figure.caption = caption;
-    Some(figure)
+    Some((figure, rest))
 }
 
 /// Width hints from `<colgroup>`/`<col>`, one entry per grid column.
@@ -886,7 +969,7 @@ fn build_inline(element: &Element) -> Option<Inline> {
     let value = match element.tag.as_str() {
         "strong" | "b" => container(meta).map(Inline::Strong),
         "em" | "i" => container(meta).map(Inline::Emphasis),
-        "u" => container(meta).map(Inline::Underline),
+        "u" | "ins" => container(meta).map(Inline::Underline),
         "s" | "del" | "strike" => container(meta).map(Inline::Strikethrough),
         "sup" => container(meta).map(Inline::Superscript),
         "sub" => container(meta).map(Inline::Subscript),

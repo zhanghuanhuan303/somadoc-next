@@ -44,6 +44,11 @@ pub struct BreakConfig {
     params: ParamSet,
     window: Window,
     param_hash: ParamHash,
+    /// True while running a relaxed emergency pass. The emergency stretch in
+    /// `fallback` is part of that pass even before emergency lines are allowed;
+    /// keeping this as run state (not a second parameter field) means there is
+    /// still one source of truth for the value (D13).
+    emergency_stage: bool,
 }
 
 impl BreakConfig {
@@ -52,6 +57,7 @@ impl BreakConfig {
             params,
             window,
             param_hash: params.param_hash(),
+            emergency_stage: false,
         }
     }
 
@@ -69,6 +75,15 @@ impl BreakConfig {
 
     pub fn param_hash(&self) -> ParamHash {
         self.param_hash
+    }
+
+    pub(crate) fn emergency_stage(&self) -> bool {
+        self.emergency_stage
+    }
+
+    pub(crate) fn with_emergency_stage(mut self, emergency_stage: bool) -> Self {
+        self.emergency_stage = emergency_stage;
+        self
     }
 
     pub fn rules_version(&self) -> u16 {
@@ -192,9 +207,7 @@ pub fn break_paragraph_traced(
             None => {
                 let mut params = *config.params();
                 params.break_params.tolerance = params.break_params.emergency_tolerance;
-                params.break_params.emergency_stretch =
-                    params.break_params.fallback.emergency_stretch;
-                let relaxed = BreakConfig::from_params(params);
+                let relaxed = BreakConfig::from_params(params).with_emergency_stage(true);
                 shaped
                     .eval_line(start, end, kind, &relaxed, true, true)
                     .ok_or(BreakError::NoFeasibleBreak)?
@@ -336,8 +349,7 @@ fn break_with_stats(
                 // when the fallback policy permits them.
                 let mut params = *config.params();
                 params.break_params.tolerance = break_params.emergency_tolerance;
-                params.break_params.emergency_stretch = break_params.fallback.emergency_stretch;
-                let relaxed = BreakConfig::from_params(params);
+                let relaxed = BreakConfig::from_params(params).with_emergency_stage(true);
 
                 match run(&shaped, &relaxed, algorithm, false, false) {
                     Ok((result, evaluated)) => (result, evaluated, FallbackStage::Emergency),
@@ -681,7 +693,11 @@ impl<'a> Shaped<'a> {
 
         let params = config.params().break_params;
         let tolerance = params.tolerance.0 as i128;
-        let emergency = params.emergency_stretch.0.max(0) as i128;
+        let emergency = if config.emergency_stage() {
+            params.fallback.emergency_stretch.0.max(0) as i128
+        } else {
+            0
+        };
         let width = self.paragraph.style.width.0 as i128;
         let first_indent = self.paragraph.style.first_indent.0.max(0) as i128;
         let hang = self.paragraph.style.hang.0.max(0) as i128;
@@ -907,8 +923,12 @@ impl<'a> Shaped<'a> {
 
         if effective < target {
             let deficit = target - effective;
-            let stretch =
-                self.total_stretch(start, end) + break_params.emergency_stretch.0.max(0) as i64;
+            let stretch = self.total_stretch(start, end)
+                + if config.emergency_stage() {
+                    break_params.fallback.emergency_stretch.0.max(0) as i64
+                } else {
+                    0
+                };
             if stretch <= 0 {
                 if !allow_emergency {
                     return None;

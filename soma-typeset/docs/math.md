@@ -4,7 +4,7 @@
 width, an ascent and a depth. `soma-layout` places that box; renderers draw it.
 
 Design records: ADR-0026 (display math), ADR-0070 (Math v2), ADR-0075
-(design variants). Known gaps: `docs/debt.md` D71, D97, D98.
+(design variants). Known gaps: `docs/debt.md` D97, D98.
 
 ## Pipeline
 

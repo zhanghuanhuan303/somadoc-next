@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 
 use soma_core::{Align, SyntaxClass};
 
-use crate::units::{LengthSpec, LineHeightSpec, Rational, Unit};
+use crate::units::{LengthSpec, LineHeightSpec, PageLength, Percent, Rational, Unit};
 use crate::yaml::{Key, Value, ValueKind};
 use crate::TemplateError;
 
@@ -130,10 +130,10 @@ impl Template {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PageSpec {
     pub size: PageSize,
-    pub margin_top: LengthSpec,
-    pub margin_bottom: LengthSpec,
-    pub margin_left: LengthSpec,
-    pub margin_right: LengthSpec,
+    pub margin_top: PageLength,
+    pub margin_bottom: PageLength,
+    pub margin_left: PageLength,
+    pub margin_right: PageLength,
     /// Height of the running header band, drawn inside the top margin.
     pub header: LengthSpec,
     /// Height of the footer band, drawn below the content box.
@@ -505,6 +505,12 @@ pub struct Selector {
     pub within: Option<String>,
     /// Heading/section level (`1..=9`). Only matches `heading` and `section`.
     pub level: Option<u8>,
+    /// Immediate parent element (`cell` in `cell > paragraph`).
+    pub parent: Option<String>,
+    /// Ordered descendant chain, outermost first (`[table, cell]`). Every name
+    /// must appear among the ancestors in that order; the chain need not be
+    /// adjacent. The last name is not required to be the immediate parent.
+    pub ancestors: Vec<String>,
 }
 
 impl Selector {
@@ -536,6 +542,14 @@ impl Selector {
                 return false;
             }
         }
+        if let Some(expected) = &self.parent {
+            if ancestors.last() != Some(&expected.as_str()) {
+                return false;
+            }
+        }
+        if !self.ancestors.is_empty() && !chain_matches(ancestors, &self.ancestors) {
+            return false;
+        }
         self.classes
             .iter()
             .all(|expected| classes.iter().any(|actual| actual == expected))
@@ -547,10 +561,26 @@ impl Selector {
             self.classes.len() as u32,
             (if self.role.is_some() { 1 } else { 0 })
                 + (if self.within.is_some() { 1 } else { 0 })
+                + (if self.parent.is_some() { 1 } else { 0 })
+                + self.ancestors.len() as u32
                 + (if self.level.is_some() { 1 } else { 0 }),
             if self.element.is_some() { 1 } else { 0 },
         )
     }
+}
+
+/// True when `chain` is an ordered subsequence of `ancestors`.
+fn chain_matches(ancestors: &[&str], chain: &[String]) -> bool {
+    let mut remaining = chain.iter();
+    let mut next = remaining.next();
+    for ancestor in ancestors {
+        if let Some(expected) = next {
+            if expected == ancestor {
+                next = remaining.next();
+            }
+        }
+    }
+    next.is_none()
 }
 
 /// A property name. The whitelist is the contract: unknown keys are errors.
@@ -668,6 +698,9 @@ impl Property {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PropertyValue {
     Length(LengthSpec),
+    /// A percentage parsed without a base. Only properties whose base is
+    /// defined at resolve time may use it; resolution rejects the rest.
+    Percent(Percent),
     LineHeight(LineHeightSpec),
     Align(Align),
     Bool(bool),
@@ -709,7 +742,38 @@ pub enum FontSlant {
 /// Parse and validate a template.
 pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
     let root = crate::yaml::parse(source)?;
-    let fields = Fields::new(&root, "")?;
+    template_from_value(&root)
+}
+
+/// Parse an overlay template that inherits from `base`.
+///
+/// Both arguments are YAML text; this crate never reads files, so a host that
+/// implements `extends: path` reads both sources itself and calls this function.
+/// `base` must be a complete, valid template; `overlay` may be partial. Merge
+/// rules:
+///
+/// - block mappings merge recursively (`page`, `numbering`, `table`, …), so an
+///   overlay may override one key and inherit the rest;
+/// - the `styles` and `masters` sequences concatenate base first, then overlay,
+///   which makes an overlay rule win the cascade on equal specificity;
+/// - every other value (including an explicit null) replaces the base value;
+///   `toc:` with no value therefore disables an inherited table of contents.
+///
+/// The merged document is validated exactly like a standalone template, so an
+/// unknown key, duplicate master, or missing required section still fails with
+/// the source position of the offending line.
+pub fn parse_template_inherit(base: &str, overlay: &str) -> Result<Template, TemplateError> {
+    let base = crate::yaml::parse(base)?;
+    // A base is a template, not a fragment: validate it before the overlay can
+    // add or repair anything.
+    template_from_value(&base)?;
+    let overlay = crate::yaml::parse(overlay)?;
+    let merged = merge_value("", &base, &overlay);
+    template_from_value(&merged)
+}
+
+fn template_from_value(root: &Value) -> Result<Template, TemplateError> {
+    let fields = Fields::new(root, "")?;
     fields.reject_unknown(&[
         "name",
         "version",
@@ -792,6 +856,44 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
     };
     validate_template(&template)?;
     Ok(template)
+}
+
+/// Recursively merge template values. Overlay mappings win key by key; the
+/// `styles` and `masters` lists append so a host can layer designs.
+fn merge_value(key: &str, base: &Value, overlay: &Value) -> Value {
+    match (&base.kind, &overlay.kind) {
+        (ValueKind::Map(base_entries), ValueKind::Map(overlay_entries)) => Value {
+            kind: ValueKind::Map(merge_entries(base_entries, overlay_entries)),
+            line: overlay.line,
+            column: overlay.column,
+        },
+        (ValueKind::Seq(base_items), ValueKind::Seq(overlay_items))
+            if key == "styles" || key == "masters" =>
+        {
+            let mut items = Vec::with_capacity(base_items.len() + overlay_items.len());
+            items.extend(base_items.iter().cloned());
+            items.extend(overlay_items.iter().cloned());
+            Value {
+                kind: ValueKind::Seq(items),
+                line: overlay.line,
+                column: overlay.column,
+            }
+        }
+        _ => overlay.clone(),
+    }
+}
+
+fn merge_entries(base: &[(Key, Value)], overlay: &[(Key, Value)]) -> Vec<(Key, Value)> {
+    let mut entries: Vec<(Key, Value)> = base.to_vec();
+    for (key, value) in overlay {
+        if let Some(index) = entries.iter().position(|(seen, _)| seen.name == key.name) {
+            let merged = merge_value(&key.name, &entries[index].1, value);
+            entries[index] = (key.clone(), merged);
+        } else {
+            entries.push((key.clone(), value.clone()));
+        }
+    }
+    entries
 }
 
 fn validate_template(template: &Template) -> Result<(), TemplateError> {
@@ -887,36 +989,36 @@ fn parse_page(value: &Value, path: &str) -> Result<PageSpec, TemplateError> {
         _ => return Err(fields.error("page size must be A4, A5, Letter, or custom")),
     };
 
-    let default_margin = LengthSpec::new(
+    let default_margin = PageLength::Length(LengthSpec::new(
         Rational::new(20, 1).expect("non-zero denominator"),
         Unit::Mm,
-    );
+    ));
     let shared = fields
         .optional("margin")
-        .map(|value| parse_length(value, "page"))
+        .map(|value| parse_page_length(value, "page"))
         .transpose()?;
 
     let margin_top = fields
         .optional("margin-top")
-        .map(|value| parse_length(value, "page"))
+        .map(|value| parse_page_length(value, "page"))
         .transpose()?
         .or(shared)
         .unwrap_or(default_margin);
     let margin_bottom = fields
         .optional("margin-bottom")
-        .map(|value| parse_length(value, "page"))
+        .map(|value| parse_page_length(value, "page"))
         .transpose()?
         .or(shared)
         .unwrap_or(default_margin);
     let margin_left = fields
         .optional("margin-left")
-        .map(|value| parse_length(value, "page"))
+        .map(|value| parse_page_length(value, "page"))
         .transpose()?
         .or(shared)
         .unwrap_or(default_margin);
     let margin_right = fields
         .optional("margin-right")
-        .map(|value| parse_length(value, "page"))
+        .map(|value| parse_page_length(value, "page"))
         .transpose()?
         .or(shared)
         .unwrap_or(default_margin);
@@ -1229,7 +1331,16 @@ fn parse_rule(value: &Value, index: usize) -> Result<StyleRule, TemplateError> {
 
 fn parse_selector(value: &Value, path: &str) -> Result<Selector, TemplateError> {
     let fields = Fields::new(value, path)?;
-    fields.reject_unknown(&["element", "role", "class", "classes", "within", "level"])?;
+    fields.reject_unknown(&[
+        "element",
+        "role",
+        "class",
+        "classes",
+        "within",
+        "level",
+        "parent",
+        "ancestors",
+    ])?;
 
     let element = fields.optional_str("element")?;
     if let Some(element) = &element {
@@ -1242,6 +1353,27 @@ fn parse_selector(value: &Value, path: &str) -> Result<Selector, TemplateError> 
     if let Some(within) = &within {
         if !ELEMENTS.contains(&within.as_str()) {
             return Err(fields.error("unknown within selector"));
+        }
+    }
+
+    let parent = fields.optional_str("parent")?;
+    if let Some(parent) = &parent {
+        if !ELEMENTS.contains(&parent.as_str()) {
+            return Err(fields.error("unknown parent selector"));
+        }
+    }
+
+    let mut ancestors = Vec::new();
+    if let Some(ancestor_nodes) = fields.optional("ancestors") {
+        for item in ancestor_nodes.as_seq(path)? {
+            let ancestor = item.as_str(path)?;
+            if !ELEMENTS.contains(&ancestor.as_str()) {
+                return Err(item.error(path, "unknown ancestor selector"));
+            }
+            ancestors.push(ancestor);
+        }
+        if ancestors.is_empty() {
+            return Err(ancestor_nodes.error(path, "ancestors must not be empty"));
         }
     }
 
@@ -1292,6 +1424,8 @@ fn parse_selector(value: &Value, path: &str) -> Result<Selector, TemplateError> 
         classes,
         within,
         level,
+        parent,
+        ancestors,
     })
 }
 
@@ -1322,12 +1456,19 @@ fn parse_declaration(
         | Property::SpaceAfterMinus
         | Property::HangingCap
         | Property::BaselineGrid => {
-            let length = LengthSpec::parse(&text).ok_or_else(|| error("invalid length value"))?;
-            PropertyValue::Length(length)
+            if let Some(length) = LengthSpec::parse(&text) {
+                PropertyValue::Length(length)
+            } else if let Some(percent) = Percent::parse(&text) {
+                PropertyValue::Percent(percent)
+            } else {
+                return Err(error("invalid length value"));
+            }
         }
         Property::LineHeight => {
             if let Some(multiple) = Rational::parse(&text) {
                 PropertyValue::LineHeight(LineHeightSpec::Multiple(multiple))
+            } else if let Some(percent) = Percent::parse(&text) {
+                PropertyValue::LineHeight(LineHeightSpec::Percent(percent))
             } else {
                 let length =
                     LengthSpec::parse(&text).ok_or_else(|| error("invalid line-height value"))?;
@@ -1396,10 +1537,13 @@ fn parse_declaration(
             | Property::PaddingBottom
             | Property::PaddingLeft
     ) {
-        if let PropertyValue::Length(length) = &parsed {
-            if length.value.num() < 0 {
-                return Err(error("padding must not be negative"));
-            }
+        let negative = match &parsed {
+            PropertyValue::Length(length) => length.value.num() < 0,
+            PropertyValue::Percent(percent) => percent.value().num() < 0,
+            _ => false,
+        };
+        if negative {
+            return Err(error("padding must not be negative"));
         }
     }
 
@@ -1414,6 +1558,11 @@ fn parse_declaration(
 fn parse_length(value: &Value, path: &str) -> Result<LengthSpec, TemplateError> {
     let text = value.as_str(path)?;
     LengthSpec::parse(&text).ok_or_else(|| value.error(path, "invalid length value"))
+}
+
+fn parse_page_length(value: &Value, path: &str) -> Result<PageLength, TemplateError> {
+    let text = value.as_str(path)?;
+    PageLength::parse(&text).ok_or_else(|| value.error(path, "invalid length value"))
 }
 
 fn parse_color(text: &str) -> Option<u32> {

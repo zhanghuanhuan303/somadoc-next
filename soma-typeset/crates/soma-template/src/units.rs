@@ -107,6 +107,46 @@ fn reduce(num: i64, den: i64) -> Rational {
     }
 }
 
+/// An exact percentage of a container dimension, stored as a fraction
+/// (`50%` is `1/2`).
+///
+/// A percentage deliberately has no `em` interpretation: [`Percent::of`]
+/// requires the base explicitly, so a percentage can never silently turn into a
+/// font-relative length. Whether a base exists is decided by the caller; when it
+/// does not, resolution rejects the value instead of guessing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Percent {
+    value: Rational,
+}
+
+impl Percent {
+    pub const fn new(value: Rational) -> Self {
+        Self { value }
+    }
+
+    /// Parse a number with a trailing `%` (`50%`, `-2.5%`). Whitespace between
+    /// the number and the sign is rejected, as is any other suffix. The value is
+    /// stored as a fraction of 1 (`50%` becomes `1/2`).
+    pub fn parse(text: &str) -> Option<Self> {
+        let text = text.trim();
+        let number = text.strip_suffix('%')?;
+        if number.trim() != number {
+            return None;
+        }
+        let value = Rational::parse(number)?;
+        Rational::new(value.num(), value.den().checked_mul(100)?).map(Self::new)
+    }
+
+    pub const fn value(self) -> Rational {
+        self.value
+    }
+
+    /// Resolve against an explicit base, truncating toward zero at 1/4096 em.
+    pub fn of(self, base: Width) -> Width {
+        scale(base, self.value)
+    }
+}
+
 /// A length unit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unit {
@@ -226,7 +266,12 @@ impl LengthSpec {
 }
 
 fn scale_em(font_size: Width, value: Rational) -> Width {
-    let result = (font_size.0 as i128 * value.num() as i128) / value.den() as i128;
+    scale(font_size, value)
+}
+
+/// Multiply a width by an exact fraction, truncating toward zero.
+fn scale(base: Width, value: Rational) -> Width {
+    let result = (base.0 as i128 * value.num() as i128) / value.den() as i128;
     Width(clamp_i32(result))
 }
 
@@ -247,11 +292,44 @@ fn clamp_i32(value: i128) -> i32 {
     }
 }
 
-/// `line-height` value: a multiplier of the font size, or a fixed length.
+/// A length allowed in page geometry. Page margins accept a percentage of the
+/// page width; absolute units and `em` keep their existing meaning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageLength {
+    Length(LengthSpec),
+    Percent(Percent),
+}
+
+impl PageLength {
+    pub fn parse(text: &str) -> Option<Self> {
+        if let Some(percent) = Percent::parse(text) {
+            Some(Self::Percent(percent))
+        } else {
+            LengthSpec::parse(text).map(Self::Length)
+        }
+    }
+
+    pub const fn is_percent(self) -> bool {
+        matches!(self, Self::Percent(_))
+    }
+
+    /// Resolve against the page width (the container for page margins) and the
+    /// root font size. A percentage never uses `font_size` as its base.
+    pub fn resolve(self, page_width: Width, font_size: Width, body_pt: Rational) -> Width {
+        match self {
+            Self::Length(length) => length.resolve(font_size, body_pt),
+            Self::Percent(percent) => percent.of(page_width),
+        }
+    }
+}
+
+/// `line-height` value: a multiplier of the font size, a fixed length, or an
+/// explicit percentage of the font size.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LineHeightSpec {
     Multiple(Rational),
     Length(LengthSpec),
+    Percent(Percent),
 }
 
 impl LineHeightSpec {
@@ -259,6 +337,7 @@ impl LineHeightSpec {
         match self {
             Self::Multiple(value) => scale_em(font_size, value),
             Self::Length(length) => length.resolve(font_size, body_pt),
+            Self::Percent(percent) => percent.of(font_size),
         }
     }
 }

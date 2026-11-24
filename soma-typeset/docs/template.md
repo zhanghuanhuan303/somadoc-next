@@ -37,11 +37,11 @@ ADR-0089（等宽族）、ADR-0090（代码块面板）、ADR-0091（语法配�
 - 块映射 `key: value`，用空格缩进嵌套；
 - 块序列 `- value` / `- key: value`；
 - 普通标量、单引号 `'...'`（`''` 表示一个引号）、双引号 `"..."`（`\"`、`\\`、`\n`、`\t`）；
+- 单行 flow 序列 `[a, b]` 与 flow 映射 `{key: value}`（可嵌套，可出现在块位置）；
 - `#` 注释（引号内不算注释）；
 - 空值（后面跟更深缩进就是嵌套块，否则是 null）。
 
-不支持：流式集合 `[a, b]` / `{a: b}`、锚点/别名、标签、多行标量、`---` 分档、
-Tab 缩进。
+不支持：锚点/别名、标签、多行标量、`---` 分档、Tab 缩进。
 
 > 因为 `#` 是注释，颜色请写 `color: 101010` 或 `color: "#101010"`（加了引号就必须带 `#`）。
 
@@ -52,6 +52,7 @@ Tab 缩进。
 | `em` | 当前字号 | 当前节点的字号 |
 | `pt` | 点 | 根字号（`document` 的 `font-size`） |
 | `mm` / `cm` / `in` | 物理长度 | 根字号 |
+| `%` | 精确比例 | 页面四边距按页宽；`line-height` 按解析后的字号；无基数的位置报错 |
 | 裸数字 | 仅允许 `0` | — |
 
 换算常量：`1in = 72pt`、`1mm = 360/127 pt`、`1cm = 3600/127 pt`。
@@ -198,8 +199,10 @@ DocIR 的 `Section.page_template: <name>` 选择母版；换母版会强制新�
 
 ## 5. 选择器与级联
 
-- 选择器可以是 `element`、`role`、`class`/`classes`、`within`、`level` 的任意组合；
-  **所有给出的部分都必须匹配**。
+- 选择器可以是 `element`、`role`、`class`/`classes`、`within`、`level`、`parent`、
+  `ancestors` 的任意组合；**所有给出的部分都必须匹配**。
+- `parent: cell` 匹配直接父级；`ancestors: [table, cell]` 匹配从外到内的祖先链
+  （不要求相邻）。`within` 仍表示“某一层祖先”。
 - `level: 1`–`9` 匹配标题（`heading`）与节（`section`）的级别；其他元素一律
   `level: null`。可以只写 `level`（不带 `element`）。
 - `within: cell` 表示“某个块级祖先的元素名是 `cell`”，用来把单元内的段落和正文段落
@@ -326,13 +329,18 @@ pub struct StyledDoc {
 
 ## 10. 明确不做（v1）
 
-- 选择器组合子（更深的后代、子代、伪类）与 `@` 规则（`within` 只覆盖“某一层祖先”）；
-- 百分比长度（需要知道参照系，先不做）；
-- 模板继承 / `@import`；
+- 伪类、`@` 规则、跨文档选择器；`parent`/`ancestors` 已覆盖直接父级与祖先链；
+- 锚点/别名、多行标量（YAML 子集边界，见 §2）；
 - 命名槽位与封面布局（`GeneratedBlock` 已有，模板侧待 A6）；
 - 目录的引导点（dot leaders）、按级自定义编号格式、图目录/表目录/索引
   （`GeneratedKind` 其余变体仍无生成器）（D73）；
 - 字体族映射到实际字体文件（渲染器/度量层职责）。
+
+### 10.1 模板继承（数据级）
+
+`parse_template_inherit(base, overlay)` 在纯数据层合并两份 YAML：
+`styles`/`masters` 按 base→overlay 追加，其余映射递归合并、标量覆盖；
+`base` 必须自身合法。它不读文件，宿主负责加载文本；没有 `@import` 文件语法。
 
 ## 11. 参考设计：`examples/templates/plex.yaml`
 
