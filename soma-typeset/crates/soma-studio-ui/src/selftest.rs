@@ -901,6 +901,29 @@ async fn s9(document: &Document, studio: Studio) -> String {
         || computed_family
             .to_lowercase()
             .contains(&expected_family.to_lowercase());
+    // The proof lives on white paper in a Shadow DOM that resets all properties.
+    // If the page CSS does not pin a dark ink colour, `all:initial` falls back
+    // to `canvastext`, which is white under a dark browser preference.
+    let ink_ok = shadow_host(document, 1)
+        .and_then(|shadow| shadow.query_selector(".block").ok().flatten())
+        .and_then(|element| {
+            web_sys::window().and_then(|window| window.get_computed_style(&element).ok().flatten())
+        })
+        .map(|style| {
+            let color = style.get_property_value("color").unwrap_or_default();
+            let mut parts = color
+                .trim_start_matches("rgb(")
+                .trim_end_matches(')')
+                .split(',')
+                .filter_map(|part| part.trim().parse::<u32>().ok());
+            match (parts.next(), parts.next(), parts.next()) {
+                (Some(red), Some(green), Some(blue)) => {
+                    (red * 299 + green * 587 + blue * 114) / 1000 < 128
+                }
+                _ => false,
+            }
+        })
+        .unwrap_or(false);
     let var_of = |element: &Element| {
         web_sys::window()
             .and_then(|window| window.get_computed_style(element).ok().flatten())
@@ -916,13 +939,14 @@ async fn s9(document: &Document, studio: Studio) -> String {
         .unwrap_or_default();
     let pages = query_all(document, ".page-slot").len();
     let detail = format!(
-        "字体 {fonts} · {label} · {class} · {title} · 页 {pages} · 探针 {ready} · 校样字体 {computed_family}（期望 {expected_family}） · var root={root_var} host={host_var}"
+        "字体 {fonts} · {label} · {class} · {title} · 页 {pages} · 探针 {ready} · 校样字体 {computed_family}（期望 {expected_family}） · 墨色 {ink_ok} · var root={root_var} host={host_var}"
     );
     result(
         "S9",
         ready
             && verdict_ok
             && proof_font_ok
+            && ink_ok
             && pages > 0
             && report.map(|report| report.samples > 0).unwrap_or(false),
         detail,

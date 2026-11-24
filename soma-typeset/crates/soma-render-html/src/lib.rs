@@ -29,14 +29,11 @@ pub fn render(layout: &PagedLayout, styles: &StyleTable, text: &dyn TextSource) 
     render_with(layout, styles, text, &NoImages)
 }
 
-/// Render with an image source. A figure whose asset resolves is inlined as a
-/// `data:` URI, so the document stays self-contained and never names an
-/// external resource (ADR-0048).
 /// The engine's page CSS. It is identical for every page, so a preview that
 /// mounts one Shadow DOM per page can inject it once per root instead of
 /// duplicating it inside every fragment.
-pub const PAGE_STYLE: &str = "html,body{margin:0;padding:0;background:#f4f4f4;}\
-.page{position:relative;background:#fff;margin:1em auto;box-shadow:0 0 4px #bbb;overflow:hidden;}\
+pub const PAGE_STYLE: &str = "html,body{margin:0;padding:0;background:#f4f4f4;color:#111;color-scheme:light;}\
+.page{position:relative;background:#fff;color:#111;margin:1em auto;box-shadow:0 0 4px #bbb;overflow:hidden;}\
 .block{position:absolute;white-space:pre;}\
 .atom{position:absolute;white-space:pre;}\
 .footnote-number{position:absolute;white-space:pre;}\
@@ -45,8 +42,7 @@ pub const PAGE_STYLE: &str = "html,body{margin:0;padding:0;background:#f4f4f4;}\
 .figure{position:absolute;background:#eee;border:1px solid #ccc;}\
 .rule{position:absolute;border-top:1px solid #333;}\
 .table-rule{position:absolute;background:#333;}\
-.code{font-family:monospace;}\
-";
+.code{font-family:monospace;}";
 
 /// One page, split into the shared style and the page body.
 ///
@@ -59,6 +55,9 @@ pub struct PageFragment {
     pub body: String,
 }
 
+/// Render with an image source. A figure whose asset resolves is inlined as a
+/// `data:` URI, so the document stays self-contained and never names an
+/// external resource (ADR-0048).
 pub fn render_with(
     layout: &PagedLayout,
     styles: &StyleTable,

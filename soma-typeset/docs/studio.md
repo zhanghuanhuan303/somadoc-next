@@ -171,7 +171,7 @@ directory; `examples/` is not modified.
 | S6 | Typing rebuilds after the debounce and changes the hash; IME composition does not rebuild until it ends. |
 | S7 | Inspect rows equal the overlay lines on page 1; clicking a row selects the same box; unavailable fields display `—`. |
 | S8 | No external resources; no `<script>`/`<a href>` inside page shadows; remote AI disabled; CSP and nosniff present. |
-| S9 | Probe p95 with fonts and `不一致` without them; SSE `built`/`error`; a failed reload keeps the previous build; PDF page count. |
+| S9 | Probe p95 with fonts and `不一致` without them; the proof's first block resolves to a dark ink colour (`color-scheme: light`); SSE `built`/`error`; a failed reload keeps the previous build; PDF page count. |
 | S10 | The assistant has no engine write path; its reply renders as text; remote is off. |
 
 ## Known limits
@@ -185,6 +185,10 @@ directory; `examples/` is not modified.
   server-free artifact.
 - **Inspect shows total cost only** (D102), and line text is best-effort
   because atoms carry no source offsets (D103).
+- **The proof's ink is pinned to `#111`.** Page CSS sets `color:#111;color-scheme:light`
+  so a dark browser preference can never turn text white on white paper; the
+  proof therefore does not follow the UI theme's ink token. Templates may still
+  colour individual runs.
 - **PDF compatibility:** Firefox/pdf.js and Poppler render the CJK TrueType
   subset correctly; Ghostscript currently maps some CJK glyphs to the wrong
   shapes (D106). The PDF is not blank in the browser or in `pdftoppm`.

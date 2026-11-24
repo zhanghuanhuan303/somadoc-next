@@ -103,6 +103,14 @@ fn text_of(html: &str) -> String {
 }
 
 #[test]
+fn page_style_has_a_light_fallback_color() {
+    // The proof is mounted in a dark UI; a missing template color must not
+    // inherit `canvastext` (white) on a white page.
+    assert!(PAGE_STYLE.contains("color-scheme:light"));
+    assert!(PAGE_STYLE.contains("color:#111"));
+}
+
+#[test]
 fn renders_pages_with_absolute_positions() {
     let html = render_document();
 
