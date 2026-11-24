@@ -38,6 +38,8 @@ const HEADER_RULE: i32 = 234;
 const RULE: i32 = 156;
 /// One 10.5pt line at line-height 1.6.
 const LINE: i32 = 6553;
+/// Booktabs-style rule separation: 0.25 em at the 10.5pt body size.
+const SEP: i32 = 1024;
 
 fn cell(value: &str, colspan: u16, rowspan: u16) -> Cell {
     let paragraph = Paragraph::new(NodeMeta::synthesized(), vec![text(value)]);
@@ -107,10 +109,10 @@ fn rules_bracket_every_row_and_repeat_on_continuation_pages() {
             .iter()
             .find(|block| block_text(&layout, block) == "表头")
             .unwrap_or_else(|| panic!("page {page} repeats the header"));
-        assert_eq!(header.y.0, OUTER, "header sits below the outer rule");
+        assert_eq!(header.y.0, OUTER + SEP, "header sits below the outer rule");
 
         let header_rule = rules[1];
-        assert_eq!(header_rule.y.0, OUTER + LINE);
+        assert_eq!(header_rule.y.0, OUTER + SEP + LINE + SEP);
         assert_eq!(header_rule.height.0, HEADER_RULE);
         assert_eq!(header_rule.width.0, content_width);
 
@@ -120,8 +122,8 @@ fn rules_bracket_every_row_and_repeat_on_continuation_pages() {
             .collect();
         assert!(!body.is_empty(), "page {page} has body rows");
         assert!(
-            body[0].y.0 >= OUTER + LINE + HEADER_RULE,
-            "body starts below the header rule"
+            body[0].y.0 >= OUTER + SEP + LINE + SEP + HEADER_RULE + SEP,
+            "body starts below the header rule and its separation"
         );
 
         // Each body row carries its own trailing rule; the last page ends
@@ -171,7 +173,8 @@ fn an_internal_rule_skips_a_spanning_cell() {
     ];
     let table = Table::new(NodeMeta::synthesized(), columns(2), rows);
     let doc = document(vec![Block::Table(table)]);
-    let styled = styled(&doc, RULED);
+    let source = RULED.replace("height: 34mm", "height: 70mm");
+    let styled = styled(&doc, &source);
     let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
 
     assert_eq!(layout.page_count(), 1, "the fixture fits one page");
@@ -223,14 +226,14 @@ fn rules_add_their_own_vertical_space() {
     assert_eq!(rules.len(), 2, "top and bottom outer rules");
     assert_eq!(rules[0].y.0, 0);
     assert_eq!(rules[0].height.0, OUTER);
-    assert_eq!(cells[0].y.0, OUTER);
+    assert_eq!(cells[0].y.0, OUTER + SEP);
 
     let bottom = rules[1];
-    assert_eq!(bottom.y.0, OUTER + cells[0].height.0);
+    assert_eq!(bottom.y.0, OUTER + SEP + cells[0].height.0 + SEP);
     assert_eq!(bottom.height.0, OUTER);
     assert_eq!(
         layout.pages[0].used_height.0,
-        OUTER + cells[0].height.0 + OUTER
+        OUTER + SEP + cells[0].height.0 + SEP + OUTER
     );
 }
 

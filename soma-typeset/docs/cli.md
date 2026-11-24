@@ -12,6 +12,8 @@ Design record: ADR-0029.
 soma render --input <file> [--template <file>] [--engine <file>] \
             [--format html|svg|json|pdf] [--out <file>] [--metrics <file>] \
             [--font <file[#index]>] [--font-bold <file[#index]>] \
+            [--font-sans <file[#index]>] [--font-sans-bold <file[#index]>] \
+            [--font-mono <file[#index]>] [--font-mono-bold <file[#index]>] \
             [--font-math <file[#index]>] [--hyphenation <patterns>]
 soma check  --input <file> [--template <file>] [--engine <file>]
 soma --help
@@ -20,7 +22,7 @@ soma --help
 | Flag | Meaning |
 |---|---|
 | `--input`, `-i` | Source document. Extension picks the frontend: `.md`, `.html`, `.tex`, or `.docx` (read as binary and imported; no layout fidelity). |
-| `--template`, `-t` | Pure-YAML template. Omitted: the built-in `latex-article` template — A4, LaTeX `article` 10 pt on a 12 pt baseline, a 121.3 x 210.2 mm text block, 1.5 em paragraph indent, no paragraph spacing, and a centred folio (ADR-0069). |
+| `--template`, `-t` | Pure-YAML template. Omitted: the built-in Plex reference — A4, 25.4 mm margins, IBM Plex Sans SC 10 pt on a 14.4 pt baseline, no paragraph indent, a 20 pt paragraph skip, natural-width three-rule tables, a cover when metadata exists, a TOC when headings exist, and the Rust-book code panel (ADR-0088). The former LaTeX `article` default is archived as `examples/templates/latex-article.yaml`. |
 | `--engine` | `soma.engine/1` file. Omitted: `latex-v1` defaults (`tolerance=1260`, ragged last line; ADR-0069). |
 | `--format`, `-f` | `html` (default), `svg`, `json` (canonical page result), or `pdf`. |
 | `--font-fallback` | Optional rescue face for glyphs `--font` lacks. Layout must have measured it: add a `fallback:` face to the metrics table (`tools/metrics-gen --face fallback:normal:<file>`). Without it, missing glyphs render as `.notdef`. |
@@ -30,6 +32,8 @@ soma --help
 `tools/metrics-gen` also audits installed fonts (`--audit <dir>`), writes a fingerprint library (`--fingerprints <csv>`) and recognises an unknown face against one (`--identify <font> --library <csv>`), checks a face against a document's character set (`--coverage`) and ranks rescue faces (`--fallback`). See [`docs/fonts.md`](fonts.md) and [`docs/mixed-font.md`](mixed-font.md). `scripts/fonts.sh` picks a face and writes the table in one step.
 | `--font` | TrueType font for `--format pdf`; `path#index` selects a TTC face. Required for PDF. |
 | `--font-bold`, `--font-math` | Optional bold/math faces. An explicit `--font-math` is trusted as given. Omitted, with a formula in the document, the CLI uses the bundled New Computer Modern Math (the embedded table's face), then probes installed faces; a candidate must match the table's advances (ADR-0077). If none matches, formula symbols use the body face and a warning is printed. |
+| `--font-sans`, `--font-sans-bold` | Optional sans family (`font-family: sans` / `hei` / `gothic`). Omitted: fall back to `--font` / `--font-bold`. |
+| `--font-mono`, `--font-mono-bold` | Optional monospaced family (`font-family: mono`). Omitted: fall back to the sans face, then the body face (ADR-0089). The metrics table must contain a `mono:` face for layout to use it; `tools/metrics-gen --face mono:normal:<file>` measures one. |
 | `--out`, `-o` | Output path; `-` or omitted writes to stdout. |
 | `--stats` | Print `pages`, `blocks`, `lines`, and the canonical hash to stderr. For PDF, also print the resolved math face: `math: <path> (auto)`, `math: <path> (explicit)`, or `math: none`. |
 

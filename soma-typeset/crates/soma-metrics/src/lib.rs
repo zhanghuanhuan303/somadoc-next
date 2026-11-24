@@ -77,6 +77,8 @@ pub const FAMILY_SANS: u8 = 1;
 pub const FAMILY_MATH: u8 = 2;
 /// A rescue face: used when the style's face has no glyph for a character.
 pub const FAMILY_FALLBACK: u8 = 3;
+/// A monospaced text face (ADR-0089). Old blobs simply have none.
+pub const FAMILY_MONO: u8 = 4;
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;

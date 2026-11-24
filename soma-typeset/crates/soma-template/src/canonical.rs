@@ -166,7 +166,27 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
         }
         None => out.write_str("null")?,
     }
+    // Keep the key out of the canonical form for the default so templates
+    // that do not opt in keep their historical bytes.
+    if template.table.width != crate::template::TableWidth::Justify {
+        out.write_str(",\"width\":\"")?;
+        out.write_str(template.table.width.as_str())?;
+        out.write_char('"')?;
+    }
     out.write_char('}')?;
+
+    if !template.syntax.is_empty() {
+        out.write_str(",\"syntax\":{")?;
+        for (index, (class, color)) in template.syntax.entries().enumerate() {
+            if index > 0 {
+                out.write_char(',')?;
+            }
+            write!(out, "\"{}\":\"", class.as_str())?;
+            write_color(out, Some(color))?;
+            out.write_char('"')?;
+        }
+        out.write_char('}')?;
+    }
 
     out.write_str(",\"masters\":[")?;
     for (index, master) in template.masters.iter().enumerate() {
@@ -391,6 +411,19 @@ fn write_style(out: &mut impl Write, styled: &StyledDoc) -> fmt::Result {
     }
     out.write_str("]")?;
 
+    if !styled.table().syntax().is_empty() {
+        out.write_str(",\"syntax\":{")?;
+        for (index, (class, color)) in styled.table().syntax().entries().enumerate() {
+            if index > 0 {
+                out.write_char(',')?;
+            }
+            write!(out, "\"{}\":\"", class.as_str())?;
+            write_color(out, Some(color))?;
+            out.write_char('"')?;
+        }
+        out.write_char('}')?;
+    }
+
     out.write_str(",\"styles\":[")?;
     for (index, style) in styled.table().styles().iter().enumerate() {
         if index > 0 {
@@ -447,7 +480,25 @@ fn write_computed_style(out: &mut impl Write, style: &ComputedStyle) -> fmt::Res
     write!(out, "\",\"underline\":{}", style.underline)?;
     write!(out, ",\"smallCaps\":{}", style.small_caps)?;
     write!(out, ",\"keepWithNext\":{}", style.keep_with_next)?;
-    write!(out, ",\"pageBreakBefore\":{}}}", style.page_break_before)
+    write!(out, ",\"pageBreakBefore\":{}", style.page_break_before)?;
+    if let Some(background) = style.background {
+        out.write_str(",\"background\":\"")?;
+        write_color(out, Some(background))?;
+        out.write_char('"')?;
+    }
+    if style.padding_top.0 != 0 {
+        write!(out, ",\"paddingTop\":{}", style.padding_top.0)?;
+    }
+    if style.padding_right.0 != 0 {
+        write!(out, ",\"paddingRight\":{}", style.padding_right.0)?;
+    }
+    if style.padding_bottom.0 != 0 {
+        write!(out, ",\"paddingBottom\":{}", style.padding_bottom.0)?;
+    }
+    if style.padding_left.0 != 0 {
+        write!(out, ",\"paddingLeft\":{}", style.padding_left.0)?;
+    }
+    out.write_char('}')
 }
 
 fn write_color(out: &mut impl Write, color: Option<u32>) -> fmt::Result {

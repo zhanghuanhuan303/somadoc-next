@@ -30,17 +30,22 @@ usage:
               [--metrics <file>]
               [--font <file[#index]>] [--font-bold <file[#index]>]
               [--font-sans <file[#index]>] [--font-sans-bold <file[#index]>]
+              [--font-mono <file[#index]>] [--font-mono-bold <file[#index]>]
               [--font-math <file[#index]>] [--font-fallback <file[#index]>]
   soma check  --input <file> [--template <file>] [--engine <file>]
 
   --input     .md / .markdown, .html / .htm, .tex / .latex, .docx
-  --template  pure-YAML template; omitted uses the built-in A4 default
+  --template  pure-YAML template; omitted uses the built-in Plex design
   --engine    soma.engine/1 configuration; omitted uses publish-v1
   --format    html (default), svg, json (canonical page result), or pdf
   --metrics   soma.metrics table; omitted uses the embedded table.
               Generate one with tools/metrics-gen to match a PDF font.
   --font      TrueType font for PDF output (required by --format pdf)
   --font-bold optional bold face; falls back to --font
+  --font-sans optional sans face; falls back to --font
+  --font-sans-bold optional bold sans face
+  --font-mono optional monospaced face; falls back to --font-sans, then --font
+  --font-mono-bold optional bold monospaced face
   --font-math optional math face; omitted uses the bundled New Computer
               Modern Math the embedded table was measured from, then probes
               installed faces, then falls back to --font with a warning
@@ -53,171 +58,9 @@ exit codes:
   1  usage, input, template, engine, or layout error
 ";
 
-/// A4, 20 mm margins, justified 10.5 pt body. Mirrors `soma_eval`'s template so
-/// `soma render` works before a designer writes one.
-const DEFAULT_TEMPLATE: &str = r#"
-# LaTeX article defaults: A4, 10pt on a 12pt baseline, the 345 x 598 pt
-# text block of the 10pt class (121.3 x 210.2 mm on A4), 15pt paragraph
-# indent, no paragraph spacing, no running head, and a centred folio
-# 30pt (\footskip) below the text block.
-name: latex-article
-version: 1
-
-page:
-  size: A4
-  margin-top: 44.4mm
-  margin-bottom: 42.4mm
-  margin-left: 44.0mm
-  margin-right: 44.7mm
-  header: 0mm
-  footer: 10.5mm
-  folio: "{page}"
-
-numbering:
-  headings: arabic-dotted
-  depth: 3
-  figures: "图 {n}"
-  tables: "表 {n}"
-  equations: "({n})"
-
-styles:
-  - selector:
-      element: document
-    declarations:
-      font-size: 10pt
-      line-height: 1.2
-      align: justify
-  - selector:
-      element: paragraph
-    declarations:
-      first-indent: 1.5em
-      space-before: 0
-      space-after: 0
-  # \section: \Large\bfseries, 3.5ex before / 2.3ex after.
-  - selector:
-      element: heading
-    declarations:
-      font-size: 12pt
-      weight: bold
-      space-before: 1.4em
-      space-after: 0.65em
-      keep-with-next: true
-  - selector:
-      element: heading
-      level: 1
-    declarations:
-      font-size: 14.4pt
-      space-before: 1.5em
-      space-after: 1em
-  - selector:
-      element: heading
-      level: 2
-    declarations:
-      font-size: 12pt
-  # \subsubsection: \normalsize\bfseries.
-  - selector:
-      element: heading
-      level: 3
-    declarations:
-      font-size: 10pt
-  - selector:
-      element: strong
-    declarations:
-      weight: bold
-  - selector:
-      element: emphasis
-    declarations:
-      slant: italic
-  - selector:
-      element: underline
-    declarations:
-      underline: true
-  - selector:
-      element: smallCaps
-    declarations:
-      small-caps: true
-  # \footnotesize: 8pt on 9.5pt.
-  - selector:
-      element: footnote
-    declarations:
-      font-size: 8pt
-      line-height: 1.1875
-      first-indent: 0
-      space-before: 0.35em
-  # \small captions, centred like article's short captions.
-  - selector:
-      element: figureCaption
-    declarations:
-      font-size: 9pt
-      line-height: 1.2
-      align: center
-      first-indent: 0
-      space-before: 0.7em
-      space-after: 1em
-  - selector:
-      element: tableCaption
-    declarations:
-      font-size: 9pt
-      line-height: 1.2
-      align: center
-      first-indent: 0
-      space-before: 0.7em
-      space-after: 0.35em
-  # itemize/enumerate: \leftmargini = 2.5em, \itemsep ~ 0.4em.
-  - selector:
-      element: list
-    declarations:
-      indent-left: 1.3em
-      first-indent: 0
-      space-before: 0.8em
-      space-after: 0.8em
-  - selector:
-      element: listItem
-    declarations:
-      indent-left: 1.2em
-  - selector:
-      element: paragraph
-      within: listItem
-    declarations:
-      first-indent: -1.2em
-      space-before: 0.2em
-      space-after: 0.2em
-  # quote: 2.5em on both sides, no first-line indent.
-  - selector:
-      element: blockQuote
-    declarations:
-      indent-left: 2.5em
-      indent-right: 2.5em
-      space-before: 0.8em
-      space-after: 0.8em
-  - selector:
-      element: paragraph
-      within: blockQuote
-    declarations:
-      first-indent: 0
-  # Verbatim is \ttfamily; `mono` selects the second (sans) family, since the
-  # renderer has one non-body slot.
-  - selector:
-      element: codeBlock
-    declarations:
-      family: mono
-      font-size: 10pt
-      line-height: 1.2
-      first-indent: 0
-      space-before: 0.6em
-      space-after: 0.6em
-  # \abovedisplayskip / \belowdisplayskip at 10pt: 10pt plus 2pt minus 5pt.
-  - selector:
-      element: mathBlock
-    declarations:
-      font-size: 10pt
-      space-before: 1em
-      space-before-plus: 0.2em
-      space-before-minus: 0.5em
-      space-after: 1em
-      space-after-plus: 0.2em
-      space-after-minus: 0.5em
-"#;
+/// The built-in design: the Plex reference page (ADR-0088). It is the same
+/// file `scripts/plex.sh` renders, embedded so a single binary still works.
+const DEFAULT_TEMPLATE: &str = include_str!("../../../examples/templates/plex.yaml");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Format {
@@ -240,6 +83,8 @@ struct Options {
     font_bold: Option<String>,
     font_sans: Option<String>,
     font_sans_bold: Option<String>,
+    font_mono: Option<String>,
+    font_mono_bold: Option<String>,
     font_math: Option<String>,
     font_fallback: Option<String>,
     hyphenation: Option<String>,
@@ -282,6 +127,8 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
     let mut font_bold = None;
     let mut font_sans = None;
     let mut font_sans_bold = None;
+    let mut font_mono = None;
+    let mut font_mono_bold = None;
     let mut font_math = None;
     let mut font_fallback = None;
     let mut hyphenation = None;
@@ -305,6 +152,8 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
             "--font-bold" => font_bold = Some(value()?),
             "--font-sans" => font_sans = Some(value()?),
             "--font-sans-bold" => font_sans_bold = Some(value()?),
+            "--font-mono" => font_mono = Some(value()?),
+            "--font-mono-bold" => font_mono_bold = Some(value()?),
             "--font-math" => font_math = Some(value()?),
             "--font-fallback" => font_fallback = Some(value()?),
             "--hyphenation" => hyphenation = Some(value()?),
@@ -335,6 +184,8 @@ fn parse_options(args: &[String], allow_format: bool) -> Result<Options, String>
         font_bold,
         font_sans,
         font_sans_bold,
+        font_mono,
+        font_mono_bold,
         font_math,
         font_fallback,
         hyphenation,
@@ -397,6 +248,8 @@ fn render(args: &[String]) -> Result<(), String> {
                 bold: faces.bold.as_ref(),
                 sans: faces.sans.as_ref(),
                 sans_bold: faces.sans_bold.as_ref(),
+                mono: faces.mono.as_ref(),
+                mono_bold: faces.mono_bold.as_ref(),
                 math: faces.math.as_ref(),
                 fallback: faces.fallback.as_ref(),
             };
@@ -711,6 +564,8 @@ struct PdfFaceSet {
     bold: Option<PdfFont>,
     sans: Option<PdfFont>,
     sans_bold: Option<PdfFont>,
+    mono: Option<PdfFont>,
+    mono_bold: Option<PdfFont>,
     math: Option<PdfFont>,
     fallback: Option<PdfFont>,
     /// How the math face was chosen, for `--stats` and the warning.
@@ -788,6 +643,14 @@ fn load_pdf_fonts(
         Some(spec) => Some(load_pdf_font(spec)?),
         None => None,
     };
+    let mono = match options.font_mono.as_deref() {
+        Some(spec) => Some(load_pdf_font(spec)?),
+        None => None,
+    };
+    let mono_bold = match options.font_mono_bold.as_deref() {
+        Some(spec) => Some(load_pdf_font(spec)?),
+        None => None,
+    };
     let (math, math_source) = match options.font_math.as_deref() {
         Some(spec) => (Some(load_pdf_font(spec)?), MathSource::Explicit),
         None if needs_math => match installed_math_face(table) {
@@ -805,6 +668,8 @@ fn load_pdf_fonts(
         bold,
         sans,
         sans_bold,
+        mono,
+        mono_bold,
         math,
         fallback,
         math_source,

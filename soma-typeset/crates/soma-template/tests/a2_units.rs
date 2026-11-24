@@ -84,8 +84,8 @@ fn line_height_multiplier_uses_the_resolved_font_size() {
 }
 
 #[test]
-fn family_names_select_the_sans_face() {
-    use soma_template::family_is_sans;
+fn family_names_select_the_three_roles() {
+    use soma_template::{family_is_sans, family_role, FamilyRole};
     assert!(!family_is_sans(None), "no family means serif");
     assert!(!family_is_sans(Some("")));
     assert!(!family_is_sans(Some("Songti SC")));
@@ -93,5 +93,13 @@ fn family_names_select_the_sans_face() {
     assert!(family_is_sans(Some("SANS")));
     assert!(family_is_sans(Some("Heiti SC")), "无衬线的中文名");
     assert!(family_is_sans(Some("Source Han Gothic")));
-    assert!(family_is_sans(Some("monospace")));
+    assert!(family_is_sans(Some("IBM Plex Sans SC")));
+
+    // Monospace is a third role, not a synonym for sans (ADR-0089).
+    assert_eq!(family_role(Some("monospace")), FamilyRole::Mono);
+    assert_eq!(family_role(Some("IBM Plex Mono")), FamilyRole::Mono);
+    assert_eq!(family_role(Some("Source Code Pro")), FamilyRole::Mono);
+    assert!(!family_is_sans(Some("monospace")));
+    assert_eq!(family_role(None), FamilyRole::Serif);
+    assert_eq!(family_role(Some("IBM Plex Sans SC")), FamilyRole::Sans);
 }

@@ -1,0 +1,11 @@
+[package]
+name = "soma-highlight"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Dependency-free, line-oriented code lexer for soma-typeset (ADR-0091)"
+
+[dependencies]
+soma-core = { path = "../soma-core" }

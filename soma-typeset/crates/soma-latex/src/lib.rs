@@ -771,6 +771,17 @@ impl<'a> Parser<'a> {
                     body.trim().to_string(),
                 ))]
             }
+            // TikZ is a display vector object, not text. Keeping the wrapper
+            // lets the layout recognise it before handing the source to the
+            // math parser (ADR-0092).
+            "tikzpicture" => {
+                let body = self.environment_body(&env);
+                let source = alloc::format!("\\begin{{{env}}}{body}\\end{{{env}}}");
+                vec![Block::MathBlock(MathBlock::new(
+                    NodeMeta::synthesized(),
+                    source,
+                ))]
+            }
             _ => {
                 let inner = self.parse_blocks(Some(&env), false);
                 self.consume_end(&env);

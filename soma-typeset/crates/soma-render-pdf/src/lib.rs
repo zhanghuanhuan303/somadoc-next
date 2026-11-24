@@ -34,7 +34,8 @@ use core::fmt::Write;
 
 use soma_core::Decorations;
 use soma_layout::{
-    BoxKind, MathBox, OutlineEntry, PagedLayout, PlacedBlock, TableCell, TextSource,
+    BoxKind, MathBox, OutlineEntry, PagedLayout, PlacedBlock, TableCell, TextSource, TikzPoint,
+    TikzSegment,
 };
 use soma_template::{ComputedStyle, FontWeight, StyledDoc};
 
@@ -49,9 +50,12 @@ const FOOTNOTE_MARKER: char = '\u{e000}';
 pub struct PdfFonts<'a> {
     pub regular: &'a PdfFont,
     pub bold: Option<&'a PdfFont>,
-    /// The sans family: `font-family: sans` (or `hei`, `gothic`, `mono`).
+    /// The sans family: `font-family: sans` (or `hei`, `gothic`).
     pub sans: Option<&'a PdfFont>,
     pub sans_bold: Option<&'a PdfFont>,
+    /// The monospaced family: `font-family: mono` (ADR-0089).
+    pub mono: Option<&'a PdfFont>,
+    pub mono_bold: Option<&'a PdfFont>,
     pub math: Option<&'a PdfFont>,
     /// A rescue face for glyphs the body face lacks. Omit it and those glyphs
     /// render as `.notdef`; layout will still have measured them correctly.
@@ -72,16 +76,20 @@ enum Role {
     Bold,
     Sans,
     SansBold,
+    Mono,
+    MonoBold,
     Math,
     Fallback,
 }
 
 impl Role {
-    const ALL: [Role; 6] = [
+    const ALL: [Role; 8] = [
         Role::Regular,
         Role::Bold,
         Role::Sans,
         Role::SansBold,
+        Role::Mono,
+        Role::MonoBold,
         Role::Math,
         Role::Fallback,
     ];
@@ -94,6 +102,8 @@ impl Role {
             Role::SansBold => "F4",
             Role::Math => "F5",
             Role::Fallback => "F6",
+            Role::Mono => "F7",
+            Role::MonoBold => "F8",
         }
     }
 }
@@ -450,6 +460,8 @@ struct Used {
     bold: Vec<(u16, u32)>,
     sans: Vec<(u16, u32)>,
     sans_bold: Vec<(u16, u32)>,
+    mono: Vec<(u16, u32)>,
+    mono_bold: Vec<(u16, u32)>,
     math: Vec<(u16, u32)>,
     fallback: Vec<(u16, u32)>,
 }
@@ -478,6 +490,8 @@ impl Used {
             Role::Bold => &mut self.bold,
             Role::Sans => &mut self.sans,
             Role::SansBold => &mut self.sans_bold,
+            Role::Mono => &mut self.mono,
+            Role::MonoBold => &mut self.mono_bold,
             Role::Math => &mut self.math,
             Role::Fallback => &mut self.fallback,
         }
@@ -489,6 +503,8 @@ impl Used {
             Role::Bold => fonts.bold.is_some() && !self.bold.is_empty(),
             Role::Sans => fonts.sans.is_some() && !self.sans.is_empty(),
             Role::SansBold => fonts.sans_bold.is_some() && !self.sans_bold.is_empty(),
+            Role::Mono => fonts.mono.is_some() && !self.mono.is_empty(),
+            Role::MonoBold => fonts.mono_bold.is_some() && !self.mono_bold.is_empty(),
             Role::Math => fonts.math.is_some() && !self.math.is_empty(),
             Role::Fallback => fonts.fallback.is_some() && !self.fallback.is_empty(),
         }
@@ -502,6 +518,8 @@ impl Used {
             Role::Bold => self.bold.clone(),
             Role::Sans => self.sans.clone(),
             Role::SansBold => self.sans_bold.clone(),
+            Role::Mono => self.mono.clone(),
+            Role::MonoBold => self.mono_bold.clone(),
             Role::Math => self.math.clone(),
             Role::Fallback => self.fallback.clone(),
         };
@@ -517,6 +535,13 @@ impl PdfFonts<'_> {
             Role::Bold => self.bold.unwrap_or(self.regular),
             Role::Sans => self.sans.unwrap_or(self.regular),
             Role::SansBold => self.sans_bold.or(self.sans).unwrap_or(self.regular),
+            Role::Mono => self.mono.or(self.sans).unwrap_or(self.regular),
+            Role::MonoBold => self
+                .mono_bold
+                .or(self.mono)
+                .or(self.sans_bold)
+                .or(self.sans)
+                .unwrap_or(self.regular),
             Role::Math => self.math.unwrap_or(self.regular),
             Role::Fallback => self.fallback.unwrap_or(self.regular),
             Role::Regular => self.regular,
@@ -528,16 +553,30 @@ impl PdfFonts<'_> {
             return Role::Fallback;
         }
         let bold = style.weight == FontWeight::Bold;
-        if soma_template::family_is_sans(style.family.as_deref()) {
-            match (bold, self.sans_bold, self.sans) {
+        match soma_template::family_role(style.family.as_deref()) {
+            soma_template::FamilyRole::Mono => match (bold, self.mono_bold, self.mono) {
+                (true, Some(_), _) => Role::MonoBold,
+                (_, _, Some(_)) => Role::Mono,
+                // A metrics table or command line without a mono face keeps
+                // working: use the sans face, then the body face.
+                _ => match (bold, self.sans_bold, self.sans) {
+                    (true, Some(_), _) => Role::SansBold,
+                    (_, _, Some(_)) => Role::Sans,
+                    _ => Role::Regular,
+                },
+            },
+            soma_template::FamilyRole::Sans => match (bold, self.sans_bold, self.sans) {
                 (true, Some(_), _) => Role::SansBold,
                 (_, _, Some(_)) => Role::Sans,
                 _ => Role::Regular,
+            },
+            soma_template::FamilyRole::Serif => {
+                if bold && self.bold.is_some() {
+                    Role::Bold
+                } else {
+                    Role::Regular
+                }
             }
-        } else if bold && self.bold.is_some() {
-            Role::Bold
-        } else {
-            Role::Regular
         }
     }
 
@@ -688,6 +727,8 @@ fn embed_font(
         Role::Bold => "SomaSerif-Bold",
         Role::Sans => "SomaSans",
         Role::SansBold => "SomaSans-Bold",
+        Role::Mono => "SomaMono",
+        Role::MonoBold => "SomaMono-Bold",
         Role::Math => "SomaMath",
         Role::Fallback => "SomaSerif-Fallback",
     };
@@ -836,19 +877,71 @@ fn paint_page(
     for block in &page.footer {
         paint_block(scene, &mut painter, block, 0, None, used_images);
     }
-    let footnote_top = scene.layout.page.content_height().0 - page.footnote_height.0;
-    for block in &page.footnotes {
-        paint_block(
-            scene,
-            &mut painter,
-            block,
-            footnote_top.max(0),
-            None,
-            used_images,
+    let footnote_top = (scene.layout.page.content_height().0 - page.footnote_height.0).max(0);
+    if !page.footnotes.is_empty() {
+        let thickness = soma_layout::FOOTNOTE_RULE_THICKNESS.0;
+        let x = scene.layout.page.margin_left.0;
+        let top = scene.layout.page.margin_top.0 + footnote_top;
+        let y = scene.layout.page.height.0 - top - thickness;
+        painter.set_fill(0x333333);
+        painter.rect(
+            painter.scale.milli(x),
+            painter.scale.milli(y),
+            painter
+                .scale
+                .milli(soma_layout::footnote_rule_width(scene.layout.page.content_width()).0),
+            painter.scale.milli(thickness),
         );
+    }
+    for (index, block) in page.footnotes.iter().enumerate() {
+        if let Some(number) = page.footnote_numbers.get(index).copied().flatten() {
+            paint_footnote_number(scene, &mut painter, block, number, footnote_top);
+        }
+        paint_block(scene, &mut painter, block, footnote_top, None, used_images);
     }
     painter.end_text();
     (painter.out, painter.links)
+}
+
+/// Draw the number in a footnote's left column. The layout reserved
+/// `footnote_number_column` at the start of the note, so this never overlaps
+/// the first line. The number is smaller and slightly raised, matching the
+/// reference mark in the body.
+fn paint_footnote_number(
+    scene: &Scene<'_>,
+    painter: &mut Painter,
+    block: &soma_layout::PlacedBlock,
+    number: u32,
+    footnote_top: i32,
+) {
+    let Some(first) = block.lines.first() else {
+        return;
+    };
+    let style = scene
+        .styles
+        .style(block.style)
+        .cloned()
+        .unwrap_or_else(ComputedStyle::base);
+    let role = scene.fonts.role_for(&style, false);
+    let font = scene.fonts.font(role);
+    let baseline = scene.layout.page.margin_top.0
+        + footnote_top
+        + block.y.0
+        + first.y.0
+        + first.line.ascent.0
+        + first.line.leading.0 / 2;
+    let full = painter.scale.size(&style);
+    let size = full * 2 / 3;
+    let x = scene.layout.page.margin_left.0;
+    let y = scene.layout.page.height.0 - baseline + style.font_size.0 / 5;
+    painter.set_fill(style.color.unwrap_or(0));
+    painter.start_text();
+    painter.set_font(role, size);
+    let glyphs: Vec<u16> = format!("{number}")
+        .chars()
+        .map(|character| font.glyph(character as u32))
+        .collect();
+    painter.show(painter.scale.milli(x), painter.scale.milli(y), &glyphs);
 }
 
 /// The document-level inputs a page needs. Bundled so that `paint_block` keeps
@@ -1177,6 +1270,27 @@ fn decoration_rect(
     [x, page_height - top - thickness, advance, thickness]
 }
 
+/// The width an underline or strikethrough must cover for one atom.
+///
+/// Justification puts glue between two atoms, so drawing each atom's own
+/// `advance` leaves a visible gap in an underlined run. Extending to the next
+/// decorated atom's `x` covers the glue as well; the last atom of a run keeps
+/// its own advance. A non-decorated neighbour ends the run.
+fn decoration_advance(
+    boxes: &[soma_core::AtomBox],
+    index: usize,
+    decorated: impl Fn(u32) -> bool,
+) -> i32 {
+    let atom = &boxes[index];
+    let mut advance = atom.advance.0;
+    if let Some(next) = boxes.get(index + 1) {
+        if decorated(next.atom) {
+            advance = advance.max(next.x.0 - atom.x.0);
+        }
+    }
+    advance
+}
+
 /// Paint one placed block.
 ///
 /// `tags` is `Some` for the main reading order (body blocks) and `None` for
@@ -1198,6 +1312,23 @@ fn paint_block(
         .style(block.style)
         .cloned()
         .unwrap_or_else(ComputedStyle::base);
+    // A code panel is a block-level fill; the text coordinates already include
+    // the template's padding (ADR-0090). Painting it before the tagged text
+    // keeps the background an artifact, not content.
+    if block.kind == BoxKind::Code {
+        if let Some(background) = style.background {
+            let x = layout.page.margin_left.0 + block.x.0;
+            let top = layout.page.margin_top.0 + block.y.0 + extra_y;
+            let y = layout.page.height.0 - top - block.height.0;
+            painter.set_fill(background);
+            painter.rect(
+                painter.scale.milli(x),
+                painter.scale.milli(y),
+                painter.scale.milli(block.width.0),
+                painter.scale.milli(block.height.0),
+            );
+        }
+    }
     match block.kind {
         BoxKind::Rule | BoxKind::TableRule => {
             painter.set_fill(style.color.unwrap_or(0x333333));
@@ -1298,9 +1429,17 @@ fn paint_block(
     }
 
     for placed in &block.lines {
-        let baseline =
-            layout.page.margin_top.0 + block.y.0 + extra_y + placed.y.0 + placed.line.ascent.0;
-        for atom in &placed.line.boxes {
+        // The core reports the total leading; the renderer distributes it
+        // half above and half below the baseline (ADR-0086). Putting it all
+        // below the baseline makes every line look high inside its box, most
+        // visibly in a table cell between two rules.
+        let baseline = layout.page.margin_top.0
+            + block.y.0
+            + extra_y
+            + placed.y.0
+            + placed.line.ascent.0
+            + placed.line.leading.0 / 2;
+        for (atom_index, atom) in placed.line.boxes.iter().enumerate() {
             if let Some(inline) = block.inline_math.iter().find(|math| math.atom == atom.atom) {
                 let left = layout.page.margin_left.0 + block.x.0 + atom.x.0;
                 paint_math(
@@ -1344,9 +1483,16 @@ fn paint_block(
             let x = layout.page.margin_left.0 + block.x.0 + atom.x.0;
             let mut y = layout.page.height.0 - baseline;
             if mark.is_some() {
-                y += (full / 3) as i32;
+                // `full` is milli-points for the font operator; the baseline
+                // lives in layout units. Raise by 1/5 em in layout units so
+                // the superscript sits just above the cap height instead of
+                // floating a third of an em above the line.
+                y += atom_style.font_size.0 / 5;
             }
-            painter.set_fill(atom_style.color.unwrap_or(0));
+            let syntax_color = text
+                .atom_syntax(block.node, atom.atom)
+                .and_then(|class| styles.table().syntax_color(class));
+            painter.set_fill(syntax_color.or(atom_style.color).unwrap_or(0));
             painter.start_text();
             painter.set_font(role, size);
             let glyphs: Vec<u16> = match mark {
@@ -1415,7 +1561,10 @@ fn paint_block(
                 // milli-point size (ADR-0044).
                 let descriptor = font.descriptor();
                 let em = atom_style.font_size.0;
-                let advance = atom.advance.0;
+                let advance = decoration_advance(&placed.line.boxes, atom_index, |atom| {
+                    text.atom_decorations(block.node, atom)
+                        .contains(Decorations::UNDERLINE)
+                });
                 let page_height = layout.page.height.0;
                 if decorations.contains(Decorations::UNDERLINE) {
                     let rect = decoration_rect(
@@ -1429,12 +1578,16 @@ fn paint_block(
                     );
                     painter.rule(rect[0], rect[1], rect[2], rect[3]);
                 }
+                let strike_advance = decoration_advance(&placed.line.boxes, atom_index, |atom| {
+                    text.atom_decorations(block.node, atom)
+                        .contains(Decorations::STRIKETHROUGH)
+                });
                 if decorations.contains(Decorations::STRIKETHROUGH) {
                     let rect = decoration_rect(
                         em,
                         descriptor.underline_thickness,
                         x,
-                        advance,
+                        strike_advance,
                         baseline,
                         page_height,
                         -em * 3 / 10,
@@ -1515,6 +1668,83 @@ fn block_tag(scene: &Scene<'_>, block: &PlacedBlock) -> Option<&'static str> {
 }
 
 #[allow(clippy::too_many_arguments)]
+fn paint_tikz_paths(
+    painter: &mut Painter,
+    page_height: i32,
+    math: &MathBox,
+    left: i32,
+    baseline: i32,
+) {
+    for path in &math.paths {
+        if path.segments.is_empty() {
+            continue;
+        }
+        let scale = painter.scale;
+        painter.end_text();
+        if let Some(fill) = path.fill {
+            // Use the tracked setter: writing `rg` directly would leave
+            // `Painter::fill` stale, and a following text run could be drawn in
+            // the path's fill colour.
+            painter.set_fill(fill);
+        }
+        if let Some(stroke) = &path.stroke {
+            let (red, green, blue) = color(stroke.color);
+            painter.emit(&format!(
+                "{} {} {} RG\n",
+                number(red),
+                number(green),
+                number(blue)
+            ));
+            painter.emit(&format!("{} w\n", number(scale.milli(stroke.width.0))));
+            if stroke.dash.is_empty() {
+                painter.emit("[] 0 d\n");
+            } else {
+                painter.emit("[");
+                for (index, dash) in stroke.dash.iter().enumerate() {
+                    if index > 0 {
+                        painter.emit(" ");
+                    }
+                    painter.emit(&number(scale.milli(dash.0)));
+                }
+                painter.emit("] 0 d\n");
+            }
+        }
+        let x = |point: &TikzPoint| scale.milli(left + point.x.0);
+        let y = |point: &TikzPoint| scale.milli(page_height - (baseline + point.y.0));
+        painter.emit(&format!(
+            "{} {} m\n",
+            number(x(&path.start)),
+            number(y(&path.start))
+        ));
+        for segment in &path.segments {
+            match segment {
+                TikzSegment::Line(to) => {
+                    painter.emit(&format!("{} {} l\n", number(x(to)), number(y(to))));
+                }
+                TikzSegment::Cubic { c1, c2, to } => {
+                    painter.emit(&format!(
+                        "{} {} {} {} {} {} c\n",
+                        number(x(c1)),
+                        number(y(c1)),
+                        number(x(c2)),
+                        number(y(c2)),
+                        number(x(to)),
+                        number(y(to))
+                    ));
+                }
+                TikzSegment::Close => painter.emit("h\n"),
+            }
+        }
+        match (path.fill.is_some(), path.stroke.is_some()) {
+            (true, true) => painter.emit("B\n"),
+            (true, false) => painter.emit("f\n"),
+            (false, true) => painter.emit("S\n"),
+            (false, false) => painter.emit("n\n"),
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn paint_math(
     painter: &mut Painter,
     layout: &PagedLayout,
@@ -1525,6 +1755,7 @@ fn paint_math(
     paint: u32,
     text_role: Role,
 ) {
+    paint_tikz_paths(painter, layout.page.height.0, math, left, baseline);
     let math_role = fonts.math_role();
     for item in &math.items {
         let x = left + item.x.0;
@@ -1943,7 +2174,9 @@ fn roman(value: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod painter_tests {
-    use super::{decoration_rect, Painter, Scale};
+    use super::{decoration_advance, decoration_rect, paint_tikz_paths, Painter, Scale};
+    use soma_core::Width;
+    use soma_layout::{MathBox, TikzPath, TikzPoint, TikzSegment};
 
     fn painter() -> Painter {
         Painter {
@@ -1955,6 +2188,43 @@ mod painter_tests {
             size: 0,
             links: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_path_fill_does_not_leak_into_the_next_text_run() {
+        // The painter caches the current fill. A path that writes `rg` directly
+        // would desynchronise the cache, and a following black text run would
+        // inherit the path's tint (the node labels in a TikZ picture).
+        let mut painter = painter();
+        painter.set_fill(0x000000);
+        let start = painter.out.len();
+        let math = MathBox {
+            width: Width(1000),
+            height: Width(1000),
+            baseline: Width(1000),
+            items: Vec::new(),
+            rules: Vec::new(),
+            paths: vec![TikzPath {
+                start: TikzPoint {
+                    x: Width(0),
+                    y: Width(0),
+                },
+                segments: vec![TikzSegment::Line(TikzPoint {
+                    x: Width(500),
+                    y: Width(0),
+                })],
+                fill: Some(0xffe6e6),
+                stroke: None,
+            }],
+        };
+        paint_tikz_paths(&mut painter, 100_000, &math, 0, 0);
+        painter.set_fill(0x000000);
+        let out = String::from_utf8_lossy(&painter.out[start..]).into_owned();
+        let tint = out.find("0.901 rg\n").expect("the path's tint is emitted");
+        let black = out
+            .rfind("0.000 0.000 0.000 rg\n")
+            .expect("text after the path must re-emit black");
+        assert!(black > tint, "{out}");
     }
 
     #[test]
@@ -1989,6 +2259,34 @@ mod painter_tests {
     fn a_strikeout_sits_above_the_baseline() {
         let rect = decoration_rect(4096, 50, 0, 1000, 10_000, 40_000, -4096 * 3 / 10);
         assert_eq!(rect[1] + rect[3], 40_000 - 10_000 + 1228);
+    }
+
+    #[test]
+    fn an_underline_run_bridges_justification_glue() {
+        let boxes = [
+            soma_core::AtomBox {
+                atom: 0,
+                x: soma_core::Width(0),
+                advance: soma_core::Width(1000),
+            },
+            soma_core::AtomBox {
+                atom: 1,
+                x: soma_core::Width(1200),
+                advance: soma_core::Width(1000),
+            },
+            soma_core::AtomBox {
+                atom: 2,
+                x: soma_core::Width(2400),
+                advance: soma_core::Width(1000),
+            },
+        ];
+        assert_eq!(decoration_advance(&boxes, 0, |_| true), 1200);
+        assert_eq!(
+            decoration_advance(&boxes, 1, |atom| atom == 1),
+            1000,
+            "a non-decorated neighbour ends the run"
+        );
+        assert_eq!(decoration_advance(&boxes, 2, |_| true), 1000);
     }
 
     #[test]

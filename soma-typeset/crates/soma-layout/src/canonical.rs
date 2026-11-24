@@ -276,7 +276,85 @@ fn write_math_payload(out: &mut impl Write, math: &crate::MathBox) -> fmt::Resul
             rule.x.0, rule.y.0, rule.width.0, rule.thickness.0
         )?;
     }
-    out.write_str("]}")
+    out.write_str("]")?;
+    if !math.paths.is_empty() {
+        out.write_str(",\"paths\":[")?;
+        for (index, path) in math.paths.iter().enumerate() {
+            if index > 0 {
+                out.write_char(',')?;
+            }
+            out.write_str("{\"start\":")?;
+            write_point(out, path.start)?;
+            out.write_str(",\"segments\":[")?;
+            for (segment_index, segment) in path.segments.iter().enumerate() {
+                if segment_index > 0 {
+                    out.write_char(',')?;
+                }
+                match segment {
+                    crate::TikzSegment::Line(to) => {
+                        out.write_str("{\"type\":\"line\",\"to\":")?;
+                        write_point(out, *to)?;
+                        out.write_char('}')?;
+                    }
+                    crate::TikzSegment::Cubic { c1, c2, to } => {
+                        out.write_str("{\"type\":\"cubic\",\"c1\":")?;
+                        write_point(out, *c1)?;
+                        out.write_str(",\"c2\":")?;
+                        write_point(out, *c2)?;
+                        out.write_str(",\"to\":")?;
+                        write_point(out, *to)?;
+                        out.write_char('}')?;
+                    }
+                    crate::TikzSegment::Close => out.write_str("{\"type\":\"close\"}")?,
+                }
+            }
+            out.write_str("],\"fill\":")?;
+            match path.fill {
+                Some(color) => {
+                    out.write_char('"')?;
+                    write_color(out, Some(color))?;
+                    out.write_char('"')?;
+                }
+                None => out.write_str("null")?,
+            }
+            out.write_str(",\"stroke\":")?;
+            match &path.stroke {
+                Some(stroke) => {
+                    out.write_str("{\"color\":\"")?;
+                    write_color(out, Some(stroke.color))?;
+                    write!(out, "\",\"width\":{},\"dash\":[", stroke.width.0)?;
+                    for (dash_index, dash) in stroke.dash.iter().enumerate() {
+                        if dash_index > 0 {
+                            out.write_char(',')?;
+                        }
+                        write!(out, "{}", dash.0)?;
+                    }
+                    out.write_str("]}")?;
+                }
+                None => out.write_str("null")?,
+            }
+            out.write_char('}')?;
+        }
+        out.write_char(']')?;
+    }
+    out.write_char('}')
+}
+
+fn write_point(out: &mut impl Write, point: crate::TikzPoint) -> fmt::Result {
+    write!(out, "{{\"x\":{},\"y\":{}}}", point.x.0, point.y.0)
+}
+
+fn write_color(out: &mut impl Write, color: Option<u32>) -> fmt::Result {
+    let Some(color) = color else {
+        return Ok(());
+    };
+    write!(
+        out,
+        "#{:02x}{:02x}{:02x}",
+        color >> 16,
+        (color >> 8) & 0xff,
+        color & 0xff
+    )
 }
 
 /// JSON string with the escapes the canonical form needs. Formula text is a

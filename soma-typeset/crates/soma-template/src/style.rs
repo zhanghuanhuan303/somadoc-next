@@ -25,17 +25,38 @@ use alloc::vec::Vec;
 use soma_core::{Align, StyleId, Width};
 use soma_doc::{Block, Document, Inline, NodeId};
 
-/// Whether a `font-family` value asks for the sans face.
+/// Which family a `font-family` value asks for.
 ///
-/// `sans`/`mono`/`hei`/`gothic` select the second family; everything else,
-/// including an empty value, selects the first. The layout and the PDF backend
-/// must agree on this, so it lives next to [`ComputedStyle`] rather than in
-/// each of them.
-pub fn family_is_sans(family: Option<&str>) -> bool {
+/// Three roles, not two: code needs a monospaced face, and folding it into
+/// sans (the pre-ADR-0089 behaviour) makes every proportional face look wrong
+/// in a code block. `serif` is the default so a template that says nothing
+/// keeps its historical body face.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FamilyRole {
+    #[default]
+    Serif,
+    Sans,
+    Mono,
+}
+
+pub fn family_role(family: Option<&str>) -> FamilyRole {
     let family = family.unwrap_or("");
-    ["sans", "mono", "hei", "gothic"]
+    let has = |needle: &str| contains_ignore_ascii_case(family, needle);
+    if ["mono", "monospace", "code", "typewriter"]
         .iter()
-        .any(|needle| contains_ignore_ascii_case(family, needle))
+        .any(|needle| has(needle))
+    {
+        FamilyRole::Mono
+    } else if ["sans", "hei", "gothic"].iter().any(|needle| has(needle)) {
+        FamilyRole::Sans
+    } else {
+        FamilyRole::Serif
+    }
+}
+
+/// Compatibility predicate for the two-family era. `mono` is no longer sans.
+pub fn family_is_sans(family: Option<&str>) -> bool {
+    family_role(family) == FamilyRole::Sans
 }
 
 fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
@@ -49,7 +70,9 @@ fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
         .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
-use crate::template::{FontSlant, FontWeight, Property, PropertyValue, StyleRule, Template};
+use crate::template::{
+    FontSlant, FontWeight, Property, PropertyValue, StyleRule, SyntaxPalette, Template,
+};
 use crate::units::Rational;
 use crate::TemplateError;
 
@@ -64,6 +87,13 @@ pub struct ComputedStyle {
     pub tracking: Width,
     pub indent_left: Width,
     pub indent_right: Width,
+    /// Panel paint behind a block. `None` draws nothing.
+    pub background: Option<u32>,
+    /// Panel inset between the block edge and its content.
+    pub padding_top: Width,
+    pub padding_right: Width,
+    pub padding_bottom: Width,
+    pub padding_left: Width,
     pub space_before: Width,
     pub space_after: Width,
     /// Stretchable part of the space before a block (vertical glue).
@@ -103,6 +133,11 @@ impl ComputedStyle {
             tracking: Width::ZERO,
             indent_left: Width::ZERO,
             indent_right: Width::ZERO,
+            background: None,
+            padding_top: Width::ZERO,
+            padding_right: Width::ZERO,
+            padding_bottom: Width::ZERO,
+            padding_left: Width::ZERO,
             space_before: Width::ZERO,
             space_after: Width::ZERO,
             space_before_plus: Width::ZERO,
@@ -151,11 +186,25 @@ impl ComputedStyle {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StyleTable {
     styles: Vec<ComputedStyle>,
+    syntax: SyntaxPalette,
 }
 
 impl StyleTable {
     pub fn styles(&self) -> &[ComputedStyle] {
         &self.styles
+    }
+
+    /// Colors for highlighted code, if the template declared any.
+    pub fn syntax(&self) -> SyntaxPalette {
+        self.syntax
+    }
+
+    pub fn syntax_color(&self, class: soma_core::SyntaxClass) -> Option<u32> {
+        self.syntax.color(class)
+    }
+
+    pub(crate) fn set_syntax(&mut self, syntax: SyntaxPalette) {
+        self.syntax = syntax;
     }
 
     pub fn get(&self, id: StyleId) -> Option<&ComputedStyle> {
@@ -264,6 +313,7 @@ pub struct StyledDoc {
     page: ResolvedPage,
     footnote: crate::template::FootnoteNumbering,
     table_rules: TableRules,
+    table_width: crate::template::TableWidth,
     masters: Vec<ResolvedMaster>,
     header_text: Option<String>,
     folio: Option<String>,
@@ -329,6 +379,11 @@ impl StyledDoc {
     /// Table rules resolved from the template's `table` section.
     pub fn table_rules(&self) -> TableRules {
         self.table_rules
+    }
+
+    /// Horizontal sizing chosen by the template's `table: width:`.
+    pub fn table_width(&self) -> crate::template::TableWidth {
+        self.table_width
     }
 
     /// Master 0 is the default `page:` geometry, then `masters:` in order.
@@ -605,6 +660,8 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         },
     };
 
+    resolver.table.set_syntax(template.syntax);
+
     Ok(StyledDoc {
         node_style: resolver.node_style,
         table: resolver.table,
@@ -634,6 +691,7 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
             style: template.table.style,
             style_id: rule_style,
         },
+        table_width: template.table.width,
         masters,
         header_text: template.page.header_text.clone(),
         folio: template.page.folio.clone(),
@@ -914,7 +972,7 @@ impl Resolver<'_> {
 
 /// Fixed application order: `font-size` first, then `line-height`, then the
 /// remaining properties. This makes the result independent of YAML key order.
-const PROPERTY_ORDER: [Property; 26] = [
+const PROPERTY_ORDER: [Property; 31] = [
     Property::FontSize,
     Property::LineHeight,
     Property::FirstIndent,
@@ -930,6 +988,11 @@ const PROPERTY_ORDER: [Property; 26] = [
     Property::WidowLines,
     Property::OrphanLines,
     Property::BaselineGrid,
+    Property::Background,
+    Property::PaddingTop,
+    Property::PaddingRight,
+    Property::PaddingBottom,
+    Property::PaddingLeft,
     Property::HangingCap,
     Property::HangingPunctuation,
     Property::Align,
@@ -960,6 +1023,19 @@ fn apply(style: &mut ComputedStyle, property: Property, value: &PropertyValue, b
         }
         (Property::IndentRight, PropertyValue::Length(length)) => {
             style.indent_right = length.resolve(font_size, body_pt);
+        }
+        (Property::Background, PropertyValue::Color(color)) => style.background = Some(*color),
+        (Property::PaddingTop, PropertyValue::Length(length)) => {
+            style.padding_top = length.resolve(font_size, body_pt);
+        }
+        (Property::PaddingRight, PropertyValue::Length(length)) => {
+            style.padding_right = length.resolve(font_size, body_pt);
+        }
+        (Property::PaddingBottom, PropertyValue::Length(length)) => {
+            style.padding_bottom = length.resolve(font_size, body_pt);
+        }
+        (Property::PaddingLeft, PropertyValue::Length(length)) => {
+            style.padding_left = length.resolve(font_size, body_pt);
         }
         (Property::SpaceBefore, PropertyValue::Length(length)) => {
             style.space_before = length.resolve(font_size, body_pt);

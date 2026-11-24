@@ -326,10 +326,28 @@ fn a_gfm_table_becomes_a_table_block() {
     assert_eq!(table.columns.len(), 2);
     assert_eq!(table.columns[0].align, soma_doc::CellAlign::Left);
     assert_eq!(table.columns[1].align, soma_doc::CellAlign::Right);
+    assert_eq!(
+        (table.columns[0].share, table.columns[1].share),
+        (0, 0),
+        "equal dashes keep the measured widths"
+    );
     assert_eq!(table.rows.len(), 3);
     assert!(table.rows[0].header);
     assert_eq!(table.rows[2].cells.len(), 2);
     assert!(document.plain_text().contains("22"));
+}
+
+#[test]
+fn table_dashes_become_column_shares() {
+    let document = parse_markdown("| 短 | 长 |\n| --- | -------- |\n| 甲 | 乙 |\n");
+    let Block::Table(table) = &document.blocks[0] else {
+        panic!("expected a table");
+    };
+    assert_eq!(
+        (table.columns[0].share, table.columns[1].share),
+        (272, 728),
+        "the longer dash run gets the wider column"
+    );
 }
 
 #[test]

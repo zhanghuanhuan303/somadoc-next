@@ -26,14 +26,14 @@ pub mod units;
 mod yaml;
 
 pub use style::{
-    family_is_sans, resolve, ComputedStyle, ResolvedMaster, ResolvedPage, StyleTable, StyledDoc,
-    TableRules,
+    family_is_sans, family_role, resolve, ComputedStyle, FamilyRole, ResolvedMaster, ResolvedPage,
+    StyleTable, StyledDoc, TableRules,
 };
 pub use template::{
     parse_template, CoverSpec, Declaration, FontSlant, FontWeight, FootnoteNumbering, FootnoteSpec,
     FrontMatterNumbering, HeadingNumbering, IndexSort, IndexSpec, MasterSpec, NumberingSpec,
-    PageSize, PageSpec, Property, PropertyValue, RuleStyle, Selector, StyleRule, TableSpec,
-    Template, TocSpec, ELEMENTS, SCHEMA,
+    PageSize, PageSpec, Property, PropertyValue, RuleStyle, Selector, StyleRule, SyntaxPalette,
+    TableSpec, TableWidth, Template, TocSpec, ELEMENTS, SCHEMA,
 };
 pub use units::{LengthSpec, LineHeightSpec, Rational, Unit, UNITS_PER_EM};
 

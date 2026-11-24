@@ -158,6 +158,68 @@ impl Decorations {
     }
 }
 
+/// One class of a highlighted code token.
+///
+/// This is shared vocabulary only: the breaker never reads it, layout stores
+/// it beside an atom, and a renderer resolves it through the template's
+/// `syntax:` palette. Keeping it here lets the rule layer, layout and every
+/// backend name the same class without depending on a lexer crate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SyntaxClass {
+    Comment,
+    Keyword,
+    String,
+    Number,
+    Type,
+    Function,
+    Variable,
+    Meta,
+    Literal,
+}
+
+impl SyntaxClass {
+    pub const COUNT: usize = 9;
+    pub const ALL: [Self; Self::COUNT] = [
+        Self::Comment,
+        Self::Keyword,
+        Self::String,
+        Self::Number,
+        Self::Type,
+        Self::Function,
+        Self::Variable,
+        Self::Meta,
+        Self::Literal,
+    ];
+
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Comment => 0,
+            Self::Keyword => 1,
+            Self::String => 2,
+            Self::Number => 3,
+            Self::Type => 4,
+            Self::Function => 5,
+            Self::Variable => 6,
+            Self::Meta => 7,
+            Self::Literal => 8,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Comment => "comment",
+            Self::Keyword => "keyword",
+            Self::String => "string",
+            Self::Number => "number",
+            Self::Type => "type",
+            Self::Function => "function",
+            Self::Variable => "variable",
+            Self::Meta => "meta",
+            Self::Literal => "literal",
+        }
+    }
+}
+
 /// One unbreakable unit of ink.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Atom {

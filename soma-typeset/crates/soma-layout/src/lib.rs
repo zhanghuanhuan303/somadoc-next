@@ -33,7 +33,8 @@ use alloc::vec::Vec;
 
 use soma_core::{
     break_paragraph as break_paragraph_core, Align, BoundaryKind, BreakConfig, Cost, Decorations,
-    FallbackStage, Line, Metrics, Paragraph, ParagraphStyle, PunctClass, StyleId, Width,
+    FallbackStage, Line, Metrics, Paragraph, ParagraphStyle, PunctClass, StyleId, SyntaxClass,
+    Width,
 };
 use soma_doc::{Block, Document, Inline, NodeId};
 use soma_rules::{
@@ -41,6 +42,10 @@ use soma_rules::{
     SpanKind,
 };
 use soma_template::{ComputedStyle, ResolvedPage, StyledDoc};
+
+pub use soma_tikz::{
+    Path as TikzPath, Point as TikzPoint, Segment as TikzSegment, Stroke as TikzStroke,
+};
 
 pub const SCHEMA: &str = "soma.pages/11";
 
@@ -90,6 +95,19 @@ fn clamp_space_glue(paragraph: &Paragraph, metrics: &dyn Metrics) -> Option<Para
 pub const FOOTNOTE_MARKER: char = '\u{e000}';
 /// The marker as a string, for metrics adapters that must recognise it.
 pub const FOOTNOTE_MARKER_TEXT: &str = "\u{e000}";
+
+/// Thickness of the rule above the footnote area, in layout units.
+pub const FOOTNOTE_RULE_THICKNESS: Width = Width::from_em_frac(1, 32);
+/// Space between that rule and the first footnote line.
+pub const FOOTNOTE_RULE_GAP: Width = Width::from_em_frac(1, 4);
+/// Width of the footnote rule, as a fraction of the content width.
+pub fn footnote_rule_width(content_width: Width) -> Width {
+    Width(content_width.0 / 3)
+}
+/// Left column reserved for the note number; the note text starts here.
+pub fn footnote_number_column(font_size: Width) -> Width {
+    Width(font_size.0 * 3 / 2)
+}
 
 /// How a page was filled. Only the deterministic greedy path exists in v1.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -229,6 +247,8 @@ pub struct MathBox {
     pub baseline: Width,
     pub items: Vec<soma_math::MathItem>,
     pub rules: Vec<soma_math::MathRule>,
+    /// Stroked/filled vector paths (TikZ, ADR-0092). Empty for formulas.
+    pub paths: Vec<TikzPath>,
 }
 
 /// One inline formula inside a block's atom stream.
@@ -256,6 +276,14 @@ pub struct Page {
     pub printed: String,
     pub blocks: Vec<PlacedBlock>,
     pub footnotes: Vec<PlacedBlock>,
+    /// Note number for each block in `footnotes`, aligned by index. Only the
+    /// first block of a note carries `Some`; continuation blocks are `None`.
+    /// Derived from the marks on the referring lines, so it is not part of the
+    /// canonical page result.
+    pub footnote_numbers: Vec<Option<u32>>,
+    /// Definition index for each block in `footnotes`, aligned by index.
+    /// Used to assign `footnote_numbers`; not canonical.
+    pub(crate) footnote_notes: Vec<usize>,
     /// Running header, positioned above the content box (negative `y`).
     pub header: Vec<PlacedBlock>,
     /// Footer and folio, positioned below the content box.
@@ -388,6 +416,12 @@ pub trait TextSource {
 
     /// Link target of one atom, when it came from one.
     fn atom_link(&self, _block: NodeId, _atom: u32) -> Option<&str> {
+        None
+    }
+
+    /// Highlighted class of one code atom (ADR-0091). `None` uses the atom's
+    /// own style color.
+    fn atom_syntax(&self, _block: NodeId, _atom: u32) -> Option<SyntaxClass> {
         None
     }
 
@@ -589,6 +623,10 @@ impl TextSource for TextIndex {
             .and_then(|entry| entry.link.as_deref())
     }
 
+    fn atom_syntax(&self, block: NodeId, atom: u32) -> Option<SyntaxClass> {
+        self.entry(block, atom).and_then(|entry| entry.syntax)
+    }
+
     fn uses_fallback(&self, block: NodeId, atom: u32) -> bool {
         self.fallbacks.binary_search(&(block.0, atom)).is_ok()
     }
@@ -639,6 +677,8 @@ pub struct TextEntry {
     pub style: StyleId,
     pub decorations: Decorations,
     pub link: Option<alloc::sync::Arc<str>>,
+    /// Token class from the code lexer; `None` for ordinary text.
+    pub syntax: Option<SyntaxClass>,
 }
 
 /// One layout failure.
@@ -933,7 +973,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
         let overflow = vertical_items[previous..end]
             .iter()
             .any(|item| item.height.0 > page_height.0);
-        let footnotes =
+        let (footnotes, footnote_notes) =
             pagination::assemble_footnotes(previous, end, &vertical_items, &builder.notes);
 
         // A page that opens a section may use the section-start master: book
@@ -1012,11 +1052,14 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
             }
         }
 
+        let footnote_numbers = vec![None; footnotes.len()];
         pages.push(Page {
             number: index as u32 + 1,
             printed: printed.get(index).cloned().unwrap_or_default(),
             blocks,
             footnotes,
+            footnote_numbers,
+            footnote_notes,
             header,
             footer,
             used_height: used,
@@ -1028,9 +1071,11 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
     if pages.is_empty() {
         pages.push(Page {
             number: 1,
-            printed: String::from("1"),
+            printed: printed.first().cloned().unwrap_or_default(),
             blocks: Vec::new(),
             footnotes: Vec::new(),
+            footnote_numbers: Vec::new(),
+            footnote_notes: Vec::new(),
             header: Vec::new(),
             footer: Vec::new(),
             used_height: Width::ZERO,
@@ -1187,8 +1232,20 @@ struct TableCellLayout {
     colspan: usize,
     rowspan: usize,
     blocks: Vec<PlacedBlock>,
+    /// Content height.
     height: Width,
 }
+
+/// Booktabs-style space above and below a horizontal rule. The rule itself
+/// keeps its own thickness; this gap is what separates text from a rule
+/// without turning every body row into a tall band. Horizontal padding remains
+/// a template concern (`indent-left` under `within: cell`, ADR-0019).
+pub const TABLE_RULE_SEP: Width = Width::from_em_frac(1, 4);
+
+/// Horizontal padding inside a natural-width table cell. It is the analogue of
+/// LaTeX's `\tabcolsep`; a justified table already gets its column gaps from
+/// the measure, so this is only added in natural mode.
+const TABLE_CELL_PAD_X: i32 = Width::from_em_frac(1, 2).0;
 
 /// Segments of a rule: one full span, or dash/gap runs.
 fn rule_segments(total: i32, thickness: i32, dashed: bool) -> Vec<(i32, i32)> {
@@ -1265,6 +1322,46 @@ fn push_vertical_rule(
 /// shared by natural width, so a table with one long column gets one wide
 /// column instead of equal slices. Largest-remainder rounding keeps the widths
 /// summing to exactly `measure`, which the rules and the span offsets rely on.
+/// Widths for a table that keeps its content width.
+///
+/// Without shares, the columns take their measured widths and the table is
+/// centred in the measure. With shares (Markdown dash counts, `<colgroup>`, a
+/// Word grid), the natural total is distributed by those weights; more dashes
+/// means a wider column. A table wider than the measure falls back to
+/// `column_widths`, which fills and justifies the measure.
+fn natural_table_widths(natural: &[i32], shares: &[u16], measure: i32) -> (Vec<i32>, i32, i32) {
+    let count = natural.len();
+    if count == 0 {
+        return (Vec::new(), 0, 0);
+    }
+    // A measured line can be a unit or two short once the cell is broken; a
+    // small bearing keeps a natural table from wrapping a word it just fit.
+    // The natural width already includes the two cell pads from the caller.
+    let slack = Width::from_em_frac(1, 8).0;
+    let mut widths: Vec<i32> = natural.iter().map(|width| *width + slack).collect();
+    let total: i64 = widths.iter().map(|width| i64::from(*width)).sum();
+    if total >= i64::from(measure) {
+        return (column_widths(natural, shares, measure), measure, 0);
+    }
+    let hint_total: u32 = shares.iter().map(|share| u32::from(*share)).sum();
+    if hint_total > 0 {
+        // Dashes can widen a column, never narrow it below its measured
+        // content: a narrower column would overwrite its padding and produce
+        // a vertical one-character strip. The table grows to accommodate the
+        // weighted widths and is centred if it still fits.
+        let target = total;
+        for (index, share) in shares.iter().enumerate() {
+            let weighted = target * i64::from(*share) / i64::from(hint_total);
+            widths[index] = widths[index].max(weighted as i32);
+        }
+    }
+    let actual: i32 = widths.iter().sum();
+    if actual >= measure {
+        return (column_widths(natural, shares, measure), measure, 0);
+    }
+    (widths, actual, (measure - actual).max(0) / 2)
+}
+
 fn column_widths(natural: &[i32], shares: &[u16], measure: i32) -> Vec<i32> {
     let count = natural.len();
     if count == 0 {
@@ -1703,7 +1800,9 @@ impl Builder<'_> {
                 }
                 Block::CodeBlock(node) => {
                     let style = self.style(node.meta.id, fallback);
-                    if let Some(item) = self.code_item(node.meta.id, &node.value, style)? {
+                    if let Some(item) =
+                        self.code_item(node.meta.id, node.lang.as_deref(), &node.value, style)?
+                    {
                         items.push(item);
                     }
                 }
@@ -1757,6 +1856,7 @@ impl Builder<'_> {
                 }
                 Block::Table(node) => {
                     let style = self.style(node.meta.id, fallback);
+                    let table_computed = self.computed(style);
                     let columns = node.columns.len().max(1);
                     let row_count = node.rows.len();
                     if row_count == 0 {
@@ -1796,8 +1896,22 @@ impl Builder<'_> {
                         }
                     }
                     let shares: Vec<u16> = node.columns.iter().map(|column| column.share).collect();
-                    let widths = column_widths(&natural, &shares, self.content_width.0);
+                    let natural_mode =
+                        self.styled.table_width() == soma_template::TableWidth::Natural;
+                    let mut sizing = natural.clone();
+                    if natural_mode {
+                        for width in &mut sizing {
+                            *width += 2 * TABLE_CELL_PAD_X;
+                        }
+                    }
+                    let (widths, table_width, table_left) = if natural_mode {
+                        natural_table_widths(&sizing, &shares, self.content_width.0)
+                    } else {
+                        let widths = column_widths(&natural, &shares, self.content_width.0);
+                        (widths, self.content_width.0, 0)
+                    };
                     let mut column_x = alloc::vec![0i32; columns + 1];
+                    column_x[0] = table_left;
                     for index in 0..columns {
                         column_x[index + 1] = column_x[index] + widths[index];
                     }
@@ -1823,7 +1937,11 @@ impl Builder<'_> {
                             let rowspan = (cell.rowspan as usize)
                                 .max(1)
                                 .min(row_count.saturating_sub(row_index).max(1));
-                            let width = Width(column_x[column + colspan] - column_x[column]);
+                            let cell_pad = if natural_mode { TABLE_CELL_PAD_X } else { 0 };
+                            let width = Width(
+                                (column_x[column + colspan] - column_x[column] - 2 * cell_pad)
+                                    .max(1),
+                            );
                             let cell_style = self.style(cell.meta.id, row_style);
                             let mut cell_items = Vec::new();
                             let saved = self.content_width;
@@ -1843,7 +1961,11 @@ impl Builder<'_> {
                             for item in cell_items {
                                 for mut placed in item.blocks {
                                     placed.kind = BoxKind::TableCell;
-                                    placed.x = placed.x + Width(column_x[column]);
+                                    placed.x = placed.x
+                                        + Width(
+                                            column_x[column]
+                                                + if natural_mode { cell_pad } else { 0 },
+                                        );
                                     placed.y = height;
                                     height = height + placed.height;
                                     // The structure tree needs the grid
@@ -1888,15 +2010,13 @@ impl Builder<'_> {
 
                     // Row gaps are part of the row height (except above row 0).
                     let mut row_heights = vec![Width::ZERO; row_count];
-                    let mut leading_gap = Width::ZERO;
                     for (row_index, row) in node.rows.iter().enumerate() {
+                        if row_index == 0 {
+                            continue;
+                        }
                         let row_style = self.style(row.meta.id, style);
                         let computed = self.computed(row_style);
-                        if row_index == 0 {
-                            leading_gap = computed.space_before;
-                        } else {
-                            row_heights[row_index] = row_heights[row_index] + computed.space_before;
-                        }
+                        row_heights[row_index] = row_heights[row_index] + computed.space_before;
                     }
                     for cell in cells.iter().filter(|cell| cell.rowspan == 1) {
                         row_heights[cell.row] = row_heights[cell.row].max(cell.height);
@@ -1940,16 +2060,34 @@ impl Builder<'_> {
                             rules.rule
                         };
                     }
+                    // Booktabs puts air on both sides of a horizontal rule.
+                    // Only the rule boundaries pay it; body rows keep the
+                    // plain line height, so a three-line table is compact.
                     let mut row_top = Vec::with_capacity(row_count + 1);
-                    let mut cursor = rules.outer_rule;
+                    let mut rule_top = vec![Width::ZERO; row_count];
+                    let mut cursor = if rules.outer_rule.0 > 0 {
+                        rules.outer_rule + TABLE_RULE_SEP
+                    } else {
+                        Width::ZERO
+                    };
                     for (row, height) in row_heights.iter().enumerate() {
                         row_top.push(cursor);
-                        cursor = cursor + *height + rule_after[row];
+                        cursor = cursor + *height;
+                        if rule_after[row].0 > 0 {
+                            cursor = cursor + TABLE_RULE_SEP;
+                            rule_top[row] = cursor;
+                            cursor = cursor + rule_after[row];
+                            if row + 1 < row_count {
+                                cursor = cursor + TABLE_RULE_SEP;
+                            }
+                        } else {
+                            rule_top[row] = cursor;
+                        }
                     }
                     row_top.push(cursor);
                     let table_height = cursor;
-                    let table_width = Width(column_x[columns]);
-                    let header_height = row_top[header_rows];
+                    let table_width = Width(table_width);
+                    let header_height = row_top.get(header_rows).copied().unwrap_or(cursor);
 
                     let mut blocks = Vec::new();
                     let pen = RulePen {
@@ -1961,7 +2099,7 @@ impl Builder<'_> {
                         push_horizontal_rule(
                             &mut blocks,
                             pen,
-                            Width::ZERO,
+                            Width(column_x[0]),
                             Width::ZERO,
                             table_width,
                             rules.outer_rule,
@@ -1980,7 +2118,7 @@ impl Builder<'_> {
                         if thickness.0 == 0 {
                             continue;
                         }
-                        let y = row_top[row] + row_heights[row];
+                        let y = rule_top[row];
                         // A rule never crosses a cell that spans the boundary,
                         // so the line is emitted column by column.
                         let mut covered = vec![false; columns];
@@ -2033,9 +2171,9 @@ impl Builder<'_> {
                             continue;
                         }
                         let x = if boundary == 0 {
-                            Width::ZERO
+                            Width(column_x[0])
                         } else if boundary == columns {
-                            Width(table_width.0 - thickness.0)
+                            Width(column_x[columns] - thickness.0)
                         } else {
                             Width(*edge - thickness.0 / 2)
                         };
@@ -2168,12 +2306,8 @@ impl Builder<'_> {
                     items.push(FlowItem {
                         blocks,
                         height: table_height,
-                        before: Glue {
-                            width: leading_gap,
-                            plus: Width::ZERO,
-                            minus: Width::ZERO,
-                        },
-                        after: Glue::ZERO,
+                        before: self.before_glue(&table_computed),
+                        after: self.after_glue(&table_computed),
                         keep_with_next: false,
                         page_break_before: false,
                         forced_break: false,
@@ -2508,6 +2642,7 @@ impl Builder<'_> {
                     baseline: layout.height,
                     items: layout.items,
                     rules: layout.rules,
+                    paths: Vec::new(),
                 },
             })
             .collect();
@@ -2523,6 +2658,7 @@ impl Builder<'_> {
                     style: atom.style,
                     decorations: atom.decor,
                     link: atom.link.clone(),
+                    syntax: None,
                 })
                 .collect(),
         );
@@ -2679,8 +2815,15 @@ impl Builder<'_> {
             for atom in &paragraph.atoms {
                 width += objects_metrics.object_advance(&atom.text, atom.style).0;
             }
-            for boundary in &paragraph.boundaries {
-                width += boundary.glue.width.0;
+            // A space boundary carries a zero `Glue.width`; the kernel asks the
+            // metrics for the actual space. Measure it the same way here, or a
+            // natural table is short by one space per word and wraps a line it
+            // already fits.
+            for (index, boundary) in paragraph.boundaries.iter().enumerate() {
+                width += match boundary.kind {
+                    BoundaryKind::Space => self.metrics.space_width(paragraph.atoms[index].style).0,
+                    BoundaryKind::Normal | BoundaryKind::Hyphen => boundary.glue.width.0,
+                };
             }
             widest = widest.max(width);
         }
@@ -2898,17 +3041,24 @@ impl Builder<'_> {
     fn code_item(
         &mut self,
         node: NodeId,
+        lang: Option<&str>,
         value: &str,
         style_id: StyleId,
     ) -> Result<Option<FlowItem>, LayoutError> {
         let computed = self.computed(style_id);
+        let pad_top = computed.padding_top;
+        let pad_bottom = computed.padding_bottom;
+        let pad_left = computed.padding_left;
         let mut lines = Vec::new();
         let mut atoms: Vec<TextEntry> = Vec::new();
-        let mut y = Width::ZERO;
+        let mut y = pad_top;
         let mut stage = FallbackStage::Normal;
+        let highlight = !self.styled.table().syntax().is_empty();
+        let mut lexer = soma_highlight::Lexer::new(lang);
 
         // Code is not wrapped in v1: each source line keeps its own line and a
-        // long line may overflow.
+        // long line may overflow. The panel is full-measure; `pad_left` and
+        // `pad_right` only move the text inside it (ADR-0090).
         let wide = ParagraphStyle {
             width: Width::from_em(1000),
             first_indent: Width::ZERO,
@@ -2919,6 +3069,14 @@ impl Builder<'_> {
         };
 
         for source_line in value.lines() {
+            // Run the lexer for empty lines too: a block comment or a
+            // multi-line string does not end because the author left a blank
+            // line inside it.
+            let classes = if highlight {
+                lexer.line(source_line)
+            } else {
+                Vec::new()
+            };
             let paragraph = match paragraph_from_code_line(source_line, wide, style_id) {
                 Ok(paragraph) => paragraph,
                 Err(RuleError::EmptyText) => {
@@ -2931,11 +3089,22 @@ impl Builder<'_> {
             // zero; shift them onto the block's atom table so the renderers
             // can look a box up by `(node, atom)`.
             let base = atoms.len() as u32;
-            atoms.extend(paragraph.atoms.iter().map(|atom| TextEntry {
-                text: atom.text.clone(),
-                style: atom.style,
-                decorations: atom.decor,
-                link: atom.link.clone(),
+            let mut position = 0usize;
+            atoms.extend(paragraph.atoms.iter().map(|atom| {
+                let length = atom.text.chars().count();
+                let syntax = if highlight {
+                    class_at(&classes, position)
+                } else {
+                    None
+                };
+                position += length;
+                TextEntry {
+                    text: atom.text.clone(),
+                    style: atom.style,
+                    decorations: atom.decor,
+                    link: atom.link.clone(),
+                    syntax,
+                }
             }));
             let result = break_paragraph(&paragraph, self.metrics, self.engine)
                 .map_err(|_| LayoutError::new(Some(node), "code breaking failed"))?;
@@ -2948,6 +3117,7 @@ impl Builder<'_> {
                 line.end += base;
                 for placed in &mut line.boxes {
                     placed.atom += base;
+                    placed.x = Width(placed.x.0 + pad_left.0);
                 }
                 y = y + line.height;
                 lines.push(PlacedLine {
@@ -2961,10 +3131,16 @@ impl Builder<'_> {
         if lines.is_empty() {
             return Ok(None);
         }
+        for (index, atom) in atoms.iter().enumerate() {
+            if self.metrics.uses_fallback(&atom.text, atom.style) {
+                self.text.mark_fallback(node, index as u32);
+            }
+        }
         self.text.insert(node, atoms);
+        let height = y + pad_bottom;
 
         Ok(Some(FlowItem {
-            height: y,
+            height,
             before: self.before_glue(&computed),
             after: self.after_glue(&computed),
             keep_with_next: computed.keep_with_next,
@@ -2982,7 +3158,7 @@ impl Builder<'_> {
                 x: Width::ZERO,
                 y: Width::ZERO,
                 width: self.content_width,
-                height: y,
+                height,
                 lines,
                 marks: Vec::new(),
                 line_offset: 0,
@@ -3081,6 +3257,7 @@ impl Builder<'_> {
                     style: atom.style,
                     decorations: atom.decor,
                     link: atom.link.clone(),
+                    syntax: None,
                 })
                 .collect(),
         );
@@ -3296,6 +3473,15 @@ impl Builder<'_> {
     ) -> Result<(), LayoutError> {
         let entry_style = self.styled.toc_style();
         let title_style = self.styled.toc_title_style();
+
+        // A template can ask for a TOC unconditionally (the default does).
+        // A document without headings, figures or tables has nothing to list:
+        // emitting a lone "Contents" page would be worse than no contents.
+        let has_figures = spec.figures.is_some() && !front.figures.is_empty();
+        let has_tables = spec.tables.is_some() && !front.tables.is_empty();
+        if self.toc_entries.is_empty() && !has_figures && !has_tables {
+            return Ok(());
+        }
 
         if let Some(title) = spec.title.as_deref().filter(|title| !title.is_empty()) {
             let node = self.generated_id();
@@ -3640,6 +3826,9 @@ impl Builder<'_> {
     /// Returns `None` when the source does not parse, so the caller can fall
     /// back to a text placeholder.
     fn math_item(&mut self, node: NodeId, source: &str, style_id: StyleId) -> Option<FlowItem> {
+        if source.trim_start().starts_with("\\begin{tikzpicture}") {
+            return self.tikz_item(node, source, style_id);
+        }
         let computed = self.computed(style_id);
         let mut layout = math::display(source, &computed, self.metrics, style_id)?;
         let pattern = self
@@ -3775,6 +3964,66 @@ impl Builder<'_> {
                     baseline: layout.height,
                     items: layout.items,
                     rules: layout.rules,
+                    paths: Vec::new(),
+                }),
+            }],
+        })
+    }
+
+    /// A TikZ picture is a display object in the math block's frame: the
+    /// picture's own baseline is its bounding-box bottom, and every path and
+    /// node label is already in that frame (ADR-0092).
+    fn tikz_item(&mut self, node: NodeId, source: &str, style_id: StyleId) -> Option<FlowItem> {
+        let computed = self.computed(style_id);
+        let root = self.computed(ROOT_STYLE);
+        let body = self.styled.body_pt();
+        if body.num() <= 0 {
+            return None;
+        }
+        let pt = 65_536i64 * body.den() / body.num();
+        let metrics = self.metrics;
+        let root_for_text = root.clone();
+        let mut measure = |text: &str, scale: i64| {
+            let size = Width(root_for_text.font_size.0 * scale as i32 / 1000);
+            math::text_at_size(text, &root_for_text, metrics, ROOT_STYLE, size)
+        };
+        let layout = soma_tikz::layout(source, pt, &mut measure).ok()?;
+        let height = layout.height;
+        let x = Width((self.content_width.0 - layout.width.0).max(0) / 2);
+        Some(FlowItem {
+            height,
+            before: self.before_glue(&computed),
+            after: self.after_glue(&computed),
+            keep_with_next: computed.keep_with_next,
+            page_break_before: computed.page_break_before,
+            forced_break: false,
+            section_start: false,
+            footnotes: Vec::new(),
+            parts: Vec::new(),
+            master: self.current_master,
+            table: None,
+            blocks: vec![PlacedBlock {
+                node,
+                kind: BoxKind::Math,
+                style: style_id,
+                x,
+                y: Width::ZERO,
+                width: layout.width,
+                height,
+                lines: Vec::new(),
+                marks: Vec::new(),
+                line_offset: 0,
+                lines_total: 0,
+                stage: FallbackStage::Normal,
+                inline_math: Vec::new(),
+                ruby: Vec::new(),
+                math: Some(MathBox {
+                    width: layout.width,
+                    height,
+                    baseline: layout.baseline,
+                    items: layout.items,
+                    rules: layout.rules,
+                    paths: layout.paths,
                 }),
             }],
         })
@@ -3832,13 +4081,21 @@ impl Builder<'_> {
         let mut compiled = Vec::with_capacity(doc.footnotes.len());
         for definition in &doc.footnotes {
             let style = self.style(definition.meta.id, ROOT_STYLE);
+            // The note number occupies its own left column; the text is laid
+            // out to the right of it, so the number never overlaps the first
+            // line and multi-digit numbers still fit.
+            let column = footnote_number_column(self.computed(style).font_size);
+            let saved_width = self.content_width;
+            self.content_width = Width(saved_width.0 - column.0);
             let mut items = Vec::new();
             self.flow_into(&definition.blocks, style, &mut items, false)?;
+            self.content_width = saved_width;
             let mut blocks = Vec::new();
             let mut y = Width::ZERO;
             for item in items {
                 for mut placed in item.blocks {
                     placed.kind = BoxKind::Footnote;
+                    placed.x = placed.x + column;
                     placed.y = y;
                     y = y + placed.height;
                     blocks.push(placed);
@@ -4102,6 +4359,7 @@ fn margin_block(
                 style: atom.style,
                 decorations: atom.decor,
                 link: atom.link.clone(),
+                syntax: None,
             })
             .collect(),
     );
@@ -4345,6 +4603,13 @@ fn hanging_amount(atom: &soma_core::Atom, cap: Width) -> i32 {
     }
 }
 
+fn class_at(spans: &[soma_highlight::ClassSpan], at: usize) -> Option<SyntaxClass> {
+    spans
+        .iter()
+        .find(|span| span.start <= at && at < span.end)
+        .map(|span| span.class)
+}
+
 fn empty_line(line_height: Width, y: Width) -> PlacedLine {
     PlacedLine {
         y,
@@ -4395,12 +4660,54 @@ impl Numbering {
             if matches!(self.policy, soma_template::FootnoteNumbering::Page) {
                 self.next = 1;
             }
+            let mut mark_numbers = Vec::new();
             for block in page.blocks.iter_mut() {
                 for mark in block.marks.iter_mut() {
                     mark.number = self.next;
+                    mark_numbers.push(self.next);
                     self.next += 1;
                 }
             }
+
+            // The note area is assembled in first-reference order, so the
+            // n-th distinct note takes the n-th mark's number on this page.
+            // A definition with several blocks keeps one number: only its
+            // first block prints it.
+            let mut notes: Vec<usize> = Vec::new();
+            for note in &page.footnote_notes {
+                if !notes.contains(note) {
+                    notes.push(*note);
+                }
+            }
+            let mut note_numbers: Vec<(usize, u32)> = Vec::with_capacity(notes.len());
+            for (index, note) in notes.iter().enumerate() {
+                let number = match mark_numbers.get(index) {
+                    Some(number) => *number,
+                    None => {
+                        let number = self.next;
+                        self.next += 1;
+                        number
+                    }
+                };
+                note_numbers.push((*note, number));
+            }
+            let mut printed: Vec<usize> = Vec::new();
+            page.footnote_numbers = page
+                .footnote_notes
+                .iter()
+                .map(|note| {
+                    let number = note_numbers
+                        .iter()
+                        .find(|(candidate, _)| candidate == note)
+                        .map(|(_, number)| *number);
+                    if printed.contains(note) {
+                        None
+                    } else {
+                        printed.push(*note);
+                        number
+                    }
+                })
+                .collect();
         }
     }
 }

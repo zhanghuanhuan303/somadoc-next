@@ -101,6 +101,14 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   `matrix`/`pmatrix`/`bmatrix`/`vmatrix`/`cases`/`aligned` are supported; symbols
   come from a dedicated math face in the metrics table (ADR-0030). See
   [`docs/math.md`](docs/math.md).
+- TikZ drawings (`soma-tikz`, ADR-0092): the core PGF drawing language —
+  coordinates (Cartesian/polar/relative/named), `--`, `rectangle`, `circle`,
+  `ellipse`, `arc`, `grid`, `-|`/`|-`, nodes with anchors and labels, `\foreach`,
+  colours, line widths, dash patterns and arrow barbs — parsed into integer
+  vector paths on the display-math box. The PDF/SVG/HTML backends paint the same
+  paths; node text goes through the math subsystem, so `$…$` and CJK work. An
+  unsupported key or command is a hard error and falls back to the visible
+  source, never a wrong picture. See [`docs/tikz.md`](docs/tikz.md).
 - Browser slice (ADR-0071): `soma-web` compiles `soma-core` + `soma-rules` to a
   32.7 KB gzip, **zero-import** `wasm32-unknown-unknown` module; `web/` is a
   dependency-free ES module plus a demo and a self-checking harness. The host
@@ -169,11 +177,21 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   vertical ink: fraction shifts and gaps, a vinculum on the radicand's ink,
   `\left…\right` sized by ink, accents, `\binom`, `\operatorname`, and
   inline formulas that break at relations and binaries. `soma.metrics/5`.
-- LaTeX `article` defaults (ADR-0069): without `--template` the CLI uses
-  `latex-article` — A4, 10 pt on 12 pt, a 121.3 x 210.2 mm text block, a 1.5 em
-  paragraph indent, no paragraph spacing, and a centred folio; without
-  `--engine` it breaks with `latex-v1` (`tolerance=1260`, ragged last line).
+- Plex reference defaults (ADR-0088): without `--template` the CLI uses the
+  pandoc `soma.latex` page design — A4, 25.4 mm margins, IBM Plex Sans SC
+  10 pt on a 14.4 pt baseline, zero paragraph indent, a 20 pt paragraph skip,
+  natural-width booktabs tables, a cover from metadata, a TOC from headings,
+  and the Rust-book code panel. The former LaTeX `article` default is
+  archived as `examples/templates/latex-article.yaml`; without `--engine` the
+  CLI still breaks with `latex-v1` (`tolerance=1260`, ragged last line).
   An explicit template or engine file still wins.
+- Code blocks (ADR-0089/0090/0091): a full-measure panel with a template
+  `background` and `padding-*`, a real monospace family (`mono`, PDF
+  `F7`/`F8`, `--font-mono`), and a dependency-free line lexer for Rust, C,
+  C++, shell, Markdown, LaTeX, Python, JS/TS, JSON, YAML, TOML, HTML, CSS,
+  SQL, Go, Java, Kotlin, Swift, C#, Ruby, PHP, Lua and Haskell. Token colors
+  come from the template's optional `syntax:` palette; the Plex template
+  transcribes mdBook's Rust theme.
 - PDF output (`soma-render-pdf`, ADR-0034): `--format pdf --font book.ttf`
   embeds a sparse TrueType subset (Identity-H + ToUnicode), writes integer
   glyph positions, table rules, display math, a nested bookmark tree from
@@ -203,6 +221,15 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   with sub-entries, `see`/`see also`, and page ranges. `full-html.pdf` is a
   one-page supplement for the HTML-only constructs (`<colgroup>` widths and
   native `<ruby>`).
+- Reference page design (`examples/templates/plex.yaml`, ADR-0081/0088): a
+  pure-YAML transcription of pandoc's `soma.latex` — A4 with one-inch margins,
+  IBM Plex Sans SC at 10pt on a 1.44 baseline, zero first-line indent with a
+  20pt paragraph skip, article-sized headings, italic quotations, booktabs
+  three-rule tables and a pinyin index. It is also the built-in template.
+  `scripts/plex.sh` resolves the system fonts (they are not redistributed),
+  measures the body, mono and math faces with `tools/metrics-gen`, and renders
+  `examples/book/full.tex` to `plex.pdf` plus the multi-language code sample
+  `examples/templates/code.md` to `code.pdf`.
 - First-release artifact (`examples/book`, ADR-0031/ADR-0032/ADR-0033): `scripts/book.sh`
   renders an eleven-page book from `examples/book/book.tex` + `book.yaml` — generated
   cover, roman-numbered front matter, contents with leaders plus figure/table
@@ -273,10 +300,12 @@ crates/
   soma-hyphen/ # Liang hyphenation over an external pattern set
   soma-cli/    # `soma`: source + template -> HTML/SVG/PDF/canonical JSON
   soma-math/   # TeX subset -> integer math boxes (symbols + rules)
+  soma-tikz/   # core PGF drawing language -> integer vector paths
   soma-render-html/ # PagedLayout -> absolutely positioned HTML
   soma-render-svg/  # PagedLayout -> SVG (Gate V/R)
   soma-render-pdf/  # PagedLayout -> PDF (TrueType subset, bookmarks)
   soma-rules/  # text -> ParaIR (Chinese punctuation + CJK/Latin segmentation)
+  soma-highlight/ # dependency-free code lexer: SyntaxClass spans per line
   soma-eval/   # benchmark, sweeps, blind-test statistics, effect scorecard
   soma-demo/   # static HTML renderer consuming LayoutResult
   soma-web/     # C ABI slice for the browser (rules + K-P, no imports)
@@ -315,9 +344,9 @@ docs/
   fonts.md            # how a body font is scored and a metrics table is built
   mixed-font.md       # coverage, rescue faces, and the fallback plan
   font-preset.md      # proposal: ink-aware line width, one profile per font
-  adr/                # accepted decisions (ADR-0001 … 0072)
+  adr/                # accepted decisions (ADR-0001 … 0092)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
-  debt.md             # global not-done register (D01–D95, N1–N6)
+  debt.md             # global not-done register (D01–D99, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
   proposal-web-kp.md  # Web v1: the K-P slice in wasm (measurement, ABI, budgets)
   e1-q-report.md      # E1–Q′ delivery report
@@ -325,6 +354,7 @@ docs/
   corpus-calibration.md # real corpus: metrics and proxy calibration
   docir.md            # DocIR contract: nodes, canonical JSON, validation
   math.md             # display math: TeX subset, box model, style constants
+  tikz.md             # TikZ subset: coordinates, paths, nodes, backends, limits
   template.md         # template DSL: YAML subset, units, cascade, hashes
   a1-report.md        # A1 milestone report (Gate A1 checklist)
   a2-report.md        # A2 milestone report (Gate A2 checklist)
@@ -380,7 +410,7 @@ scripts/gates.sh
 ```
 
 The gate runs format, clippy, 555 tests, a `wasm32-unknown-unknown` check for
-`soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-template`,
+`soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-highlight`, `soma-template`,
 `soma-layout`, `soma-md`, `soma-render-html`, `soma-render-svg`, and
 `soma-render-pdf`, a
 native/`wasm32-wasip1` canonical-byte comparison (DocIR + inline layout + pages),

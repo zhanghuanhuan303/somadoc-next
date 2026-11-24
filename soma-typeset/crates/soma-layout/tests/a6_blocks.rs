@@ -14,6 +14,82 @@ use soma_doc::node::NodeMeta;
 use soma_doc::{Block, CellAlign, FootnoteDef};
 use soma_layout::{layout, BoxKind, TextSource, FOOTNOTE_MARKER};
 
+const CODE_PANEL: &str = r##"
+name: code-panel
+page:
+  size: custom
+  width: 100mm
+  height: 80mm
+  margin: 4mm
+syntax:
+  keyword: "#9d00ec"
+  comment: "#575757"
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+  - selector:
+      element: codeBlock
+    declarations:
+      font-size: 8pt
+      line-height: 2
+      background: "#f6f7f6"
+      padding-top: 1em
+      padding-left: 3em
+      padding-bottom: 2em
+"##;
+
+#[test]
+fn code_panel_padding_is_part_of_the_block_box() {
+    let doc = document(vec![Block::CodeBlock(CodeBlock::new(
+        NodeMeta::synthesized(),
+        Some("rust".into()),
+        "fn main() {\n}\n",
+    ))]);
+    let styled = styled(&doc, CODE_PANEL);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+
+    assert_eq!(block.kind, BoxKind::Code);
+    let style = styled
+        .style_of(block.node)
+        .and_then(|id| styled.table().get(id))
+        .expect("code style");
+    let pad_top = style.padding_top;
+    let pad_bottom = style.padding_bottom;
+    let pad_left = style.padding_left;
+    let line_height = style.line_height;
+    assert_eq!(
+        block.height,
+        pad_top + line_height + line_height + pad_bottom
+    );
+    assert_eq!(block.lines[0].y, pad_top);
+    assert_eq!(block.lines[1].y, pad_top + line_height);
+    assert_eq!(block.lines[0].line.boxes[0].x, pad_left);
+    assert_eq!(style.background, Some(0xf6f7f6));
+}
+
+#[test]
+fn code_tokens_carry_their_syntax_class() {
+    let doc = document(vec![Block::CodeBlock(CodeBlock::new(
+        NodeMeta::synthesized(),
+        Some("rust".into()),
+        "fn main() { // note\n}",
+    ))]);
+    let styled = styled(&doc, CODE_PANEL);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+
+    let mut classes = Vec::new();
+    for atom in &block.lines[0].line.boxes {
+        classes.push(layout.text.atom_syntax(block.node, atom.atom));
+    }
+    assert!(classes.contains(&Some(soma_core::SyntaxClass::Keyword)));
+    assert!(classes.contains(&Some(soma_core::SyntaxClass::Comment)));
+}
+
 #[test]
 fn code_block_keeps_source_lines() {
     let doc = document(vec![Block::CodeBlock(CodeBlock::new(
@@ -322,6 +398,151 @@ fn table_rows_place_cells_at_column_offsets() {
 }
 
 #[test]
+fn table_rules_leave_breathing_room_around_the_text() {
+    let columns = vec![Column::new(NodeMeta::synthesized(), CellAlign::Left)];
+    let row = Row::new(
+        NodeMeta::synthesized(),
+        false,
+        vec![Cell::new(
+            NodeMeta::synthesized(),
+            vec![Block::Paragraph(Paragraph::new(
+                NodeMeta::synthesized(),
+                vec![text("甲")],
+            ))],
+        )],
+    );
+    let doc = document(vec![Block::Table(Table::new(
+        NodeMeta::synthesized(),
+        columns,
+        vec![row],
+    ))]);
+    let source = TIGHT.replace(
+        "styles:",
+        "table:\n  outer-rule-width: 0.8pt\n  header-rule-width: 0.6pt\nstyles:",
+    );
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let blocks = &layout.pages[0].blocks;
+
+    let top = blocks
+        .iter()
+        .find(|block| block.kind == BoxKind::TableRule && block.y.0 == 0)
+        .expect("the outer rule");
+    let cell = blocks
+        .iter()
+        .find(|block| block.kind == BoxKind::TableCell)
+        .expect("the cell");
+    let bottom = blocks
+        .iter()
+        .find(|block| block.kind == BoxKind::TableRule && block.y.0 > cell.y.0)
+        .expect("the bottom rule");
+    let sep = soma_layout::TABLE_RULE_SEP.0;
+    assert_eq!(cell.y.0 - top.height.0, sep, "space below the top rule");
+    assert_eq!(
+        bottom.y.0 - (cell.y.0 + cell.height.0),
+        sep,
+        "space above the bottom rule"
+    );
+}
+
+#[test]
+fn a_natural_table_is_centred_at_its_content_width() {
+    let columns = vec![
+        Column::new(NodeMeta::synthesized(), CellAlign::Left),
+        Column::new(NodeMeta::synthesized(), CellAlign::Left),
+    ];
+    let row = Row::new(
+        NodeMeta::synthesized(),
+        false,
+        vec![
+            Cell::new(
+                NodeMeta::synthesized(),
+                vec![Block::Paragraph(Paragraph::new(
+                    NodeMeta::synthesized(),
+                    vec![text("短句")],
+                ))],
+            ),
+            Cell::new(
+                NodeMeta::synthesized(),
+                vec![Block::Paragraph(Paragraph::new(
+                    NodeMeta::synthesized(),
+                    vec![text("说明文字")],
+                ))],
+            ),
+        ],
+    );
+    let doc = document(vec![Block::Table(Table::new(
+        NodeMeta::synthesized(),
+        columns,
+        vec![row],
+    ))]);
+    let source = TIGHT.replace("styles:", "table:\n  width: natural\nstyles:");
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let cells: Vec<_> = layout.pages[0]
+        .blocks
+        .iter()
+        .filter(|block| block.kind == BoxKind::TableCell)
+        .collect();
+    assert_eq!(cells.len(), 2);
+    let left = cells[0].x.0;
+    let right = layout.page.content_width().0 - (cells[1].x.0 + cells[1].width.0);
+    assert!(left > 0, "a narrow table is not flush left");
+    assert!(
+        (left - right).abs() <= 2,
+        "the table is centred: left {left}, right {right}"
+    );
+}
+
+#[test]
+fn dash_shares_widen_a_natural_table_without_squeezing_it() {
+    let columns = vec![
+        Column::new(NodeMeta::synthesized(), CellAlign::Left).with_share(100),
+        Column::new(NodeMeta::synthesized(), CellAlign::Left).with_share(900),
+    ];
+    let row = Row::new(
+        NodeMeta::synthesized(),
+        false,
+        vec![
+            Cell::new(
+                NodeMeta::synthesized(),
+                vec![Block::Paragraph(Paragraph::new(
+                    NodeMeta::synthesized(),
+                    vec![text("短句")],
+                ))],
+            ),
+            Cell::new(
+                NodeMeta::synthesized(),
+                vec![Block::Paragraph(Paragraph::new(
+                    NodeMeta::synthesized(),
+                    vec![text("说明")],
+                ))],
+            ),
+        ],
+    );
+    let doc = document(vec![Block::Table(Table::new(
+        NodeMeta::synthesized(),
+        columns,
+        vec![row],
+    ))]);
+    let source = TIGHT.replace("styles:", "table:\n  width: natural\nstyles:");
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let cells: Vec<_> = layout.pages[0]
+        .blocks
+        .iter()
+        .filter(|block| block.kind == BoxKind::TableCell)
+        .collect();
+    assert_eq!(cells.len(), 2);
+    assert!(
+        cells[1].width.0 > cells[0].width.0,
+        "the 900 share column is wider: {} vs {}",
+        cells[1].width.0,
+        cells[0].width.0
+    );
+}
+
+#[test]
 fn thematic_break_is_a_rule_box() {
     let doc = document(vec![
         paragraph("前文。"),
@@ -382,6 +603,43 @@ fn footnotes_move_to_the_page_area() {
     assert_eq!(page.footnotes[0].kind, BoxKind::Footnote);
     assert!(page.footnote_height.0 > 0);
     assert!(page.used_height.0 + page.footnote_height.0 <= layout.page.content_height().0);
+}
+
+#[test]
+fn the_footnote_area_has_a_rule_and_a_number_column() {
+    let doc = footnote_document();
+    let styled = styled(&doc, TIGHT);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let page = &layout.pages[0];
+    let block = &page.footnotes[0];
+    let font_size = styled
+        .style(block.style)
+        .map(|style| style.font_size.0)
+        .expect("the footnote style");
+
+    assert_eq!(page.footnote_numbers, vec![Some(1)]);
+    assert_eq!(
+        block.x.0,
+        soma_layout::footnote_number_column(Width(font_size)).0,
+        "the note text starts after the number column"
+    );
+    assert_eq!(
+        page.blocks[0].marks[0].number,
+        page.footnote_numbers[0].unwrap()
+    );
+    assert!(
+        page.footnote_height.0
+            >= block.height.0
+                + soma_layout::FOOTNOTE_RULE_THICKNESS.0
+                + soma_layout::FOOTNOTE_RULE_GAP.0,
+        "the reservation includes the separator"
+    );
+    let rule = soma_layout::footnote_rule_width(layout.page.content_width()).0;
+    assert!(
+        rule * 3 >= layout.page.content_width().0 - 2
+            && rule * 3 <= layout.page.content_width().0 + 2,
+        "the rule is one third of the measure, within rounding"
+    );
 }
 
 #[test]

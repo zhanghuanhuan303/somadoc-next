@@ -1,0 +1,351 @@
+# A page design transcribed from the pandoc template
+# ~/.local/share/pandoc/templates/soma.latex.
+#
+# The reference is an article-class A4 page: one-inch margins, IBM Plex Sans SC
+# for text and Latin alike, \linespread{1.2} on a 12pt baseline, no first-line
+# indent, and a 20pt gap between paragraphs. Headings keep LaTeX's article
+# sizes, quotations are italic (the reference also draws a frame, which the
+# template model cannot express), and tables use booktabs' three rules.
+#
+# Build with: scripts/plex.sh
+name: soma-plex
+version: 1
+
+page:
+  size: A4
+  # geometry{top=1in, inner=1in, outer=1in, bottom=1in}; the 1.5cm headsep
+  # leaves the header band empty in the reference, so no header is drawn here.
+  margin: 25.4mm
+  header: 0mm
+  footer: 8mm
+  folio: "{page}"
+  # The reference numbers the title page as page 1 and continues from there.
+  front-matter: continuous
+
+cover:
+  master: cover
+
+toc:
+  depth: 2
+  title: 目录
+
+index:
+  title: 索引
+  # Chinese publishing order; a code-point index is the engine default.
+  sort: pinyin
+
+numbering:
+  headings: none
+  depth: 3
+  figures: "图 {n}"
+  tables: "表 {n}"
+  equations: "({n})"
+
+masters:
+  - name: cover
+    header: 0
+    footer: 0
+
+# booktabs: toprule, midrule below the header, bottomrule; no vertical rules.
+table:
+  # A three-column capability table is narrower than the measure, like the
+  # pandoc reference; keep its content width and centre it.
+  width: natural
+  rule-width: 0
+  header-rule-width: 0.6pt
+  outer-rule-width: 0.8pt
+  column-rule-width: 0
+  outer-column-rule-width: 0
+
+# mdBook's Rust theme (`highlight.css`, ADR-0091): comments grey, keywords
+# purple, strings green, functions blue, numbers/types orange.
+syntax:
+  comment: "#575757"
+  keyword: "#9d00ec"
+  string: "#008200"
+  number: "#b21e00"
+  type: "#b21e00"
+  function: "#0030f2"
+  variable: "#d70025"
+  meta: "#b21e00"
+  literal: "#b21e00"
+
+styles:
+  # \setmainfont{IBM Plex Sans SC} + \linespread{1.2} over article's 12pt
+  # baseline: 10pt text on a 14.4pt baseline. `family: sans` selects the
+  # second face group, so pass --font-sans/--font-sans-bold on the CLI.
+  - selector:
+      element: document
+    declarations:
+      font-size: 10pt
+      line-height: 1.44
+      align: justify
+      family: sans
+
+  # \parindent 0em and \setlength{\parskip}{20pt}.
+  - selector:
+      element: paragraph
+    declarations:
+      first-indent: 0
+      space-before: 0
+      space-after: 20pt
+
+  # article.cls: \section is \Large\bfseries, \subsection is \large\bfseries,
+  # \subsubsection is \normalsize\bfseries. The reference does not force a
+  # page break before a section.
+  - selector:
+      element: heading
+    declarations:
+      family: sans
+      weight: bold
+      line-height: 1.2
+      space-before: 1.5em
+      space-after: 0.8em
+      keep-with-next: true
+
+  - selector:
+      element: heading
+      level: 1
+    declarations:
+      font-size: 14.4pt
+      space-before: 1.5em
+      space-after: 1em
+
+  - selector:
+      element: heading
+      level: 2
+    declarations:
+      font-size: 12pt
+      space-before: 1.2em
+      space-after: 0.6em
+
+  - selector:
+      element: heading
+      level: 3
+    declarations:
+      font-size: 10pt
+      space-before: 1em
+      space-after: 0.5em
+
+  - selector:
+      element: heading
+      level: 4
+    declarations:
+      font-size: 10pt
+      slant: italic
+      space-before: 0.8em
+      space-after: 0.4em
+
+  - selector:
+      element: strong
+    declarations:
+      weight: bold
+
+  - selector:
+      element: emphasis
+    declarations:
+      slant: italic
+
+  - selector:
+      element: underline
+    declarations:
+      underline: true
+
+  - selector:
+      element: smallCaps
+    declarations:
+      small-caps: true
+
+  # \footnotesize: 8pt on a 9.5pt baseline (article.cls).
+  - selector:
+      element: footnote
+    declarations:
+      font-size: 8pt
+      line-height: 1.1875
+      first-indent: 0
+      space-before: 0.35em
+
+  # The reference renews `quote` as framed + italic. The template model has no
+  # border or background, so indentation and italic carry the same signal.
+  - selector:
+      element: blockQuote
+    declarations:
+      indent-left: 1.5em
+      indent-right: 1.5em
+      first-indent: 0
+      slant: italic
+      space-before: 1em
+      space-after: 1em
+
+  - selector:
+      element: paragraph
+      within: blockQuote
+    declarations:
+      first-indent: 0
+      space-after: 0.6em
+
+  # Standard article lists, with pandoc's \tightlist itemsep removed.
+  - selector:
+      element: list
+    declarations:
+      indent-left: 2em
+      first-indent: 0
+      space-before: 0.6em
+      space-after: 0.6em
+
+  - selector:
+      element: listItem
+    declarations:
+      indent-left: 1.2em
+
+  - selector:
+      element: paragraph
+      within: listItem
+    declarations:
+      first-indent: -1.2em
+      space-after: 0
+
+  # The Rust book code panel: a #f6f7f6 field, a real monospace face, no
+  # border, and padding that is part of the block's height (ADR-0090). Code
+  # lines never wrap; a long command overflows rather than becoming uncopyable.
+  - selector:
+      element: codeBlock
+    declarations:
+      family: mono
+      font-size: 8.75pt
+      line-height: 1.4
+      align: left
+      first-indent: 0
+      background: "#f6f7f6"
+      padding-top: 0.5em
+      padding-right: 0.8em
+      padding-bottom: 0.5em
+      padding-left: 0.8em
+      space-before: 1em
+      space-after: 1em
+
+  # Inline code is the same mono face, muted like the reference's
+  # --inline-code-color; it keeps the line height of the body text.
+  - selector:
+      element: code
+    declarations:
+      family: mono
+      font-size: 8.75pt
+      color: "#6e6b5e"
+
+  # \small captions, centred.
+  - selector:
+      element: figureCaption
+    declarations:
+      font-size: 9pt
+      line-height: 1.2
+      align: center
+      first-indent: 0
+      space-before: 0.3em
+      space-after: 1em
+
+  - selector:
+      element: tableCaption
+    declarations:
+      font-size: 9pt
+      line-height: 1.2
+      align: center
+      first-indent: 0
+      space-before: 1em
+      space-after: 0.3em
+
+  # The reference puts a table on the paragraph rhythm: 20pt above the
+  # following text (\parskip), and enough room below the caption to let the
+  # top rule breathe.
+  - selector:
+      element: table
+    declarations:
+      space-before: 0.3em
+      space-after: 20pt
+
+  - selector:
+      element: paragraph
+      within: cell
+    declarations:
+      first-indent: 0
+      align: left
+      space-before: 0
+      space-after: 0
+
+  # hyperref uses black for internal links; leave links in the text colour.
+  # Formula sizes keep the project's optical compensation for the math face.
+  - selector:
+      element: math
+    declarations:
+      font-size: 11pt
+
+  - selector:
+      element: mathBlock
+    declarations:
+      font-size: 12pt
+      space-before: 0.5em
+      space-after: 0.5em
+
+  - selector:
+      element: toc
+    declarations:
+      font-size: 10pt
+      line-height: 1.6
+      first-indent: 0
+
+  - selector:
+      element: tocTitle
+    declarations:
+      font-size: 15pt
+      weight: bold
+      align: center
+      space-after: 1.4em
+
+  - selector:
+      element: indexEntry
+    declarations:
+      font-size: 9pt
+      line-height: 1.5
+      first-indent: 0
+
+  - selector:
+      element: indexTitle
+    declarations:
+      font-size: 15pt
+      weight: bold
+      align: center
+      space-after: 1.4em
+
+  # \maketitle: \huge title, \large author and date, pushed toward the top by
+  # \setlength{\droptitle}{-8em}. Our cover is a page of its own, so the same
+  # hierarchy is centred instead of sharing page 1 with the body.
+  - selector:
+      element: coverTitle
+    declarations:
+      font-size: 25pt
+      weight: bold
+      line-height: 1.25
+      align: center
+      space-before: 30mm
+      space-after: 4mm
+
+  - selector:
+      element: coverSubtitle
+    declarations:
+      font-size: 12pt
+      line-height: 1.4
+      align: center
+      space-after: 18mm
+
+  - selector:
+      element: coverAuthor
+    declarations:
+      font-size: 11pt
+      align: center
+      space-after: 2mm
+
+  - selector:
+      element: coverDate
+    declarations:
+      font-size: 10pt
+      align: center

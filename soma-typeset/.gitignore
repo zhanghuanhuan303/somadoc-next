@@ -9,3 +9,4 @@ examples/book/*.log
 examples/book/*.fls
 examples/book/*.fdb_latexmk
 examples/book/*.synctex.gz
+examples/templates/out/

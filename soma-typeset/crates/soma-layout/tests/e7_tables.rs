@@ -129,7 +129,10 @@ fn a_repeated_header_appears_on_every_table_page() {
             .iter()
             .find(|block| block_text(&layout, block) == "表头")
             .unwrap_or_else(|| panic!("page {} has no repeated header", page.number));
-        assert_eq!(header.y.0, 0, "the header sits at the top of the page");
+        assert_eq!(
+            header.y.0, 0,
+            "without rules the repeated header starts at the page top"
+        );
         assert_eq!(block_text(&layout, header), "表头");
         let first_content = cells
             .iter()

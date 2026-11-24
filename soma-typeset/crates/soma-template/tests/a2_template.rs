@@ -1,8 +1,8 @@
 //! A2 template parsing: YAML subset behaviour, validation, hashing.
 
 use soma_template::{
-    parse_template, FootnoteNumbering, FrontMatterNumbering, HeadingNumbering, PageSize, Property,
-    Unit,
+    parse_template, FootnoteNumbering, FrontMatterNumbering, HeadingNumbering, LineHeightSpec,
+    PageSize, Property, PropertyValue, Rational, Unit,
 };
 
 const FULL: &str = r##"
@@ -635,4 +635,138 @@ styles:
     let bad = source.replace("  title: 索引\n", "  title: 索引\n  sort: stroke\n");
     let error = parse_template(&bad).expect_err("unknown order");
     assert!(error.reason.contains("codepoint or pinyin"));
+}
+
+/// The reference page design transcribed from pandoc's `soma.latex`.
+///
+/// Keeping this as a test means an edit to the example template cannot silently
+/// drift from the design record: one-inch margins, Plex-sized 10/14.4pt text,
+/// no first-line indent, a 20pt paragraph skip, italic quotations, and the
+/// booktabs three-rule table.
+#[test]
+fn plex_reference_template_matches_the_pandoc_design() {
+    let source = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../examples/templates/plex.yaml"
+    ));
+    let template = parse_template(source).expect("plex reference template must parse");
+
+    assert_eq!(template.name, "soma-plex");
+    assert_eq!(template.page.size, PageSize::A4);
+    let margin = Rational::new(254, 10).expect("non-zero denominator");
+    assert_eq!(template.page.margin_top.value, margin);
+    assert_eq!(template.page.margin_top.unit, Unit::Mm);
+    assert_eq!(template.page.margin_bottom.value, margin);
+    assert_eq!(template.page.folio.as_deref(), Some("{page}"));
+    assert!(template.cover.is_some());
+    assert_eq!(template.toc.as_ref().map(|toc| toc.depth), Some(2));
+    assert_eq!(
+        template.index.as_ref().map(|index| index.sort),
+        Some(soma_template::IndexSort::Pinyin)
+    );
+    assert_eq!(template.table.width, soma_template::TableWidth::Natural);
+    assert!(
+        template.canonical_json().contains("\"width\":\"natural\""),
+        "a natural table is part of the template hash"
+    );
+
+    let declaration = |element: &str, level: Option<u8>, property: Property| {
+        template
+            .styles
+            .iter()
+            .find(|rule| {
+                rule.selector.element.as_deref() == Some(element) && rule.selector.level == level
+            })
+            .and_then(|rule| {
+                rule.declarations
+                    .iter()
+                    .find(|declaration| declaration.property == property)
+            })
+            .map(|declaration| &declaration.value)
+    };
+
+    assert_eq!(
+        declaration("document", None, Property::Family),
+        Some(&PropertyValue::Text("sans".to_string()))
+    );
+    assert_eq!(
+        declaration("document", None, Property::LineHeight),
+        Some(&PropertyValue::LineHeight(LineHeightSpec::Multiple(
+            Rational::new(36, 25).expect("1.44")
+        )))
+    );
+    assert_eq!(
+        declaration("paragraph", None, Property::FirstIndent),
+        Some(&PropertyValue::Length(soma_template::LengthSpec::zero()))
+    );
+    let twenty_points = Rational::new(20, 1).expect("20pt");
+    assert_eq!(
+        declaration("paragraph", None, Property::SpaceAfter),
+        Some(&PropertyValue::Length(soma_template::LengthSpec::new(
+            twenty_points,
+            Unit::Pt
+        )))
+    );
+    assert_eq!(
+        declaration("blockQuote", None, Property::Slant),
+        Some(&PropertyValue::Slant(soma_template::FontSlant::Italic))
+    );
+    assert_eq!(
+        declaration("heading", Some(1), Property::FontSize),
+        Some(&PropertyValue::Length(soma_template::LengthSpec::new(
+            Rational::new(72, 5).expect("14.4pt"),
+            Unit::Pt
+        )))
+    );
+
+    let header_rule = Rational::new(6, 10).expect("0.6pt");
+    assert_eq!(template.table.header_rule.value, header_rule);
+    assert_eq!(template.table.header_rule.unit, Unit::Pt);
+    assert_eq!(template.table.rule.value, Rational::ZERO);
+    assert_eq!(template.table.column_rule.value, Rational::ZERO);
+
+    // ADR-0090: the code panel is a template declaration, not a renderer
+    // constant.
+    assert_eq!(
+        declaration("codeBlock", None, Property::Background),
+        Some(&PropertyValue::Color(0xf6f7f6))
+    );
+    let pad = Rational::new(1, 2).expect("0.5em");
+    let pad = soma_template::LengthSpec::new(pad, Unit::Em);
+    assert_eq!(
+        declaration("codeBlock", None, Property::PaddingTop),
+        Some(&PropertyValue::Length(pad))
+    );
+    assert_eq!(
+        declaration("codeBlock", None, Property::PaddingBottom),
+        Some(&PropertyValue::Length(pad))
+    );
+
+    // ADR-0091: mdBook's Rust palette.
+    use soma_core::SyntaxClass;
+    assert_eq!(template.syntax.color(SyntaxClass::Comment), Some(0x575757));
+    assert_eq!(template.syntax.color(SyntaxClass::Keyword), Some(0x9d00ec));
+    assert_eq!(template.syntax.color(SyntaxClass::String), Some(0x008200));
+    assert_eq!(template.syntax.color(SyntaxClass::Function), Some(0x0030f2));
+}
+
+#[test]
+fn negative_padding_is_rejected() {
+    let source = r##"
+name: bad
+page:
+  size: A4
+  margin: 20mm
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10pt
+  - selector:
+      element: codeBlock
+    declarations:
+      padding-left: -1em
+"##;
+    let error = parse_template(source).expect_err("negative padding must fail");
+    assert!(error.to_string().contains("padding"));
 }

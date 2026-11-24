@@ -16,6 +16,9 @@
 //!   --face serif:bold:/path/NotoSerifCJK-Bold.ttc#2 \
 //!   --face sans:bold:/path/NotoSansCJK-Bold.ttc#2 \
 //!   --face math:normal:/path/NotoSansMath-Regular.ttf
+//!
+//! `--leading 0` overrides every face's leading. The font's `lineGap` is a
+//! recommendation, not ink; a template that sets `line-height` can zero it.
 //! ```
 
 mod cff;
@@ -631,6 +634,8 @@ impl FaceSpec {
         let family = match family {
             "serif" => 0,
             "sans" => 1,
+            // A monospaced text face (ADR-0089).
+            "mono" => 4,
             // A dedicated math face: used for formula symbols, not for text.
             "math" => 2,
             // A rescue face: measured with the body but drawn only for glyphs
@@ -1579,6 +1584,7 @@ fn run() -> Result<(), String> {
     let mut fallback_spec: Option<FaceSpec> = None;
     let mut text_path: Option<String> = None;
     let mut library: Option<String> = None;
+    let mut leading_override: Option<i32> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -1586,6 +1592,18 @@ fn run() -> Result<(), String> {
             "--face" => specs.push(FaceSpec::parse(
                 &args.next().ok_or("--face needs a value")?,
             )?),
+            // Set the face's leading to a fixed value in 1/4096 em. A font's
+            // lineGap is a recommendation, not ink; a template that sets
+            // `line-height` should be able to ignore it. `--leading 0` is the
+            // escape hatch for faces such as IBM Plex with a one-em lineGap.
+            "--leading" => {
+                leading_override = Some(
+                    args.next()
+                        .ok_or("--leading needs a value")?
+                        .parse()
+                        .map_err(|_| "--leading needs a number".to_string())?,
+                )
+            }
             "--audit" => audit_dirs.push(args.next().ok_or("--audit needs a directory")?),
             "--top" => {
                 top = args
@@ -1652,7 +1670,10 @@ fn run() -> Result<(), String> {
         let data = fs::read(&spec.path).map_err(|error| format!("{}: {error}", spec.path))?;
         let font = Font::open(&data, spec.index)?;
         let upem = font.units_per_em()?;
-        let (ascent, descent, leading) = font.line_metrics()?;
+        let (ascent, descent, mut leading) = font.line_metrics()?;
+        if let Some(value) = leading_override {
+            leading = value;
+        }
         let map = font.cmap()?;
         let advances = font.advances()?;
 

@@ -190,11 +190,11 @@ pub fn parse_markdown_with_meta(source: &str, meta: DocumentMeta) -> Document {
 
         // GFM table: a header row followed by a delimiter row.
         if text.contains('|') {
-            if let Some(aligns) = lines
+            if let Some((aligns, shares)) = lines
                 .get(index + 1)
                 .and_then(|next| table_delimiter(next.text.trim_start()))
             {
-                let (table, next_index) = parse_table(&lines, index, &aligns);
+                let (table, next_index) = parse_table(&lines, index, &aligns, &shares);
                 blocks.push(Block::Table(table));
                 index = next_index;
                 continue;
@@ -434,7 +434,12 @@ fn setext_underline(text: &str) -> Option<u8> {
 }
 
 /// GFM table delimiter row: `| --- | :-: | ---: |`.
-fn table_delimiter(text: &str) -> Option<Vec<CellAlign>> {
+///
+/// The number of dashes is the column's relative width, as in pandoc's pipe
+/// tables: more dashes means a wider column. The counts are normalised to
+/// per-mille so the layout's `Column.share` can carry them without physical
+/// units.
+fn table_delimiter(text: &str) -> Option<(Vec<CellAlign>, Vec<u16>)> {
     if !text.contains('-') {
         return None;
     }
@@ -443,6 +448,7 @@ fn table_delimiter(text: &str) -> Option<Vec<CellAlign>> {
         return None;
     }
     let mut aligns = Vec::with_capacity(cells.len());
+    let mut dashes = Vec::with_capacity(cells.len());
     for cell in cells {
         let cell = cell.trim();
         let left = cell.starts_with(':');
@@ -457,8 +463,40 @@ fn table_delimiter(text: &str) -> Option<Vec<CellAlign>> {
             (false, true) => CellAlign::Right,
             (false, false) => CellAlign::Default,
         });
+        dashes.push(body.chars().count() as u32);
     }
-    Some(aligns)
+    Some((aligns, shares_from_dashes(&dashes)))
+}
+
+fn shares_from_dashes(dashes: &[u32]) -> Vec<u16> {
+    // Equal dashes are the ordinary GFM spelling and carry no preference;
+    // keeping them zero preserves the measured column widths. A differing
+    // dash run is the author asking for a different relative width.
+    if dashes.windows(2).all(|pair| pair[0] == pair[1]) {
+        return vec![0; dashes.len()];
+    }
+    let total: u32 = dashes.iter().sum();
+    if total == 0 {
+        return vec![0; dashes.len()];
+    }
+    let mut shares: Vec<u16> = dashes
+        .iter()
+        .map(|dashes| (*dashes * 1000 / total) as u16)
+        .collect();
+    let assigned: u32 = shares.iter().map(|share| u32::from(*share)).sum();
+    let mut left = 1000u32.saturating_sub(assigned);
+    // Give rounding remainders to the largest dash counts; ties stay left to
+    // right, so the result is deterministic.
+    let mut order: Vec<usize> = (0..dashes.len()).collect();
+    order.sort_by(|a, b| dashes[*b].cmp(&dashes[*a]).then(a.cmp(b)));
+    for index in order {
+        if left == 0 {
+            break;
+        }
+        shares[index] += 1;
+        left -= 1;
+    }
+    shares
 }
 
 /// Split one table row. A leading and trailing pipe are decoration; an escaped
@@ -492,7 +530,12 @@ fn table_cells(text: &str) -> Vec<String> {
     cells
 }
 
-fn parse_table(lines: &[Line<'_>], index: usize, aligns: &[CellAlign]) -> (Table, usize) {
+fn parse_table(
+    lines: &[Line<'_>],
+    index: usize,
+    aligns: &[CellAlign],
+    shares: &[u16],
+) -> (Table, usize) {
     let header = &lines[index];
     let header_cells = table_cells(header.text.trim_start());
     let columns = aligns
@@ -507,6 +550,7 @@ fn parse_table(lines: &[Line<'_>], index: usize, aligns: &[CellAlign]) -> (Table
                 )),
                 *align,
             )
+            .with_share(shares.get(column).copied().unwrap_or(0))
         })
         .collect::<Vec<_>>();
     let mut rows = Vec::new();
@@ -1001,7 +1045,12 @@ mod unit_tests {
         );
         assert_eq!(
             table_delimiter("| :--- | ---: |"),
-            Some(vec![CellAlign::Left, CellAlign::Right])
+            Some((vec![CellAlign::Left, CellAlign::Right], vec![0, 0]))
+        );
+        assert_eq!(
+            table_delimiter("| --- | -------- |"),
+            Some((vec![CellAlign::Default, CellAlign::Default], vec![272, 728])),
+            "dash counts become relative column shares"
         );
     }
 }

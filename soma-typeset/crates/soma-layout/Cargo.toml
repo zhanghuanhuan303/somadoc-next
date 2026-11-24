@@ -12,7 +12,9 @@ soma-core = { path = "../soma-core" }
 soma-collate = { path = "../soma-collate" }
 soma-hyphen = { path = "../soma-hyphen" }
 soma-doc = { path = "../soma-doc" }
+soma-highlight = { path = "../soma-highlight" }
 soma-math = { path = "../soma-math" }
 soma-metrics = { path = "../soma-metrics" }
 soma-rules = { path = "../soma-rules" }
 soma-template = { path = "../soma-template" }
+soma-tikz = { path = "../soma-tikz" }

@@ -182,17 +182,28 @@ impl<'a> StyledMetrics<'a> {
     fn face_of(&self, computed: &ComputedStyle) -> Option<&Face> {
         // Search by family and weight rather than by slot: a table written in
         // any order then still answers with the face the style asked for.
-        let family = if soma_template::family_is_sans(computed.family.as_deref()) {
-            soma_metrics::FAMILY_SANS
-        } else {
-            soma_metrics::FAMILY_SERIF
+        let role = soma_template::family_role(computed.family.as_deref());
+        let family = match role {
+            soma_template::FamilyRole::Serif => soma_metrics::FAMILY_SERIF,
+            soma_template::FamilyRole::Sans => soma_metrics::FAMILY_SANS,
+            soma_template::FamilyRole::Mono => soma_metrics::FAMILY_MONO,
         };
         let bold = computed.weight == FontWeight::Bold;
         let faces = self.table.faces();
-        faces
-            .iter()
-            .find(|face| face.family == family && (face.weight != 0) == bold)
-            .or_else(|| faces.iter().find(|face| face.family == family))
+        let by_family = |family: u8| {
+            faces
+                .iter()
+                .find(|face| face.family == family && (face.weight != 0) == bold)
+                .or_else(|| faces.iter().find(|face| face.family == family))
+        };
+        // A table measured without a mono face still has to lay out code: a
+        // mono template falls back to the sans face, then to the body face.
+        by_family(family)
+            .or_else(|| {
+                (role == soma_template::FamilyRole::Mono)
+                    .then(|| by_family(soma_metrics::FAMILY_SANS))
+                    .flatten()
+            })
             .or_else(|| self.table.face(0))
     }
 }

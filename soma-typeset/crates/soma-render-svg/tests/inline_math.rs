@@ -68,7 +68,11 @@ fn inline_symbols_are_painted_on_the_line_baseline() {
         .expect("the formula atom");
 
     let base_x = pages.page.margin_left.0 + block.x.0 + atom.x.0;
-    let base_y = pages.page.margin_top.0 + block.y.0 + placed.y.0 + placed.line.ascent.0;
+    let base_y = pages.page.margin_top.0
+        + block.y.0
+        + placed.y.0
+        + placed.line.ascent.0
+        + placed.line.leading.0 / 2;
 
     assert_eq!(
         svg.matches("data-math=").count(),

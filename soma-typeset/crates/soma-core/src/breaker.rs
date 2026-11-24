@@ -840,12 +840,20 @@ impl<'a> Shaped<'a> {
             trim_right = c_end as i32;
             effective = natural - c_end;
 
-            // Only an overfull line needs to give up the leading mark's side
-            // bearing as well, and only an originally overfull line pays for
-            // the trim: the trailing bearing of a short line is optical
-            // alignment, not compensation.
+            // A justified line also aligns its leading mark: an opening
+            // quote or bracket draws its ink inside the em box, so charging
+            // the full advance leaves the quote visibly indented against the
+            // lines above and below. Trimming the empty side bearing lets the
+            // extra glue fill the line and puts the ink on the text edge
+            // (ADR-0082). A ragged line has no text edge to align to, so it
+            // still trims its leading mark only when it would overrun.
             let mut c = c_end;
-            if effective > target {
+            if justified && start + 1 < end {
+                let c_start = left_cap;
+                trim_left = c_start as i32;
+                effective -= c_start;
+                c += c_start;
+            } else if effective > target {
                 let excess = effective - target;
                 let c_start = excess.min(left_cap);
                 trim_left = c_start as i32;

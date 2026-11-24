@@ -96,7 +96,7 @@ Cumulative public test files:
 | `k1_fixtures.rs` | 10 | public-seam fixtures |
 | `k2_boundary.rs` | 5 | boundary role, deviation, trace |
 | `k3_styles.rs` | 6 | glyph metrics, line boxes, height cost |
-| `k4_trim.rs` | 10 | edge trim and coordinates |
+| `k4_trim.rs` | 11 | edge trim and coordinates, including line-start opening marks |
 | `k5_forced.rs` | 7 | forced breaks and segments |
 | `k6_reporting.rs` | 7 | breaker/stage/length flags |
 | `k6_fallback.rs` | 4 | emergency and forbidden rescue |
@@ -104,13 +104,13 @@ Cumulative public test files:
 | `a1_model.rs` | 9 | node coverage, renumbering, text projection |
 | `a1_raw.rs` | 4 | raw payload preservation |
 | `a1_validate.rs` | 26 | every DocIR invariant has a failing case (incl. table grid) |
-| `a2_template.rs` | 20 | YAML subset, validation, positions, hash, `within`, `table:`, `masters:`, `toc:`, `start-master`, `level`, `numbering:`, front matter, lists |
+| `a2_template.rs` | 21 | YAML subset, validation, positions, hash, `within`, `table:`, `masters:`, `toc:`, `start-master`, `level`, `numbering:`, front matter, lists, the Plex reference design |
 | `a2_units.rs` | 7 | exact conversion, truncation, strict grammar |
 | `a2_resolve.rs` | 12 | cascade, inheritance, page geometry, style hash, heading levels |
 | `a2_cell_context.rs` | 1 | `within: cell` overrides body rules and sets cell padding |
 | `a3_layout.rs` | 7 | paragraph boxes match the kernel, text index, stacking |
 | `a4_pagination.rs` | 13 | vertical K-P optimality, page breaks, keep-with-next, splitting, overflow |
-| `a6_blocks.rs` | 24 | code (one atom table, spaces kept), display math box, figures, tables (+colspan), rules, raw, footnotes, marker width, numbered equations, tags and notags, a tag carrying maths, list markers, hanging indent and container indent |
+| `a6_blocks.rs` | 29 | code (one atom table, spaces kept), display math box, figures, tables (+colspan, rule separation, natural centring, dash shares), rules, raw, footnotes (rule, number column), marker width, numbered equations, tags and notags, a tag carrying maths, list markers, hanging indent and container indent |
 | `metrics.rs` (layout) | 11 | table-backed metrics, per-style scaling, bold face, determinism, outline ink, rescue face, Han inside a formula measured with the text face, inline code measured with its style |
 | `e2_split.rs` | 7 | line conservation, widows/orphans, footnote lines, glue, vertical hash |
 | `e3_typography.rs` | 2 | hanging punctuation is post-processing and respects the cap |
@@ -126,13 +126,15 @@ Cumulative public test files:
 | `effect.rs` (eval) | 7 | Gate Q′ structural claims on the scorecard |
 | `engine.rs` | 17 | `soma.engine/1`: parse, reject, canonical hash, preset selection, layout equivalence |
 | `corpus.rs` (eval) | 9 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
-| `a5_md.rs` | 22 | Markdown subset (nested lists, GFM tables, setext headings), inlines (including GFM `~~`), spans, index/ruby extensions, front matter, validity |
+| `a5_md.rs` | 23 | Markdown subset (nested lists, GFM tables with dash-derived column shares, setext headings), inlines (including GFM `~~`), spans, index/ruby extensions, front matter, validity |
 | `html.rs` (html) | 12 | HTML subset shapes, table grid, caption and `<colgroup>` widths, degradation, recovery, pipeline |
 | `latex.rs` (latex) | 17 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, inline command opening a block, ruby, recovery, pipeline |
 | `macros.rs` (latex) | 22 | source-level expansion: 0–2 argument macros, nesting, renew, depth limit, `\def`, counters (arabic/roman/alph), definitions vanish, comments, verbatim untouched |
 | `math.rs` (soma-math) | 54 | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, TeX spacing table, Bin normalisation, style levels, rule 18, `\sin`/`\binom`/`\operatorname`/`\overline`/`\hat`, errors, italic variables, tags |
 | `e11_math.rs` (layout) | 10 | centring, baseline inside the box, flow, canonical `math` field, default display skip |
 | `e12_inline_math.rs` (layout) | 12 | marker atoms, line-box growth, text style, placeholder, canonical `inlineMath`, splitting a long formula at relations |
+| `e27_tikz.rs` (layout) | 4 | a picture is one centred vector box, node labels are items, paths only in canonical when present, source fallback, atomic flow |
+| `tikz.rs` (soma-tikz) | 10 | centimetre unit, shift/scale, circle/arc cubics, named coordinates and anchors, `\foreach` and its tail, grid lattice and step, a filled grid has no area, node measurement, orthogonal paths |
 | `e13_toc.rs` (layout) | 13 | TOC depth, page numbers, row shape, leaders, wrapped rows, forced page, figure/table lists, section-start master |
 | `e14_alignment.rs` (layout) | 6 | left/center/right placement, first-indent interaction, justify unchanged |
 | `e15_cover.rs` (layout) | 7 | cover metadata, master, centring, fallbacks, unknown master error |
@@ -177,9 +179,9 @@ Cumulative public test files:
 | `soma-hyphen` unit | 10 | pattern parsing (`%`, `\patterns{}`), the `hyphenation` fixture, left/right limits, UTF-8 offsets, ordering |
 | `soma-docx` (unit + integration) | 32 | zip store/deflate, inflate, XML entities, headings from style names, `basedOn` styles, tables, lists, metadata, embedded media, damaged archives |
 | math geometry (ADR-0075/0076) | 14 | `soma.metrics/7` variants, gaps and top accents; TeX variant selection and fallback size; the radical link and degree; fraction and axis geometry; accent attachment and combining marks |
-| render-pdf unit | 26 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing |
+| render-pdf unit | 27 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing |
 
-Total: **801 tests** (`cargo test --workspace`). The standalone
+Total: **809 tests** (`cargo test --workspace`). The standalone
 `tools/metrics-gen` crate adds its own 4 (`cargo test --manifest-path tools/metrics-gen/Cargo.toml`).
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,

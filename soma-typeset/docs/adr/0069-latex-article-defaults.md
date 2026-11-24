@@ -1,6 +1,7 @@
 # ADR-0069: the default template is LaTeX article 10pt
 
-- Status: Accepted
+- Status: Superseded by ADR-0088 (the design lives on as
+  `examples/templates/latex-article.yaml`)
 - Date: 2026-11-21
 - Related: ADR-0015 (page masters), ADR-0023 (`publish-v1`), ADR-0029 (CLI),
   D13 (`emergency_stretch` has two sources)

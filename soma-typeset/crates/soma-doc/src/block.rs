@@ -282,10 +282,11 @@ pub struct Column {
     pub align: CellAlign,
     /// Relative width hint in per-mille, `0` for "size from content".
     ///
-    /// This is a share of the measure, not a length: DocIR stays free of
-    /// physical units (ADR-0009), and the layout still guarantees a content
-    /// floor. An HTML `<colgroup>` or a Word grid may supply it; every other
-    /// front end leaves it zero, which is exactly the old behaviour.
+    /// This is a share, not a length: DocIR stays free of physical units
+    /// (ADR-0009). A justified table reads it as per-mille of the measure; a
+    /// natural table distributes its measured total by it. An HTML
+    /// `<colgroup>`, a Word grid, or a GFM delimiter row may supply it; every
+    /// other front end leaves it zero.
     pub share: u16,
 }
 

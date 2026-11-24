@@ -117,6 +117,7 @@
 | D55 | ~~图只画占位框~~ | **已关闭（ADR-0047/0048）**：PNG/JPEG 在 PDF 里是 XObject（PNG 走 Flate、JPEG 直通），HTML/SVG 用 `data:` URI；盒子的宽高比来自图片本身。Ruby 见 ADR-0060 | — | ✅ 已关闭 | 否 |
 | D56 | `Section` 级脚注编号回退 | `numbering: section` 按全文连续处理 | 分节编号不准确 | 未排期 | 否 |
 | D57 | `Line` 序列化上提到 kernel | `Line::write_canonical` 是增量 API（页面结果复用），`soma.layout/6` 字节不变 | 无 | — | 否 |
+| D99 | TikZ 只做核心绘图语言 | **ADR-0092 已交付**：路径/节点/坐标/网格/裁剪与三种后端的矢量绘制；仍不包含 `plot`、`decorations`、`graphs`、`matrix`、`pic`、`clip`、patterns、shadings、3D、`positioning` 库；箭头是几何 barbs 而非 `arrows.meta` 字形；没有旋转选项；节点文字不能 `\\` 换行 | 复杂 TikZ 图会走可见的源码回退，而不是画错 | 有真实文档用到对应库时按 ADR 扩子集 | 否 |
 
 ## 3. 非目标（不是债务）
 
@@ -161,4 +162,4 @@
 | PDF 输出 | **已完成（ADR-0034/ADR-0039）**：TrueType 稀疏子集与 CID-keyed CFF、Identity-H、书签树、PageLabels；边界见 D82/D85 |
 | 全量补课 | **已完成（ADR-0059–0063）**：关闭 D09、D24、D37、D53、D80、D81 |
 | 遗留清账 | **已完成（ADR-0064–0067）**：关闭 D12、D70；D24/D69/D81 补齐（Word 样式与图片、HTML `colgroup`、索引页码区间） |
-| 未排期 | D01、D03、D04、D05、D10、D11、D13、D60、D62、D69、D71、D74、D91、D92、D95、D97、D98、N1–N6 |
+| 未排期 | D01、D03、D04、D05、D10、D11、D13、D60、D62、D69、D71、D74、D91、D92、D95、D97、D98、D99、N1–N6 |

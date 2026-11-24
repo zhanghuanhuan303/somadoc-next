@@ -8,7 +8,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use soma_core::Align;
+use soma_core::{Align, SyntaxClass};
 
 use crate::units::{LengthSpec, LineHeightSpec, Rational, Unit};
 use crate::yaml::{Key, Value, ValueKind};
@@ -84,6 +84,8 @@ pub struct Template {
     pub cover: Option<CoverSpec>,
     pub numbering: NumberingSpec,
     pub table: TableSpec,
+    /// Token colors for highlighted code. Empty means no highlighting.
+    pub syntax: SyntaxPalette,
     /// Named page masters beyond the default `page:` geometry.
     pub masters: Vec<MasterSpec>,
     pub styles: Vec<StyleRule>,
@@ -365,6 +367,63 @@ pub struct TableSpec {
     pub style: RuleStyle,
     /// Packed `0xRRGGBB`; `None` uses the table style's color.
     pub color: Option<u32>,
+    /// Whether a table fills the measure or keeps its natural width.
+    pub width: TableWidth,
+}
+
+/// Token colors for code blocks. A missing class keeps the code block's own
+/// color, so a template can highlight only what it cares about.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SyntaxPalette {
+    colors: [Option<u32>; SyntaxClass::COUNT],
+}
+
+impl SyntaxPalette {
+    pub fn color(self, class: SyntaxClass) -> Option<u32> {
+        self.colors[class.index()]
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.colors.iter().all(Option::is_none)
+    }
+
+    pub(crate) fn set(&mut self, class: SyntaxClass, color: u32) {
+        self.colors[class.index()] = Some(color);
+    }
+
+    /// Classes in canonical order, with their colors.
+    pub fn entries(self) -> impl Iterator<Item = (SyntaxClass, u32)> {
+        SyntaxClass::ALL
+            .into_iter()
+            .filter_map(move |class| self.color(class).map(|color| (class, color)))
+    }
+}
+
+/// Horizontal sizing of a table.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TableWidth {
+    /// Columns share the whole measure (the historical behaviour).
+    #[default]
+    Justify,
+    /// The table is as wide as its content; when it fits, it is centred.
+    Natural,
+}
+
+impl TableWidth {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Justify => "justify",
+            Self::Natural => "natural",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "justify" => Some(Self::Justify),
+            "natural" => Some(Self::Natural),
+            _ => None,
+        }
+    }
 }
 
 /// How a table rule is painted.
@@ -402,6 +461,7 @@ impl Default for TableSpec {
             outer_column_rule: LengthSpec::zero(),
             style: RuleStyle::Solid,
             color: None,
+            width: TableWidth::Justify,
         }
     }
 }
@@ -502,6 +562,11 @@ pub enum Property {
     LetterSpacing,
     IndentLeft,
     IndentRight,
+    Background,
+    PaddingTop,
+    PaddingRight,
+    PaddingBottom,
+    PaddingLeft,
     SpaceBefore,
     SpaceAfter,
     SpaceBeforePlus,
@@ -533,6 +598,11 @@ impl Property {
             Self::LetterSpacing => "letter-spacing",
             Self::IndentLeft => "indent-left",
             Self::IndentRight => "indent-right",
+            Self::Background => "background",
+            Self::PaddingTop => "padding-top",
+            Self::PaddingRight => "padding-right",
+            Self::PaddingBottom => "padding-bottom",
+            Self::PaddingLeft => "padding-left",
             Self::SpaceBefore => "space-before",
             Self::SpaceAfter => "space-after",
             Self::SpaceBeforePlus => "space-before-plus",
@@ -564,6 +634,11 @@ impl Property {
             "letter-spacing" => Self::LetterSpacing,
             "indent-left" => Self::IndentLeft,
             "indent-right" => Self::IndentRight,
+            "background" => Self::Background,
+            "padding-top" => Self::PaddingTop,
+            "padding-right" => Self::PaddingRight,
+            "padding-bottom" => Self::PaddingBottom,
+            "padding-left" => Self::PaddingLeft,
             "space-before" => Self::SpaceBefore,
             "space-after" => Self::SpaceAfter,
             "space-before-plus" => Self::SpaceBeforePlus,
@@ -645,6 +720,7 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
         "cover",
         "numbering",
         "table",
+        "syntax",
         "masters",
         "styles",
     ])?;
@@ -685,6 +761,10 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
         Some(value) if !value.is_null() => parse_table(value, "table")?,
         _ => TableSpec::default(),
     };
+    let syntax = match fields.optional("syntax") {
+        Some(value) if !value.is_null() => parse_syntax(value, "syntax")?,
+        _ => SyntaxPalette::default(),
+    };
     let masters = match fields.optional("masters") {
         Some(value) if !value.is_null() => parse_masters(value, "masters")?,
         _ => Vec::new(),
@@ -706,6 +786,7 @@ pub fn parse_template(source: &str) -> Result<Template, TemplateError> {
         cover,
         numbering,
         table,
+        syntax,
         masters,
         styles,
     };
@@ -1008,6 +1089,7 @@ fn parse_table(value: &Value, path: &str) -> Result<TableSpec, TemplateError> {
         "outer-column-rule-width",
         "rule-style",
         "rule-color",
+        "width",
     ])?;
 
     let mut spec = TableSpec::default();
@@ -1040,6 +1122,10 @@ fn parse_table(value: &Value, path: &str) -> Result<TableSpec, TemplateError> {
         spec.color =
             Some(parse_color(&text).ok_or_else(|| fields.error("rule color must be #rrggbb"))?);
     }
+    if let Some(text) = fields.optional_str("width")? {
+        spec.width = TableWidth::parse(&text)
+            .ok_or_else(|| fields.error("table width must be justify or natural"))?;
+    }
 
     for length in [
         spec.rule,
@@ -1054,6 +1140,26 @@ fn parse_table(value: &Value, path: &str) -> Result<TableSpec, TemplateError> {
     }
 
     Ok(spec)
+}
+
+fn parse_syntax(value: &Value, path: &str) -> Result<SyntaxPalette, TemplateError> {
+    let fields = Fields::new(value, path)?;
+    let allowed: Vec<&str> = SyntaxClass::ALL
+        .iter()
+        .map(|class| class.as_str())
+        .collect();
+    fields.reject_unknown(&allowed)?;
+    let mut palette = SyntaxPalette::default();
+    for class in SyntaxClass::ALL {
+        let Some(value) = fields.optional(class.as_str()) else {
+            continue;
+        };
+        let text = value.as_str(path)?;
+        let color = parse_color(&text)
+            .ok_or_else(|| value.error(path, "syntax colors must be quoted #rrggbb strings"))?;
+        palette.set(class, color);
+    }
+    Ok(palette)
 }
 
 fn parse_masters(value: &Value, path: &str) -> Result<Vec<MasterSpec>, TemplateError> {
@@ -1204,6 +1310,10 @@ fn parse_declaration(
         | Property::LetterSpacing
         | Property::IndentLeft
         | Property::IndentRight
+        | Property::PaddingTop
+        | Property::PaddingRight
+        | Property::PaddingBottom
+        | Property::PaddingLeft
         | Property::SpaceBefore
         | Property::SpaceAfter
         | Property::SpaceBeforePlus
@@ -1237,8 +1347,13 @@ fn parse_declaration(
             }
             PropertyValue::Text(text)
         }
-        Property::Color => {
-            let color = parse_color(&text).ok_or_else(|| error("color must be #rrggbb"))?;
+        Property::Color | Property::Background => {
+            let reason = if property == Property::Background {
+                "background must be #rrggbb"
+            } else {
+                "color must be #rrggbb"
+            };
+            let color = parse_color(&text).ok_or_else(|| error(reason))?;
             PropertyValue::Color(color)
         }
         Property::Weight => PropertyValue::Weight(match text.as_str() {
@@ -1273,6 +1388,20 @@ fn parse_declaration(
             PropertyValue::Count(count)
         }
     };
+
+    if matches!(
+        property,
+        Property::PaddingTop
+            | Property::PaddingRight
+            | Property::PaddingBottom
+            | Property::PaddingLeft
+    ) {
+        if let PropertyValue::Length(length) = &parsed {
+            if length.value.num() < 0 {
+                return Err(error("padding must not be negative"));
+            }
+        }
+    }
 
     Ok(Declaration {
         property,

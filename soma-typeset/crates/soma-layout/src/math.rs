@@ -167,6 +167,28 @@ pub fn display_inline(
     soma_math::layout(source, &math_style, &adapter).ok()
 }
 
+/// Lay out a TikZ node's text at `size`, with `$...$` still maths.
+pub fn text_at_size(
+    source: &str,
+    computed: &ComputedStyle,
+    metrics: &dyn Metrics,
+    style: StyleId,
+    size: Width,
+) -> Option<MathLayout> {
+    let adapter = MathAdapter::new(metrics, style, computed);
+    let mut math_style = inline_style_for(computed);
+    math_style.size = size;
+    math_style.apply_params(&adapter);
+    let wrapped = alloc::format!("\\text{{{source}}}");
+    let nodes = soma_math::parse(&wrapped).ok()?;
+    Some(soma_math::lay_out(
+        &nodes,
+        math_style.size,
+        &math_style,
+        &adapter,
+    ))
+}
+
 /// One inline formula, registered under a marker until the break produces the
 /// atom index.
 pub struct InlineMath {

@@ -83,7 +83,7 @@ fn svg_is_available_and_draws_boxes() {
 }
 
 #[test]
-fn the_default_template_is_latex_article() {
+fn the_default_template_is_plex() {
     let input = temp("md-default", "md", "# 标题\n\n一段正文。\n");
     let (ok, stdout, stderr) = run(&[
         "render",
@@ -94,27 +94,77 @@ fn the_default_template_is_latex_article() {
     ]);
 
     assert!(ok, "stderr: {stderr}");
-    // The 10pt article text block is 345 x 598 pt = 121.3 x 210.2 mm on A4,
-    // with 44.0/44.7 mm side margins and 44.4/42.4 mm top/bottom margins.
+    // The Plex reference: A4 with 25.4 mm margins. The content box is
+    // 159.2 mm = 451.3 pt; the template asks for a TOC, which moves the body
+    // to page 2.
+    assert!(
+        stdout.contains(
+            "\"page\":{\"width\":243824,\"height\":344838,\"marginTop\":29491,\"marginBottom\":29491,\"marginLeft\":29491,\"marginRight\":29491}"
+        ),
+        "head: {stdout}"
+    );
+    // `numbering: headings: none` keeps the heading text bare.
+    assert!(
+        stdout.contains("\"outline\":[{\"level\":1,\"text\":\"标题\",\"page\":2"),
+        "outline: {stdout}"
+    );
+    assert!(stdout.contains("\"toc\":{\"passes\":3"), "toc: {stdout}");
+    assert!(
+        stdout.contains("\"footer\":[{\"node\":"),
+        "footer: {stdout}"
+    );
+    assert!(stdout.contains("\"printed\":\"2\""));
+}
+
+#[test]
+fn the_archived_article_template_is_still_selectable() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("workspace root");
+    let template = root.join("examples/templates/latex-article.yaml");
+    let input = temp("md-article", "md", "# 标题\n\n一段正文。\n");
+    let (ok, stdout, stderr) = run(&[
+        "render",
+        "--input",
+        input.to_str().unwrap(),
+        "--template",
+        template.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+
+    assert!(ok, "stderr: {stderr}");
     assert!(
         stdout.contains(
             "\"page\":{\"width\":243824,\"height\":344838,\"marginTop\":51551,\"marginBottom\":49229,\"marginLeft\":51087,\"marginRight\":51899}"
         ),
         "head: {stdout}"
     );
-    // `arabic-dotted` numbering: the first level-1 heading is "1".
+    assert!(stdout.contains("\"pageCount\":1"), "{stdout}");
     assert!(
-        stdout.contains(
-            "\"outline\":[{\"level\":1,\"text\":\"1 标题\",\"page\":1,\"printed\":\"1\"}]"
-        ),
+        stdout.contains("\"outline\":[{\"level\":1,\"text\":\"1 标题\",\"page\":1"),
         "outline: {stdout}"
     );
-    // `folio: "{page}"` puts a centred page number in the footer band.
+}
+
+#[test]
+fn a_document_without_headings_gets_no_empty_contents_page() {
+    let input = temp("md-no-toc", "md", "第一段。\n\n第二段。\n");
+    let (ok, stdout, stderr) = run(&[
+        "render",
+        "--input",
+        input.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+
+    assert!(ok, "stderr: {stderr}");
+    assert!(stdout.contains("\"pageCount\":1"), "{stdout}");
     assert!(
-        stdout.contains("\"footer\":[{\"node\":"),
-        "footer: {stdout}"
+        stdout.contains("\"toc\":{\"passes\":1,\"stable\":true,\"entries\":0"),
+        "{stdout}"
     );
-    assert!(stdout.contains("\"printed\":\"1\""));
 }
 
 #[test]

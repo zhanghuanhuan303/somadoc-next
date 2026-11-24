@@ -87,7 +87,7 @@ only).
 | [0066](0066-word-styles-and-media.md) | Word styles resolved through `basedOn`; embedded images as figures | Accepted |
 | [0067](0067-latex-macros.md) | LaTeX macros and counters expanded before parsing | Accepted |
 | [0068](0068-figure-units-and-image-sizes.md) | Figure/caption units, table headers that never stand alone, intrinsic image sizes | Accepted |
-| [0069](0069-latex-article-defaults.md) | The built-in template is LaTeX `article` 10pt; `latex-v1` preset | Accepted |
+| [0069](0069-latex-article-defaults.md) | The built-in template is LaTeX `article` 10pt; `latex-v1` preset | Superseded by ADR-0088; design archived |
 | [0070](0070-math-v2.md) | Math v2: TeX atom classes and spacing, `MATH` constants + glyph ink, style levels, inline math breaking | Accepted |
 | [0071](0071-web-kp-slice.md) | Browser slice: `soma-core` + `soma-rules` behind a C ABI; three defaulted `Metrics` methods; no wasm-bindgen | Accepted |
 | [0072](0072-emergency-window.md) | The emergency stage gets a width window: 1.26M → 30k candidates at 20 em, same breaks (D94) | Accepted |
@@ -99,6 +99,18 @@ only).
 | [0078](0078-latin-modern-math.md) | The default math face is Latin Modern Math; CFF math ink, Type 2 curve/stem fixes, the regenerated tables and the bundled face | Accepted; default face superseded by 0079 |
 | [0079](0079-new-computer-modern-math.md) | The default math face is New Computer Modern Math: the Typst reference face, bundled and proved against the regenerated tables | Accepted |
 | [0080](0080-display-math-skip.md) | A display formula gets one body em before/after by default, even when a template does not style `mathBlock` | Accepted |
+| [0081](0081-plex-reference-template.md) | A reference page design transcribed from pandoc `soma.latex`: Plex Sans body, zero indent, 20pt skip, booktabs rules | Accepted; promoted to the built-in default by ADR-0088 |
+| [0082](0082-line-start-opening-trim.md) | A justified line trims the side bearing of an opening mark at its start | Accepted; supersedes ADR-0036 §4 |
+| [0083](0083-footnote-area.md) | The footnote area gets a separator rule, a 1.5em number column, and a layout-unit superscript raise | Accepted |
+| [0084](0084-table-rule-separation.md) | Table rules own the vertical air: 1/4em above/below rules, table `space-before/after` from the template, no per-cell padding | Accepted |
+| [0085](0085-continuous-decoration.md) | An underline run bridges justification glue; a decorated atom extends to its decorated neighbour | Accepted |
+| [0086](0086-half-leading.md) | Renderers split line leading half above/below the baseline; metrics can zero a font's lineGap | Accepted |
+| [0087](0087-natural-table-width.md) | `table: width: natural` centres a content-width table; GFM dash counts become column shares | Accepted |
+| [0088](0088-plex-builtin-default.md) | The Plex reference is the built-in template; LaTeX article is archived as a selectable template | Accepted; supersedes ADR-0069 |
+| [0089](0089-monospace-family.md) | Monospace is a third family: `FAMILY_MONO`, PDF `F7`/`F8`, `--font-mono`, sans fallback | Accepted |
+| [0090](0090-code-block-panel.md) | Code blocks are full-measure panels: template `background`/`padding-*`, geometry resolved before pagination | Accepted |
+| [0091](0091-syntax-highlighting.md) | A dependency-free line lexer emits `SyntaxClass`; colors come from the template `syntax:` palette | Accepted |
+| [0092](0092-tikz-vector-subsystem.md) | TikZ is a vector subsystem: `soma-tikz` parses the core PGF drawing language into integer paths on `MathBox.paths`; unsupported syntax fails loudly | Accepted |
 
 ## Rules
 

@@ -344,7 +344,11 @@ pub(crate) fn page_badness(
 }
 
 pub(crate) fn note_height_of(notes_seen: &[usize], notes: &NoteMap) -> Width {
-    let mut height = Width::ZERO;
+    let mut height = if notes_seen.is_empty() {
+        Width::ZERO
+    } else {
+        crate::FOOTNOTE_RULE_THICKNESS + crate::FOOTNOTE_RULE_GAP
+    };
     for note in notes_seen {
         if let Some(blocks) = notes.blocks.get(*note) {
             for block in blocks {
@@ -387,25 +391,34 @@ pub(crate) fn footnote_heights(ends: &[usize], items: &[VItem], notes: &NoteMap)
     out
 }
 
+/// Footnotes for one page, plus the definition index of each returned block.
+/// The separator rule is drawn by the renderer at `y = 0`; the text starts
+/// below it, so the reservation and the placed geometry agree.
 pub(crate) fn assemble_footnotes(
     start: usize,
     end: usize,
     items: &[VItem],
     notes: &NoteMap,
-) -> Vec<PlacedBlock> {
+) -> (Vec<PlacedBlock>, Vec<usize>) {
+    let used = page_note_indices(start, end, items);
     let mut out = Vec::new();
-    let mut y = Width::ZERO;
-    for note in page_note_indices(start, end, items) {
+    let mut ids = Vec::new();
+    if used.is_empty() {
+        return (out, ids);
+    }
+    let mut y = crate::FOOTNOTE_RULE_THICKNESS + crate::FOOTNOTE_RULE_GAP;
+    for note in used {
         if let Some(blocks) = notes.blocks.get(note) {
             for block in blocks {
                 let mut placed = block.clone();
                 placed.y = y;
                 y = y + placed.height;
                 out.push(placed);
+                ids.push(note);
             }
         }
     }
-    out
+    (out, ids)
 }
 
 /// Greedy fill with the footnote reservation fixed point: paginate, measure

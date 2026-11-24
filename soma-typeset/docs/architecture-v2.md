@@ -577,6 +577,8 @@ LayoutResult
 crates/
   soma-core/        # units, metrics seam, inline K-P, canonical line result
   soma-rules/       # segmentation + CJK punctuation/gap/trim -> inline sequence
+  soma-highlight/   # code lexer -> SyntaxClass spans (ADR-0091)
+  soma-tikz/        # core PGF drawing language -> integer vector paths (ADR-0092)
   soma-doc/         # DocIR, source map, document schema
   soma-template/    # manifest, YAML style rules, validation, page masters
   soma-layout/      # box tree, paragraph adapter, pagination, footnotes

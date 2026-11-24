@@ -45,6 +45,7 @@ let document = parse_latex(r"\section{标题}
 | `tabular`（`\\` 分行、`&` 分列、`\hline`/`\toprule`/`\midrule`/`\bottomrule`、`\multicolumn`） | `Table` |
 | `table` / `table*`（内部 `\caption{...}`） | `Table.caption` |
 | `figure` / `figure*`（`\includegraphics[opts]{path}` + `\caption{...}`） | `Figure`（`ImageRef`，无 intrinsic 时按 3:2 占位）；无路径时丢弃 |
+| `tikzpicture` 环境 | `MathBlock` 保留环境源码；布局交给 `soma-tikz` 解析核心 PGF 绘图语言（ADR-0092，子集见 `docs/tikz.md`），失败时回退为源码文本 |
 | `\newpage` / `\clearpage` | `PageBreak` |
 | `\title` / `\author`（`\and` 分隔）/ `\date`（`YYYY-MM-DD`） | `DocumentMeta` |
 

@@ -75,7 +75,11 @@ fn an_inline_formula_is_drawn_at_the_atom_origin() {
         .expect("the formula atom");
 
     let left = layout.page.margin_left.0 + block.x.0 + atom.x.0;
-    let baseline = layout.page.margin_top.0 + block.y.0 + placed.y.0 + placed.line.ascent.0;
+    let baseline = layout.page.margin_top.0
+        + block.y.0
+        + placed.y.0
+        + placed.line.ascent.0
+        + placed.line.leading.0 / 2;
 
     assert_eq!(
         html.matches("class=\"math\"").count(),

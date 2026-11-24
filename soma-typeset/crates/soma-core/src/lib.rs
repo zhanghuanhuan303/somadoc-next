@@ -27,7 +27,7 @@ pub use breaker::{
 };
 pub use ir::{
     Align, Atom, AtomKind, Boundary, BoundaryKind, BoundaryRole, Breakability, Decorations, Glue,
-    IrError, Paragraph, ParagraphStyle, PunctClass,
+    IrError, Paragraph, ParagraphStyle, PunctClass, SyntaxClass,
 };
 pub use metrics::{
     GlyphMetrics, LineMetrics, MathParam, MathVariant, Metrics, StyleId, SyntheticMetrics,

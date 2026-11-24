@@ -74,7 +74,7 @@ fn attr<'a>(line: &'a str, name: &str) -> Option<&'a str> {
 
 fn text_elements(svg: &str) -> Vec<(&str, &str, &str, &str)> {
     svg.lines()
-        .filter(|line| line.starts_with("<text "))
+        .filter(|line| line.starts_with("<text ") && !line.contains("data-footnote-number"))
         .map(|line| {
             (
                 attr(line, "data-node").expect("node"),
@@ -178,7 +178,10 @@ fn svg_coordinates_equal_the_layout_coordinates() {
     );
 
     let mut checked = 0;
-    for line in svg.lines().filter(|line| line.starts_with("<text ")) {
+    for line in svg
+        .lines()
+        .filter(|line| line.starts_with("<text ") && !line.contains("data-footnote-number"))
+    {
         let node: u32 = attr(line, "data-node").unwrap().parse().unwrap();
         let atom: u32 = attr(line, "data-atom").unwrap().parse().unwrap();
         let x = attr(line, "x").unwrap();
@@ -266,4 +269,6 @@ fn svg_bytes_are_a_visual_regression_lock() {
 /// 2026-11-21: a footer line sits at the bottom of its band and a header at the
 /// top, so the folio no longer touches the text block. Only margin-block
 /// position changes; every body coordinate is untouched.
-const GOLDEN_SVG_HASH: u64 = 16_517_979_550_617_088_203;
+/// 2026-11-25: the footnote area gains a separator rule and a note number,
+/// and table cells gain vertical padding (ADR-0082/0083/0084).
+const GOLDEN_SVG_HASH: u64 = 465_205_654_041_102_849;

@@ -16,9 +16,12 @@ extern crate alloc;
 
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use soma_core::Width;
-use soma_layout::{BoxKind, ImageSource, MathBox, NoImages, PagedLayout, PlacedBlock, TextSource};
+use soma_layout::{
+    BoxKind, ImageSource, MathBox, NoImages, PagedLayout, PlacedBlock, TextSource, TikzSegment,
+};
 use soma_template::{ComputedStyle, StyleTable};
 
 const UNITS_PER_EM: i32 = 4096;
@@ -64,9 +67,38 @@ pub fn render_with(
         for block in &page.footer {
             render_block(&mut out, layout, styles, &sources, page.number, block);
         }
-        for block in &page.footnotes {
-            let top = layout.page.content_height().0 - page.footnote_height.0;
-            render_block_at(&mut out, layout, styles, &sources, page.number, block, top);
+        let footnote_top = (layout.page.content_height().0 - page.footnote_height.0).max(0);
+        if !page.footnotes.is_empty() {
+            out.push_str(&format!(
+                "<rect data-page=\"{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#333333\"/>\n",
+                page.number,
+                units(layout.page.margin_left),
+                units(Width(layout.page.margin_top.0 + footnote_top)),
+                units(soma_layout::footnote_rule_width(layout.page.content_width())),
+                units(soma_layout::FOOTNOTE_RULE_THICKNESS)
+            ));
+        }
+        for (index, block) in page.footnotes.iter().enumerate() {
+            if let Some(number) = page.footnote_numbers.get(index).copied().flatten() {
+                render_footnote_number(
+                    &mut out,
+                    layout,
+                    styles,
+                    page.number,
+                    block,
+                    number,
+                    footnote_top,
+                );
+            }
+            render_block_at(
+                &mut out,
+                layout,
+                styles,
+                &sources,
+                page.number,
+                block,
+                footnote_top,
+            );
         }
 
         out.push_str("</svg>\n");
@@ -90,6 +122,40 @@ fn render_block(
     block: &PlacedBlock,
 ) {
     render_block_at(out, layout, styles, sources, page, block, 0);
+}
+
+fn render_footnote_number(
+    out: &mut String,
+    layout: &PagedLayout,
+    styles: &StyleTable,
+    page: u32,
+    block: &PlacedBlock,
+    number: u32,
+    footnote_top: i32,
+) {
+    let Some(first) = block.lines.first() else {
+        return;
+    };
+    let style = styles
+        .get(block.style)
+        .cloned()
+        .unwrap_or_else(ComputedStyle::base);
+    let size = Width(style.font_size.0 * 2 / 3);
+    let x = layout.page.margin_left.0;
+    let y = layout.page.margin_top.0
+        + footnote_top
+        + block.y.0
+        + first.y.0
+        + first.line.ascent.0
+        + first.line.leading.0 / 2
+        - style.font_size.0 / 5;
+    out.push_str(&format!(
+        "<text data-page=\"{page}\" data-footnote-number=\"{number}\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\">{number}</text>\n",
+        units(Width(x)),
+        units(Width(y)),
+        units(size),
+        color(style.color)
+    ));
 }
 
 fn render_block_at(
@@ -155,6 +221,20 @@ fn render_block_at(
         _ => {}
     }
 
+    if block.kind == BoxKind::Code {
+        if let Some(background) = style.and_then(|style| style.background) {
+            out.push_str(&format!(
+                "<rect data-page=\"{page}\" data-node=\"{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>\n",
+                block.node.0,
+                units(Width(layout.page.margin_left.0 + block.x.0)),
+                units(Width(layout.page.margin_top.0 + block.y.0 + extra_y)),
+                units(block.width),
+                units(block.height),
+                color(Some(background))
+            ));
+        }
+    }
+
     for placed in &block.lines {
         for atom in &placed.line.boxes {
             // Inline formulas replace their marker atom and sit on the line
@@ -165,7 +245,8 @@ fn render_block_at(
                     + block.y.0
                     + extra_y
                     + placed.y.0
-                    + placed.line.ascent.0;
+                    + placed.line.ascent.0
+                    + placed.line.leading.0 / 2;
                 paint_math(
                     out,
                     page,
@@ -193,8 +274,12 @@ fn render_block_at(
                 .cloned()
                 .unwrap_or_else(ComputedStyle::base);
             let x = layout.page.margin_left.0 + block.x.0 + atom.x.0;
-            let y =
-                layout.page.margin_top.0 + block.y.0 + extra_y + placed.y.0 + placed.line.ascent.0;
+            let y = layout.page.margin_top.0
+                + block.y.0
+                + extra_y
+                + placed.y.0
+                + placed.line.ascent.0
+                + placed.line.leading.0 / 2;
             let decorations = text.atom_decorations(block.node, atom.atom);
             let decoration = if decorations.contains(soma_core::Decorations::UNDERLINE) {
                 " text-decoration=\"underline\""
@@ -205,6 +290,9 @@ fn render_block_at(
             };
             // SVG is a preview like HTML, so it does not create external
             // references either; the PDF annotation is the actionable copy.
+            let syntax = text
+                .atom_syntax(block.node, atom.atom)
+                .and_then(|class| styles.syntax_color(class));
             out.push_str(&format!(
                 "<text data-page=\"{page}\" data-node=\"{}\" data-atom=\"{}\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\"{decoration}>{}</text>\n",
                 block.node.0,
@@ -212,7 +300,7 @@ fn render_block_at(
                 units(Width(x)),
                 units(Width(y)),
                 units(effective.font_size),
-                color(effective.color),
+                color(syntax.or(effective.color)),
                 escape(&drawn)
             ));
             // Ruby: a second text element, centred on the base and raised by
@@ -246,7 +334,8 @@ fn render_block_at(
                     + block.y.0
                     + extra_y
                     + placed.y.0
-                    + placed.line.ascent.0;
+                    + placed.line.ascent.0
+                    + placed.line.leading.0 / 2;
                 out.push_str(&format!(
                     "<text data-page=\"{page}\" data-node=\"{}\" data-atom=\"{}\" data-hyphen=\"1\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\">-</text>\n",
                     block.node.0,
@@ -289,6 +378,76 @@ fn render_math(
 
 /// Paint one formula whose baseline is at `baseline`. Shared by display math
 /// (block top + `MathBox.baseline`) and inline math (line top + line ascent).
+fn paint_tikz_paths(
+    out: &mut String,
+    page: u32,
+    node: u32,
+    left: i32,
+    baseline: i32,
+    math: &MathBox,
+) {
+    for path in &math.paths {
+        if path.segments.is_empty() {
+            continue;
+        }
+        let mut d = format!(
+            "M {} {}",
+            units(Width(left + path.start.x.0)),
+            units(Width(baseline + path.start.y.0))
+        );
+        for segment in &path.segments {
+            match segment {
+                TikzSegment::Line(to) => {
+                    d.push_str(&format!(
+                        " L {} {}",
+                        units(Width(left + to.x.0)),
+                        units(Width(baseline + to.y.0))
+                    ));
+                }
+                TikzSegment::Cubic { c1, c2, to } => {
+                    d.push_str(&format!(
+                        " C {} {} {} {} {} {}",
+                        units(Width(left + c1.x.0)),
+                        units(Width(baseline + c1.y.0)),
+                        units(Width(left + c2.x.0)),
+                        units(Width(baseline + c2.y.0)),
+                        units(Width(left + to.x.0)),
+                        units(Width(baseline + to.y.0))
+                    ));
+                }
+                TikzSegment::Close => d.push_str(" Z"),
+            }
+        }
+        let fill = path
+            .fill
+            .map(|value| color(Some(value)))
+            .unwrap_or_else(|| String::from("none"));
+        let stroke = match &path.stroke {
+            Some(stroke) => format!(
+                " stroke=\"{}\" stroke-width=\"{}\"",
+                color(Some(stroke.color)),
+                units(stroke.width)
+            ),
+            None => String::new(),
+        };
+        let dash = match &path.stroke {
+            Some(stroke) if !stroke.dash.is_empty() => format!(
+                " stroke-dasharray=\"{}\"",
+                stroke
+                    .dash
+                    .iter()
+                    .map(|value| units(*value))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            _ => String::new(),
+        };
+        out.push_str(&format!(
+            "<path data-page=\"{page}\" data-node=\"{node}\" data-tikz=\"1\" d=\"{d}\" fill=\"{fill}\"{stroke}{dash}/>\n"
+        ));
+    }
+}
+
 fn paint_math(
     out: &mut String,
     page: u32,
@@ -298,6 +457,7 @@ fn paint_math(
     baseline: i32,
     math: &MathBox,
 ) {
+    paint_tikz_paths(out, page, node, left, baseline, math);
     for item in &math.items {
         let fill = match item.color {
             Some(value) => color(Some(value)),

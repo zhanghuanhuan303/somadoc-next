@@ -21,7 +21,7 @@
 | `inline_code` | supported | `` `x` `` → `Code`，一个不可断 atom |
 | `link` | supported | `[text](url)` → `Link` |
 | `image` | supported | `![alt](src)` → `Image` |
-| `fenced_code` | supported | ``` ``` ``` / `~~~` → `CodeBlock` |
+| `fenced_code` | supported | ``` ``` ``` / `~~~` → `CodeBlock`；info string 的第一个 token 选择语法着色（rust/c/cpp/shell/markdown/latex 等，ADR-0091） |
 | `list_unordered` | supported | `-`/`*`/`+`，只支持平铺列表 |
 | `list_ordered` | supported | `1.` / `1)`，保留起始编号 |
 | `blockquote` | supported | `>` 行合并为一个 `BlockQuote` 段落 |
@@ -33,11 +33,15 @@
 | `escape` | supported | 反斜杠转义下一个字符 |
 | `nested_list` | supported | 缩进记号成为父项内的 `List` |
 | `setext_heading` | supported | 段落下方的 `===` / `---` 成为一/二级 `Heading` |
-| `table` | supported | 带分隔行的 GFM 竖线表格成为 `Table`；`\|` 是字面竖线 |
+| `table` | supported | 带分隔行的 GFM 竖线表格成为 `Table`；`\|` 是字面竖线；分隔行的破折号数量成为相对列宽 |
 | `html_block` | degraded | 原样保留为文本，永不执行 |
 | `html_inline` | degraded | 原样保留为文本，永不执行 |
 | `link_reference` | degraded | `[label]: url` 定义保持文本 |
 | `multi_line_code_span` | degraded | 未闭合的行内代码保持文本 |
+
+TikZ 不是 Markdown 构造：`tikzpicture` 由 LaTeX 前端作为 `MathBlock` 显示对象进入，
+再由 `soma-tikz` 解释核心 PGF 绘图语言（ADR-0092，子集见 `docs/tikz.md`），
+因此不在本表与 `soma_md::CAPABILITIES` 的对账范围内。
 
 ## 安全口径
 

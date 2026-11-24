@@ -5,6 +5,8 @@ members = [
     "crates/soma-doc",
     "crates/soma-engine",
     "crates/soma-metrics",
+    "crates/soma-highlight",
+    "crates/soma-tikz",
     "crates/soma-template",
     "crates/soma-rules",
     "crates/soma-layout",
