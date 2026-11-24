@@ -41,8 +41,8 @@ usage:
               Generate one with tools/metrics-gen to match a PDF font.
   --font      TrueType font for PDF output (required by --format pdf)
   --font-bold optional bold face; falls back to --font
-  --font-math optional math face; omitted uses the bundled Latin Modern
-              Math the embedded table was measured from, then probes
+  --font-math optional math face; omitted uses the bundled New Computer
+              Modern Math the embedded table was measured from, then probes
               installed faces, then falls back to --font with a warning
   --font-fallback optional rescue face for glyphs --font lacks
   --hyphenation TeX pattern file enabling hyphenation of long Latin words
@@ -726,16 +726,21 @@ enum MathSource {
     None,
 }
 
-/// The embedded metrics table was measured from Latin Modern Math. Bundling
-/// the same face makes the default machine-independent: a fresh install gets
-/// the LaTeX design without TeX Live (ADR-0078).
-const EMBEDDED_MATH_FACE: &[u8] = include_bytes!("../assets/latinmodern-math.otf");
+/// The embedded metrics table was measured from New Computer Modern Math,
+/// the face Typst 0.13 uses for formulas. Bundling the same face makes the
+/// default machine-independent (ADR-0079).
+const EMBEDDED_MATH_FACE: &[u8] = include_bytes!("../assets/NewCMMath-Regular.otf");
 
 /// Installed math faces to try when `--font-math` is omitted, in preference
 /// order. A candidate is used only when its advances agree with the metrics
 /// table: a different math face resolves the same ordinals but draws variants
 /// at other sizes and places limits from other ink (ADR-0077).
 const MATH_FACE_CANDIDATES: &[&str] = &[
+    "/usr/share/texmf-dist/fonts/opentype/public/newcomputermodern/NewCMMath-Regular.otf",
+    "/usr/share/texmf/fonts/opentype/public/newcomputermodern/NewCMMath-Regular.otf",
+    "/usr/share/texlive/texmf-dist/fonts/opentype/public/newcomputermodern/NewCMMath-Regular.otf",
+    "/usr/share/fonts/OTF/NewCMMath-Regular.otf",
+    "/usr/share/fonts/newcomputermodern/NewCMMath-Regular.otf",
     "/usr/share/texmf-dist/fonts/opentype/public/lm-math/latinmodern-math.otf",
     "/usr/share/texmf/fonts/opentype/public/lm-math/latinmodern-math.otf",
     "/usr/share/texlive/texmf-dist/fonts/opentype/public/lm-math/latinmodern-math.otf",
@@ -818,7 +823,7 @@ fn pages_have_math(pages: &soma_layout::PagedLayout) -> bool {
 
 fn installed_math_face(table: &MetricsTable) -> Option<(PdfFont, &'static str)> {
     if let Some(font) = embedded_math_face(table) {
-        return Some((font, "built-in Latin Modern Math"));
+        return Some((font, "built-in New Computer Modern Math"));
     }
     MATH_FACE_CANDIDATES.iter().find_map(|spec| {
         let (path, index) = split_font_spec(spec).ok()?;

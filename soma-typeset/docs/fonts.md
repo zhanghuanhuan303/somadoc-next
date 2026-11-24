@@ -107,16 +107,16 @@ second, anything usable last). Inside a family it requires a `Regular` or
 `Normal` cut: a Light or Thin face would quietly set the whole document
 lighter. A `Bold` companion is added when the file naming offers one, and the
 Noto CJK face when present. The math face is added by `scripts/math-face.sh`,
-which prefers Latin Modern Math and falls back to DejaVu/Noto.
+which prefers New Computer Modern Math and falls back to Latin Modern/DejaVu/Noto.
 
 `--font-math` names the face the PDF draws formulas with. When it is omitted
 and the document has a formula, `soma render --format pdf` uses the bundled
-Latin Modern Math first, then probes installed faces and accepts only one whose
-advances agree with the metrics table (ADR-0077). The bundle is the face the
-embedded table was measured from, so the default works on a machine with no
+New Computer Modern Math first, then probes installed faces and accepts only one
+whose advances agree with the metrics table (ADR-0077). The bundle is the face
+the embedded table was measured from, so the default works on a machine with no
 TeX installation; a custom table measured from another face falls through to
-Noto Sans Math, DejaVu Math TeX Gyre, TeX Gyre Pagella Math, Libertinus Math,
-STIX Two Math or Cambria Math. A different math face resolves the same variant
+Latin Modern, Noto Sans Math, DejaVu Math TeX Gyre, TeX Gyre Pagella Math,
+Libertinus Math, STIX Two Math or Cambria Math. A different math face resolves the same variant
 ordinals but draws them at other sizes, so the probe compares advances rather
 than names. `--stats` reports which face was chosen; a document whose formula
 symbols fall back to the body face prints a warning naming the flag.
@@ -241,13 +241,14 @@ faces whose licence clearly allows redistribution:
 | Face | Licence |
 | --- | --- |
 | Noto CJK | SIL OFL 1.1 |
+| New Computer Modern Math | GUST Font License |
 | Latin Modern Math | GUST Font License |
 | LXGW WenKai | SIL OFL 1.1 |
 | WenQuanYi Micro Hei | GPL v3 + font embedding exception |
 | MiSans | free to use; redistribution of the font is restricted — its table is generated locally, not committed |
 
-Latin Modern Math is also bundled as
-`crates/soma-cli/assets/latinmodern-math.otf`, with the GUST license text next
+New Computer Modern Math is also bundled as
+`crates/soma-cli/assets/NewCMMath-Regular.otf`, with the GUST license text next
 to it; it is the only font binary in the repository. All other listed faces
 contribute measurements only.
 

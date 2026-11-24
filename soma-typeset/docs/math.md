@@ -169,15 +169,16 @@ Either way the page never fails because of a formula.
 ## Metric source
 
 Formula symbols come from a dedicated **math face** (family `2`) in the metrics
-table, measured from **Latin Modern Math**, the LaTeX default face. `Metrics::math_advance` and
+table, measured from **New Computer Modern Math**, the face Typst 0.13 uses for
+formulas. `Metrics::math_advance` and
 `Metrics::math_metrics` are the seam; `TableMetrics`/`StyledMetrics` answer from
 that face at the style's font size, so `∑`, `∫`, `√`, Greek and relations get
 their real advances and extents. Adapters without a math face keep the body
 font (the trait defaults), and their output is byte-identical to before.
 
 For PDF output the face is `--font-math`. When the flag is omitted and the
-document contains at least one formula, the CLI uses the bundled Latin Modern
-Math (the face the embedded table was measured from), then probes installed
+document contains at least one formula, the CLI uses the bundled New Computer
+Modern Math (the face the embedded table was measured from), then probes installed
 faces; a candidate is accepted only when its advances agree with the table
 (ADR-0077). `--stats` prints `math: <path> (auto)`. When nothing matches, the
 formula symbols fall back to the body face and a warning names the flag. The
@@ -295,8 +296,8 @@ sits just above the base, so a combining mark — whose whole ink is above its
 own baseline — is not floated by its own height (ADR-0076).
 
 The ordinal comes from the metrics table, so the table and `--font-math` must
-be built from the same face. The embedded table is measured from Latin Modern
-Math (ADR-0078); the automatic probe enforces that for the default path
+be built from the same face. The embedded table is measured from New Computer
+Modern Math (ADR-0079); the automatic probe enforces that for the default path
 (ADR-0077); an explicit `--font-math` is trusted. A table built from Noto Sans
 Math used with the DejaVu math font still resolves every ordinal, but the two
 fonts draw their display variants at different sizes (a `∑` at 1.34 em versus

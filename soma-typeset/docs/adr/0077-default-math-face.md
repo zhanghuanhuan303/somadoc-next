@@ -1,7 +1,8 @@
 # ADR-0077: The default math face is probed and proved against the metrics table
 
-- Status: Accepted; the default math face is superseded by ADR-0078
-  (Latin Modern Math, bundled with the CLI). The probe and advance check remain.
+- Status: Accepted; the default math face is superseded by ADR-0079
+  (New Computer Modern Math, bundled with the CLI). The probe and advance check
+  remain.
 - Date: 2026-11-24
 - Related: ADR-0012 (table metrics), ADR-0070 (math v2), ADR-0075
   (vertical variants addressed by ordinal), ADR-0076 (Typst-aligned geometry),

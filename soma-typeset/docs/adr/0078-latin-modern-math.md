@@ -1,6 +1,8 @@
 # ADR-0078: The default math face is Latin Modern Math; CFF faces are measured and embedded
 
-- Status: Accepted
+- Status: Accepted; the default math face is superseded by ADR-0079
+  (New Computer Modern Math). The CFF math pipeline and the bundled-face
+  mechanism remain.
 - Date: 2026-11-24
 - Related: ADR-0012 (table metrics), ADR-0039 (CFF embedding), ADR-0070 (math
   v2), ADR-0073 (CFF punctuation ink), ADR-0075 (design variants), ADR-0076

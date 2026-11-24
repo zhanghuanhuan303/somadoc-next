@@ -183,10 +183,10 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   this for the example. `glyf` and CFF outlines are embedded (`/FontFile2` and
   `/FontFile3`; a name-keyed CFF is promoted to CID-keyed and its `seac`
   composites are drawn out). `--font-math` names the formula face; when it is
-  omitted and the document has a formula, the CLI uses the bundled Latin
+  omitted and the document has a formula, the CLI uses the bundled New Computer
   Modern Math (the embedded table's face), then probes installed faces, and
   accepts only one whose advances match the table. So a fresh install gets
-  serif LaTeX formulas with no flag and no TeX Live; `∑` and `√` are never
+  serif LaTeX-style formulas with no flag and no TeX Live; `∑` and `√` are never
   drawn with the body face by accident (ADR-0077). Streams are
   deflated by a deterministic encoder
   that picks fixed or dynamic Huffman blocks per stream (ADR-0043/ADR-0045),

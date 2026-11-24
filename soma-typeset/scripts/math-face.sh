@@ -1,11 +1,17 @@
 #!/bin/sh
-# Print the first installed math face, in LaTeX-first order.
+# Print the first installed math face, in the reference order.
 #
-# Latin Modern Math is the embedded table's face (ADR-0078), so it is preferred
-# for samples; DejaVu, Libertinus and Noto are fallbacks. Scripts use this as
-# the default of SOMA_SONG_MATH / SOMA_PDF_MATH. Prints nothing when no face is
-# installed; the caller decides whether that is an error.
+# New Computer Modern Math is the embedded table's face and Typst's default
+# (ADR-0079), so it is preferred for samples; Latin Modern, DejaVu, Libertinus
+# and Noto are fallbacks. Scripts use this as the default of SOMA_SONG_MATH /
+# SOMA_PDF_MATH. Prints nothing when no face is installed; the caller decides
+# whether that is an error.
 for candidate in \
+    /usr/share/texmf-dist/fonts/opentype/public/newcomputermodern/NewCMMath-Regular.otf \
+    /usr/share/texmf/fonts/opentype/public/newcomputermodern/NewCMMath-Regular.otf \
+    /usr/share/texlive/texmf-dist/fonts/opentype/public/newcomputermodern/NewCMMath-Regular.otf \
+    /usr/share/fonts/OTF/NewCMMath-Regular.otf \
+    /usr/share/fonts/newcomputermodern/NewCMMath-Regular.otf \
     /usr/share/texmf-dist/fonts/opentype/public/lm-math/latinmodern-math.otf \
     /usr/share/texmf/fonts/opentype/public/lm-math/latinmodern-math.otf \
     /usr/share/texlive/texmf-dist/fonts/opentype/public/lm-math/latinmodern-math.otf \

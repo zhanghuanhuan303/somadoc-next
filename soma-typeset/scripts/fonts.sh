@@ -71,13 +71,18 @@ set -- --out "$out" --face "serif:normal:$pick_path#$pick_index"
 if [ -n "$bold_path" ]; then
     set -- "$@" --face "serif:bold:$bold_path#$pick_index"
 fi
-# A serif math face first: it matches a Chinese serif body. Latin Modern Math
-# is the LaTeX default and, with ADR-0078, its CFF outlines are measured like a
-# `glyf` face; DejaVu and Noto remain fallbacks.
-for math in /usr/share/texmf-dist/fonts/opentype/public/lm-math/latinmodern-math.otf \
+# A serif math face first: it matches a Chinese serif body. New Computer Modern
+# Math is the Typst reference face and, with ADR-0078, its CFF outlines are
+# measured like a `glyf` face; Latin Modern, DejaVu and Noto remain fallbacks.
+for math in \
+    /usr/share/texmf-dist/fonts/opentype/public/newcomputermodern/NewCMMath-Regular.otf \
+    /usr/share/texmf/fonts/opentype/public/newcomputermodern/NewCMMath-Regular.otf \
+    /usr/share/texlive/texmf-dist/fonts/opentype/public/newcomputermodern/NewCMMath-Regular.otf \
+    /usr/share/fonts/OTF/NewCMMath-Regular.otf \
+    /usr/share/fonts/newcomputermodern/NewCMMath-Regular.otf \
+    /usr/share/texmf-dist/fonts/opentype/public/lm-math/latinmodern-math.otf \
     /usr/share/texmf/fonts/opentype/public/lm-math/latinmodern-math.otf \
     /usr/share/texlive/texmf-dist/fonts/opentype/public/lm-math/latinmodern-math.otf \
-    /usr/share/fonts/OTF/latinmodern-math.otf \
     /usr/share/fonts/TTF/DejaVuMathTeXGyre.ttf \
     /usr/share/fonts/libertinus/LibertinusMath-Regular.ttf \
     /usr/share/fonts/noto/NotoSansMath-Regular.ttf; do
