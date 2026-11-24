@@ -195,7 +195,9 @@ same way, so width and paint agree.
 ## Pagination
 
 A display formula is one indivisible flow item: it has glue before/after from
-the style, `keep_with_next` and `page_break_before` are honoured, and it never
+the style (a template that does not style `mathBlock` still gets one body em
+before and after, plus 0.2em, minus 0.5em; an explicit rule overrides it,
+ADR-0080), `keep_with_next` and `page_break_before` are honoured, and it never
 splits. If it does not fit on an empty page the page is marked `overflow` like
 any other tall box. An inline formula is an indivisible *atom*: it moves to the
 next line with the rest of the line and never splits mid-formula.

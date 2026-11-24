@@ -6,7 +6,7 @@
 
 mod common;
 
-use common::{document, engine, metrics, paragraph, styled, TIGHT};
+use common::{document, engine, metrics, paragraph, styled, BOOK, TIGHT};
 use soma_core::{Metrics, Width};
 use soma_doc::block::MathBlock;
 use soma_doc::node::NodeMeta;
@@ -40,6 +40,24 @@ fn display_formula_is_centred_on_the_content_box() {
         math.height.0
     );
     assert!(math.width.0 > 0 && math.height.0 > 0);
+}
+
+#[test]
+fn consecutive_display_formulas_keep_the_default_skip() {
+    let doc = document(vec![
+        Block::MathBlock(MathBlock::new(NodeMeta::synthesized(), r"\frac{a}{b}")),
+        Block::MathBlock(MathBlock::new(NodeMeta::synthesized(), r"\sqrt{x}")),
+    ]);
+    let styled = styled(&doc, BOOK);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let first = &layout.pages[0].blocks[0];
+    let second = &layout.pages[0].blocks[1];
+    let gap = second.y.0 - (first.y.0 + first.height.0);
+    let body = styled.table().styles()[0].font_size.0;
+    assert!(
+        gap >= body * 9 / 10,
+        "display skips: gap {gap}, body {body}"
+    );
 }
 
 #[test]

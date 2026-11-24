@@ -686,12 +686,25 @@ impl Resolver<'_> {
         for block in blocks {
             let meta = block.meta();
             let element = block_element(block);
+            let mut base = ComputedStyle::inherited_from(parent);
+            if element == "mathBlock" {
+                // TeX's display skips: a template that does not mention
+                // `mathBlock` still gets breathing room, so consecutive
+                // formulas do not touch (ADR-0080). An explicit rule overrides
+                // every value here.
+                base.space_before = base.font_size;
+                base.space_after = base.font_size;
+                base.space_before_plus = Width(base.font_size.0 / 5);
+                base.space_after_plus = Width(base.font_size.0 / 5);
+                base.space_before_minus = Width(base.font_size.0 / 2);
+                base.space_after_minus = Width(base.font_size.0 / 2);
+            }
             let style = self.compute(
                 element,
                 meta.attrs.role.as_deref(),
                 &class_refs(&meta.attrs.classes),
                 block_level(block),
-                ComputedStyle::inherited_from(parent),
+                base,
                 ancestors,
             )?;
             let id = self.table.intern(style.clone());

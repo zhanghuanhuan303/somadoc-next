@@ -98,6 +98,7 @@ only).
 | [0077](0077-default-math-face.md) | The default math face is probed and proved against the metrics table: at least 16 exact advances, a warning when none matches, no font redistributed | Accepted; default face superseded by 0079 |
 | [0078](0078-latin-modern-math.md) | The default math face is Latin Modern Math; CFF math ink, Type 2 curve/stem fixes, the regenerated tables and the bundled face | Accepted; default face superseded by 0079 |
 | [0079](0079-new-computer-modern-math.md) | The default math face is New Computer Modern Math: the Typst reference face, bundled and proved against the regenerated tables | Accepted |
+| [0080](0080-display-math-skip.md) | A display formula gets one body em before/after by default, even when a template does not style `mathBlock` | Accepted |
 
 ## Rules
 

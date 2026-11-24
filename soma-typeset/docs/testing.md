@@ -131,7 +131,7 @@ Cumulative public test files:
 | `latex.rs` (latex) | 17 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, inline command opening a block, ruby, recovery, pipeline |
 | `macros.rs` (latex) | 22 | source-level expansion: 0–2 argument macros, nesting, renew, depth limit, `\def`, counters (arabic/roman/alph), definitions vanish, comments, verbatim untouched |
 | `math.rs` (soma-math) | 54 | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, TeX spacing table, Bin normalisation, style levels, rule 18, `\sin`/`\binom`/`\operatorname`/`\overline`/`\hat`, errors, italic variables, tags |
-| `e11_math.rs` (layout) | 8 | centring, baseline inside the box, flow, canonical `math` field |
+| `e11_math.rs` (layout) | 10 | centring, baseline inside the box, flow, canonical `math` field, default display skip |
 | `e12_inline_math.rs` (layout) | 12 | marker atoms, line-box growth, text style, placeholder, canonical `inlineMath`, splitting a long formula at relations |
 | `e13_toc.rs` (layout) | 13 | TOC depth, page numbers, row shape, leaders, wrapped rows, forced page, figure/table lists, section-start master |
 | `e14_alignment.rs` (layout) | 6 | left/center/right placement, first-indent interaction, justify unchanged |
@@ -179,7 +179,7 @@ Cumulative public test files:
 | math geometry (ADR-0075/0076) | 14 | `soma.metrics/7` variants, gaps and top accents; TeX variant selection and fallback size; the radical link and degree; fraction and axis geometry; accent attachment and combining marks |
 | render-pdf unit | 26 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing |
 
-Total: **800 tests** (`cargo test --workspace`). The standalone
+Total: **801 tests** (`cargo test --workspace`). The standalone
 `tools/metrics-gen` crate adds its own 4 (`cargo test --manifest-path tools/metrics-gen/Cargo.toml`).
 
 Still deferred: a quality-labeled calibration corpus, the human blind-test run,
