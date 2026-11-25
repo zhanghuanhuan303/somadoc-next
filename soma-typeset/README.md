@@ -456,7 +456,7 @@ scripts/gates.sh
 scripts/studio.sh   # S1-S11 for the web workbench (needs chromium)
 ```
 
-The gate runs format, clippy, 969 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 975 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-highlight`, `soma-template`,
 `soma-layout`, `soma-tikz`, `soma-md`, `soma-render-html`, `soma-render-svg`, and
 `soma-render-pdf`, a

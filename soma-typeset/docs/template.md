@@ -80,6 +80,11 @@ page:
   folio: "第 {page} 页 / 共 {pages} 页"
   start-master: chapter    # 章节起始页用的母版，可选
   front-matter: continuous # continuous | roman | hidden
+layout:
+  mode: book               # book（默认，章另页）| sample（连续排）
+figure:
+  width: full              # natural | half | full；默认 full
+  align: center            # left | center | right；默认 center
 index:
   title: 索引               # 可选；省略或留空 = 无标题
 numbering:
@@ -169,6 +174,16 @@ Markdown 竖线表格的分隔行里，破折号越多那一列越宽；全列�
 `[[index:term]]`（Markdown）。词条按 Unicode 码位排序，重复词条合并页码，
 索引另起一页，样式用 `element: indexEntry` / `indexTitle`。词条内的标记在表格单元
 与脚注定义中不收集（见 D81）。
+
+节流（`layout.mode:`）：`book`（默认）让一级标题另起一页；`sample` 只取消一级
+标题的分页，其余 `page-break-before` 不变。生成样式 `tocChapter` / `tocSection` /
+`tocListTitle` 分别控制目录章条、节条和图表目录标题；未定义时分别继承
+`toc` / `tocTitle`。`runningHead` / `folio` 控制页眉页脚，未定义时继承正文，
+页眉文字只取一级标题。封面第五行 `coverColophon` 读取 `cover.fields` 里键为
+`colophon` 的字段（LaTeX 写作 `\colophon{...}`）。
+
+图宽（`figure:`）：模板统一控制，DocIR 仍只带路径与本征尺寸；`natural` 按
+96 dpi 把像素折算成物理宽并封顶版心。
 
 题注（`figureCaption` / `tableCaption`）：图题在图下方，表题在表上方并
 `keep-with-next`；题注内的强调继承题注字号，不回到正文字号。

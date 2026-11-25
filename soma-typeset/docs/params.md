@@ -349,6 +349,7 @@ Preset 是数据，不是算法分支：
 
 - `default-v1`：冻结的 K-P 参考（`tolerance = 3000`）。
 - `publish-v1`：**`soma.engine/1` 的默认 preset**（ADR-0023）：`default-v1` + `tolerance = 1500`，其余权重与回退完全相同；母语出版优先。
+- `book-v1`：`publish-v1` + `short_last_threshold = 3em`（ADR-0106）。中文书籍里两字末行按孤尾计费；样书 `examples/book/book.engine` 使用它。
 - `latex-v1`：LaTeX article 的断行口径（ADR-0069，**CLI 内置默认**）：`default-v1` + `tolerance = 1260`（`\tolerance=200` 换算）+ `short_last_scale = 0`（末行不罚）；其余权重与回退不变。
 - ~~更保守的 emergency~~：实测没有必要，回退阶梯保持 `default-v1`。
 - `mobile-v1`：更低 `max_lines`、更少 feature（延迟优先）。
@@ -496,7 +497,9 @@ pub struct EvalParams {
 | `compress_amount` | 20 | 0..=1e9 | 是 | 每 1 em trim；0.25em = 5 |
 
 > `publish-v1` 只改 `tolerance`（1500）；`badness_scale=100`、权重、fallback 与
-> 短末行阈值都与 `default-v1` 相同，便于对照。`rules_version = 1` 对应
+> 短末行阈值都与 `default-v1` 相同，便于对照。`book-v1`（ADR-0106）在
+> `publish-v1` 上只把 `short_last_threshold` 提到 3em，用于中文书籍样张。
+> `rules_version = 1` 对应
 > 开标点行首 trim 从 1/4 em 改为 1/2 em（ADR-0023）。
 | `compress_count` | 5 | 0..=1e9 | 是 | 每次裁剪；0.25em 事件合计约 10 |
 | `boundary_deviation` | 50 | 0..=1e9 | 是 | 每 1 个 ideal gap 的平均偏差；满 gap = 5 行 |

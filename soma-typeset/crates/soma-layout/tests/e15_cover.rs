@@ -3,7 +3,7 @@
 mod common;
 
 use common::{engine, metrics, paragraph};
-use soma_doc::meta::{CoverData, DocumentMeta};
+use soma_doc::meta::{CoverData, DocumentMeta, MetaField};
 use soma_doc::Document;
 use soma_layout::{layout, BoxKind, PagedLayout, TextSource};
 use soma_template::{parse_template, resolve};
@@ -98,6 +98,9 @@ fn full_meta() -> DocumentMeta {
     cover.subtitle = Some(String::from("从断行到成书"));
     cover.authors = vec![String::from("张三"), String::from("李四")];
     cover.date = Some(String::from("2026 年 11 月"));
+    cover
+        .fields
+        .push(MetaField::new("colophon", "soma-typeset · 2026"));
     DocumentMeta::new()
         .with_language("zh-Hans")
         .with_cover(cover)
@@ -117,6 +120,7 @@ fn a_cover_page_uses_the_cover_metadata() {
         "authors join with 、: {first}"
     );
     assert!(first.contains("2026年11月"), "{first}");
+    assert!(first.contains("soma-typeset·2026"), "the colophon: {first}");
     assert!(!first.contains("正文第一段"), "the body starts on page 2");
     assert!(text_of(&layout, 1).contains("正文第一段"));
 }

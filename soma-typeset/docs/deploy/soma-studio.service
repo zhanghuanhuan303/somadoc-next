@@ -1,0 +1,19 @@
+[Unit]
+Description=Soma Studio (all-Rust typesetting workbench)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=admin
+Group=Users
+WorkingDirectory=/home/admin/soma-studio
+Environment=SOMA_HOST=0.0.0.0
+Environment=SOMA_PORT=7070
+ExecStart=/home/admin/soma-studio/run.sh
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

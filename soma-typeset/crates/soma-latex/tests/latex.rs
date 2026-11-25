@@ -342,6 +342,18 @@ fn a_subtitle_reaches_the_cover_data() {
 }
 
 #[test]
+fn a_language_tag_reaches_the_metadata() {
+    let source = r#"\language{zh-Hans}
+\title{书}
+\begin{document}
+正文。
+\end{document}
+"#;
+    let doc = parse_latex(source);
+    assert_eq!(doc.meta.language.as_deref(), Some("zh-Hans"));
+}
+
+#[test]
 fn index_commands_become_markers() {
     let document = parse_latex("正文\\index{排版}后文");
     let Block::Paragraph(paragraph) = &document.blocks[0] else {

@@ -42,7 +42,7 @@ use soma_doc::inline::FootnoteRef;
 use soma_doc::inline::{
     Container, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link, MathInline, Ruby,
 };
-use soma_doc::meta::{Author, CoverData, Date, DocumentMeta, ImageRef};
+use soma_doc::meta::{Author, CoverData, Date, DocumentMeta, ImageRef, MetaField};
 use soma_doc::node::NodeMeta;
 use soma_doc::{Block, Code, Document, FootnoteDef, Text};
 
@@ -110,6 +110,25 @@ pub fn parse_latex_with_meta(source: &str, mut meta: DocumentMeta) -> Document {
             if cover.subtitle.is_none() {
                 cover.subtitle = Some(String::from(text));
             }
+        }
+    }
+    // BCP 47 tag for the PDF `/Lang` entry and for CJK-specific defaults.
+    if meta.language.is_none() {
+        if let Some(language) = preamble_group(&expanded, "language") {
+            let tag = language.trim();
+            if !tag.is_empty() {
+                meta.language = Some(String::from(tag));
+            }
+        }
+    }
+    // A colophon is cover data, not body content.
+    if let Some(colophon) = preamble_group(&expanded, "colophon") {
+        let text = colophon.trim();
+        if !text.is_empty() {
+            let cover = meta.cover.get_or_insert_with(CoverData::new);
+            cover
+                .fields
+                .push(MetaField::new("colophon", String::from(text)));
         }
     }
 

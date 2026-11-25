@@ -302,6 +302,7 @@ pub struct CoverStyles {
     pub subtitle: StyleId,
     pub author: StyleId,
     pub date: StyleId,
+    pub colophon: StyleId,
 }
 
 /// The resolved style layer for one document.
@@ -314,6 +315,7 @@ pub struct StyledDoc {
     footnote: crate::template::FootnoteNumbering,
     table_rules: TableRules,
     table_width: crate::template::TableWidth,
+    figure: crate::template::FigureSpec,
     masters: Vec<ResolvedMaster>,
     header_text: Option<String>,
     folio: Option<String>,
@@ -331,6 +333,15 @@ pub struct StyledDoc {
     toc_style: StyleId,
     /// Style for the TOC heading (`element: tocTitle`).
     toc_title_style: StyleId,
+    /// Contents rows by level and the figure/table list heading.
+    toc_chapter_style: StyleId,
+    toc_section_style: StyleId,
+    toc_list_title_style: StyleId,
+    /// Running head and folio styles.
+    running_head_style: StyleId,
+    folio_style: StyleId,
+    /// Chapter flow chosen by the template.
+    layout_mode: crate::template::LayoutMode,
     /// Style for generated figure captions (`element: figureCaption`).
     figure_caption_style: StyleId,
     /// Style for generated table captions (`element: tableCaption`).
@@ -386,6 +397,11 @@ impl StyledDoc {
         self.table_width
     }
 
+    /// Sizing and placement chosen by the template's `figure:` section.
+    pub fn figure(&self) -> crate::template::FigureSpec {
+        self.figure
+    }
+
     /// Master 0 is the default `page:` geometry, then `masters:` in order.
     pub fn masters(&self) -> &[ResolvedMaster] {
         &self.masters
@@ -424,6 +440,35 @@ impl StyledDoc {
     /// Style of the TOC heading.
     pub fn toc_title_style(&self) -> StyleId {
         self.toc_title_style
+    }
+
+    /// Style of a contents row at `level`.
+    pub fn toc_entry_style(&self, level: u8) -> StyleId {
+        if level <= 1 {
+            self.toc_chapter_style
+        } else {
+            self.toc_section_style
+        }
+    }
+
+    /// Style of the `figures`/`tables` list heading.
+    pub fn toc_list_title_style(&self) -> StyleId {
+        self.toc_list_title_style
+    }
+
+    /// Style of the running head (`element: runningHead`).
+    pub fn running_head_style(&self) -> StyleId {
+        self.running_head_style
+    }
+
+    /// Style of the folio (`element: folio`).
+    pub fn folio_style(&self) -> StyleId {
+        self.folio_style
+    }
+
+    /// Chapter flow chosen by the template.
+    pub fn layout_mode(&self) -> crate::template::LayoutMode {
+        self.layout_mode
     }
 
     /// Style of generated figure captions.
@@ -645,12 +690,13 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         ComputedStyle::inherited_from(&root),
         &[],
     )?;
-    let toc_style_id = resolver.table.intern(toc_style);
+    let toc_style_id = resolver.table.intern(toc_style.clone());
     let cover_styles = CoverStyles {
         title: intern_element(&mut resolver, "coverTitle", &root)?,
         subtitle: intern_element(&mut resolver, "coverSubtitle", &root)?,
         author: intern_element(&mut resolver, "coverAuthor", &root)?,
         date: intern_element(&mut resolver, "coverDate", &root)?,
+        colophon: intern_element(&mut resolver, "coverColophon", &root)?,
     };
     let toc_title_style = resolver.compute(
         "tocTitle",
@@ -660,7 +706,13 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         ComputedStyle::inherited_from(&root),
         &[],
     )?;
-    let toc_title_style_id = resolver.table.intern(toc_title_style);
+    let toc_title_style_id = resolver.table.intern(toc_title_style.clone());
+    let toc_chapter_style = intern_element_from(&mut resolver, "tocChapter", &toc_style)?;
+    let toc_section_style = intern_element_from(&mut resolver, "tocSection", &toc_style)?;
+    let toc_list_title_style =
+        intern_element_from(&mut resolver, "tocListTitle", &toc_title_style)?;
+    let running_head_style = intern_element(&mut resolver, "runningHead", &root)?;
+    let folio_style = intern_element(&mut resolver, "folio", &root)?;
     let figure_caption_style = intern_element(&mut resolver, "figureCaption", &root)?;
     let table_caption_style = intern_element(&mut resolver, "tableCaption", &root)?;
     let index_style = intern_element(&mut resolver, "indexEntry", &root)?;
@@ -704,6 +756,12 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         front_matter: template.page.front_matter,
         toc_style: toc_style_id,
         toc_title_style: toc_title_style_id,
+        toc_chapter_style,
+        toc_section_style,
+        toc_list_title_style,
+        running_head_style,
+        folio_style,
+        layout_mode: template.layout,
         figure_caption_style,
         table_caption_style,
         index_style,
@@ -722,6 +780,7 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
             style_id: rule_style,
         },
         table_width: template.table.width,
+        figure: template.figure,
         masters,
         header_text: template.page.header_text.clone(),
         folio: template.page.folio.clone(),
@@ -746,12 +805,23 @@ fn intern_element(
     element: &str,
     root: &ComputedStyle,
 ) -> Result<StyleId, TemplateError> {
+    intern_element_from(resolver, element, root)
+}
+
+/// Intern a generated element's style, inheriting from `base` rather than the
+/// document root. A template that never mentions the element keeps the style
+/// it had before the element existed.
+fn intern_element_from(
+    resolver: &mut Resolver<'_>,
+    element: &str,
+    base: &ComputedStyle,
+) -> Result<StyleId, TemplateError> {
     let style = resolver.compute(
         element,
         None,
         &[],
         None,
-        ComputedStyle::inherited_from(root),
+        ComputedStyle::inherited_from(base),
         &[],
     )?;
     Ok(resolver.table.intern(style))

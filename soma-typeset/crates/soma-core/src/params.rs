@@ -175,6 +175,15 @@ impl ParamSet {
         params
     }
 
+    /// Chinese book defaults: `publish-v1` plus a larger short-last-line
+    /// threshold, so a two-character tail is charged like the widow it is.
+    pub fn book_v1() -> Self {
+        let mut params = Self::publish_v1();
+        params.preset = PresetId("book-v1");
+        params.break_params.costs.short_last_threshold = Width::from_em(3);
+        params
+    }
+
     /// LaTeX article defaults: `\tolerance=200` (badness, which is
     /// `100 * |r|^3` here, so `|r| <= 2^(1/3) ~= 1.26`), and no
     /// short-last-line penalty (TeX leaves the last line ragged).

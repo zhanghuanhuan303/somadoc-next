@@ -124,6 +124,7 @@ only).
 | [0103](0103-studio-tikz-export.md) | Studio exports the first compiled diagram as natural-size TikZ through `/api/tikz`; page scaling and figure selection stay out of the source export | Accepted |
 | [0104](0104-mixed-markdown-latex-html.md) | Markdown is a compound frontend: math, LaTeX commands/environments and semantic HTML map into the same DocIR through the peer frontends | Accepted |
 | [0105](0105-ragged-line-opening-trim.md) | A ragged or left-aligned line also trims an opening mark at its start; centered/right text undoes the optical trim | Accepted; extends ADR-0082 |
+| [0106](0106-book-layout-pass.md) | Book pass: free segment tails, chapter-only running heads, `layout.mode`, `book-v1` 3 em short-last, contents/cover styles, figure policy | Accepted; closes D110 |
 
 ## Rules
 

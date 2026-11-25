@@ -2008,9 +2008,16 @@ mod tests {
 
     #[test]
     fn last_line_counts_line_cost() {
+        use crate::params::{ParamSet, Weight};
+
         let paragraph = two_atom_paragraph(2);
         let metrics = SyntheticMetrics::default();
-        let result = break_paragraph(&paragraph, &metrics, &BreakConfig::default()).unwrap();
+        // Isolate the line cost: the default now charges a short last line
+        // below 3em, which is not what this test measures.
+        let mut params = ParamSet::default_v1();
+        params.break_params.costs.short_last_scale = Weight(0);
+        let config = BreakConfig::from_params(params);
+        let result = break_paragraph(&paragraph, &metrics, &config).unwrap();
 
         assert_eq!(result.lines.len(), 1);
         assert_eq!(result.total_cost, Cost(10));

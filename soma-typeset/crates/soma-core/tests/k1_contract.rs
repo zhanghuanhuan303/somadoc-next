@@ -63,6 +63,30 @@ fn default_v1_matches_the_frozen_table() {
 }
 
 #[test]
+fn book_v1_only_raises_the_short_last_threshold() {
+    let publish = ParamSet::publish_v1();
+    let book = ParamSet::book_v1();
+
+    assert_eq!(book.break_params.tolerance, publish.break_params.tolerance);
+    assert_eq!(
+        book.break_params.costs.short_last_threshold,
+        Width::from_em(3)
+    );
+    assert_eq!(
+        book.break_params.costs.short_last_scale,
+        publish.break_params.costs.short_last_scale
+    );
+    assert_eq!(book.preset.0, "book-v1");
+    assert_eq!(
+        book.break_params.costs,
+        CostParams {
+            short_last_threshold: Width::from_em(3),
+            ..publish.break_params.costs
+        }
+    );
+}
+
+#[test]
 fn preset_module_and_paramset_are_one_source() {
     assert_eq!(preset::default_v1(), ParamSet::default_v1());
 }

@@ -128,7 +128,9 @@
 | D107 | 流程图只覆盖 Mermaid flowchart 与 DOT 子集 | 子图只画成员包围框，不约束 rank；sequence/class/state/ER、图标、HTML 标签、外部链接没有实现；宽图低于 60% 或高于页高回退源码 | 复杂组织结构图会退化成较松的层次图；非 flowchart 图种仍显示为代码 | 有真实图种需求时扩 `soma-diagram` 的 frontend；子图 rank 约束优先 | 否 |
 | D108 | Studio 的 TikZ 导出只取第一张图 | `/api/tikz` 按文档顺序取第一张 Mermaid/DOT 图，导出自然尺寸；不能选择后续图、导出页面缩放后的几何，也不能导出 SVG | 含多张图的文档需要手工定位并裁剪导出的文件 | 有按图导出需求时给图块加稳定 target，UI 增加图列表选择 | 否 |
 | D109 | Markdown 内嵌 LaTeX 的脚注/计数器语义不完整 | 行内 `\footnote{...}` 保留为可见源码，不生成脚注定义；块级环境里的脚注只在标签不冲突时合并；Markdown 没有 LaTeX 导言区，`\newcommand`/计数器宏不参与 | 混合文档里的 LaTeX 脚注需要改成 Markdown `[^label]` 或改写为块级环境；复杂宏包语义不可用 | 有真实混合文档依赖这些语义时，做一层带标签重写的脚注合并与最小导言上下文 | 否 |
-| D110 | `\includegraphics[width=...]` 等选项被忽略 | LaTeX 前端只读取图片路径；宽度/高度/裁切属于版面信息，当前 DocIR 不携带，模板也没有 figure 宽度标尺 | 作者以为写了 `width=0.5\linewidth`，实际图片仍按自身盒宽/版心显示 | 有真实图文版式需求时，给模板加 figure 宽度/对齐参数，前端只保留原始路径 | 否 |
+| D110 | **已完成（ADR-0106）**：`figure: width: natural/half/full` 与 `align`；LaTeX 仍只保留路径与语义尺寸提示 | 模板决定图宽/对齐；`natural` 按 96 dpi 的本征像素折算并封顶版心 | 作者不能直接写 `width=0.5\linewidth`；要由模板改 `figure.width` | 有逐图宽度需求时再加语义尺寸提示 | 否 |
+| D111 | 索引暂不排双栏 | `index_rows` 逐条生成单列 flow item；超过 24 条时仍是一列，页数浪费 | 长索引（>24 条）会多占页面 | 有长索引样书时按栏高切分生成双栏索引项 | 否 |
+| D112 | 页眉下没有细线 | `runningHead` 样式已独立，但模板没有 `header-rule` 参数，渲染器不画页眉分隔线 | 页眉与正文的视觉分层弱一些 | 需要时加 `page.header-rule` 与百分比宽度，PDF/SVG 同步 | 否 |
 | D106 | Ghostscript 渲染 CJK TrueType 子集时字形错位 | Firefox/pdf.js 与 Poppler（`pdftoppm`/`pdftotext`）渲染正确，`gs` 会把正文 CJK 换成别的字形（标题粗体正常）。用整字体替换子集、加 `cmap`/`name`/`post`、写显式 `CIDToGIDMap` 均未改变结果，倾向是 Ghostscript 对保留 GID 空洞的 CIDFontType2 子集的解释差异 | 用 Ghostscript 打印或某些基于 gs 的查看器会看到错字 | 需要时改为紧凑 CID + 重排 GID 的子集格式，并加 gs 渲染回归 | 否 |
 
 ## 3. 非目标（不是债务）
@@ -177,4 +179,4 @@
 | Web Studio | **已完成（ADR-0093/0094）**：`soma-studio-core/-ui/-` 三个 crate、S1–S10、字体探针、SSE 重载、CSP；关闭 D95，新增 D101–D105 |
 | 流程图 | **已完成（ADR-0102）**：`Block::Diagram`、Mermaid/DOT frontend、确定性分层布局、三种渲染器零改动、TikZ 导出；新增 D107 |
 | 混合语法 | **已完成（ADR-0104）**：Markdown 复用 `soma-html`/`soma-latex`，支持行内/行间数学、LaTeX 命令与环境、语义 HTML 与 HTML 块；新增 D109 |
-| 未排期 | D01、D32、D51、D60、D61、D62、D63、D65、D66、D67、D97、D98、D99、D100、D101–D110、N3–N6 |
+| 未排期 | D01、D32、D51、D60、D61、D62、D63、D65、D66、D67、D97、D98、D99、D100、D101、D102、D103、D104、D105、D106、D107、D108、D109、D111、D112、N3–N6 |

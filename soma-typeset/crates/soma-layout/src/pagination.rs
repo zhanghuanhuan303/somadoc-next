@@ -129,12 +129,8 @@ pub(crate) fn place_kp(
     params: VerticalParams,
 ) -> Option<Vec<usize>> {
     let mut ends = Vec::new();
-    let last_segment = segments.len().saturating_sub(1);
-    for (index, &(start, end)) in segments.iter().enumerate() {
-        let free_last = index == last_segment;
-        ends.extend(place_segment(
-            items, start, end, capacity, notes, params, free_last,
-        )?);
+    for &(start, end) in segments {
+        ends.extend(place_segment(items, start, end, capacity, notes, params)?);
     }
     Some(ends)
 }
@@ -146,7 +142,6 @@ fn place_segment(
     capacity: Width,
     notes: &NoteMap,
     params: VerticalParams,
-    free_last: bool,
 ) -> Option<Vec<usize>> {
     let n = end - start;
     if n == 0 {
@@ -210,7 +205,11 @@ fn place_segment(
             if can_break {
                 let last = j + 1 == end;
                 let mut cost = params.page_weight + item.penalty;
-                if !(last && free_last) {
+                // Every segment ends where the next one already starts a new
+                // page (a chapter opening or an explicit break). Only that
+                // final page may be short: filling every earlier page is what
+                // keeps a chapter from ending in two half-empty leaves.
+                if !last {
                     cost += page_badness(
                         total,
                         capacity_units,

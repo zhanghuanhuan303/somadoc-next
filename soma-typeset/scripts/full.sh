@@ -30,11 +30,11 @@ set -- --out "$out/full.smt" --face "serif:normal:$serif"
 [ -f "$math" ] && set -- "$@" --face "math:normal:$math"
 cargo run --quiet --manifest-path tools/metrics-gen/Cargo.toml -- "$@"
 
-# The book template, with the index ordered by pinyin.
-# A capability sheet reads better as one continuous flow: keep the book's
-# page size, masters and numbering, but let a chapter start mid-page.
+# The book template, with the index ordered by pinyin and the chapter flow
+# explicit: a capability sheet reads better as one continuous sample.
+# The page-break policy lives in `layout.mode`, not in a style edit.
 sed -e 's/^index:$/index:\n  sort: pinyin/' \
-    -e 's/page-break-before: true/page-break-before: false/' \
+    -e 's/^  mode: book$/  mode: sample/' \
     examples/book/song.yaml > "$out/full.yaml"
 
 # The HTML supplement is a single leaf; a contents page for one heading is
@@ -46,7 +46,8 @@ awk '
 ' "$out/full.yaml" > "$out/full-html.yaml"
 
 set -- --input examples/book/full.tex --template "$out/full.yaml" \
-    --metrics "$out/full.smt" --hyphenation examples/book/hyphen-en.pat --stats
+    --metrics "$out/full.smt" --hyphenation examples/book/hyphen-en.pat \
+    --engine examples/book/book.engine --stats
 
 for format in html json; do
     cargo run --quiet -p soma-cli -- render "$@" --format "$format" \
@@ -64,7 +65,8 @@ cargo run --quiet -p soma-cli -- render "$@" --out "$out/full.pdf"
 # A one-page supplement for the two HTML-only constructs: `<colgroup>`
 # relative widths and native `<ruby>`.
 set -- --input examples/book/full-html.html --template "$out/full-html.yaml" \
-    --metrics "$out/full.smt" --format pdf --out "$out/full-html.pdf" \
+    --metrics "$out/full.smt" --engine examples/book/book.engine \
+    --format pdf --out "$out/full-html.pdf" \
     --font "$serif"
 [ -f "$serif_bold" ] && set -- "$@" --font-bold "$serif_bold"
 [ -f "$sans" ] && set -- "$@" --font-sans "$sans"

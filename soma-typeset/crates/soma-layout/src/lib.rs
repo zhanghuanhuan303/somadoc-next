@@ -1144,15 +1144,20 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
         if master.header_height.0 > 0 {
             let source = master.header_text.as_deref().unwrap_or("running-title");
             let text = if source == "running-title" {
-                let item_index = vertical_items
-                    .get(previous)
-                    .map(|item| item.item)
+                // A running head names the chapter that governs the page. In
+                // book mode a chapter opens on its own page, so the page-start
+                // and page-end chapters agree. A sample sheet may open a
+                // chapter mid-page; the page then carries the new chapter
+                // rather than the one it is leaving.
+                let last_item = vertical_items
+                    .get(previous..end)
+                    .and_then(|slice| slice.iter().map(|item| item.item).max())
                     .unwrap_or(0);
                 builder
                     .headings
                     .iter()
                     .rev()
-                    .find(|heading| heading.item <= item_index)
+                    .find(|heading| heading.level == 1 && heading.item <= last_item)
                     .map(|heading| heading.text.clone())
                     .unwrap_or_default()
             } else {
@@ -1162,7 +1167,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
                 &mut builder,
                 NodeId(next_node),
                 &text,
-                ROOT_STYLE,
+                styled.running_head_style(),
                 content_width,
                 master.header_height,
                 Width(-master.header_height.0),
@@ -1183,7 +1188,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
                         &mut builder,
                         NodeId(next_node),
                         &text,
-                        ROOT_STYLE,
+                        styled.folio_style(),
                         content_width,
                         master.footer_height,
                         page_height,
@@ -1872,6 +1877,12 @@ impl Builder<'_> {
                         // page, that page may use the section-start master.
                         if node.level == 1 {
                             items[index].section_start = true;
+                            // A sample sheet reads as one continuous flow even
+                            // though its template is a book. The mode is part
+                            // of the template, not a build-script edit.
+                            if self.styled.layout_mode() == soma_template::LayoutMode::Sample {
+                                items[index].page_break_before = false;
+                            }
                         }
                     }
                 }
@@ -1985,7 +1996,24 @@ impl Builder<'_> {
                 }
                 Block::Figure(node) => {
                     let style = self.style(node.meta.id, fallback);
-                    items.push(self.figure_item(node.meta.id, &node.image.source, style)?);
+                    // An image needs an accessible name. The author's alt text
+                    // wins; otherwise the caption is the honest description.
+                    let alt = node
+                        .image
+                        .source
+                        .alt
+                        .clone()
+                        .filter(|text| !text.is_empty())
+                        .or_else(|| {
+                            let text = inline_text(&node.caption);
+                            (!text.is_empty()).then_some(text)
+                        });
+                    items.push(self.figure_item(
+                        node.meta.id,
+                        &node.image.source,
+                        alt.as_deref(),
+                        style,
+                    )?);
                     if !node.caption.is_empty() {
                         // A figure and its caption are one unit: a page never
                         // ends between them (a lone caption is not a caption).
@@ -3496,7 +3524,13 @@ impl Builder<'_> {
                 .ok_or_else(|| LayoutError::new(None, "unknown cover master"))?,
         };
         let styles = self.styled.cover_styles();
-        let (title, subtitle, authors, date) = cover_lines(doc);
+        let CoverText {
+            title,
+            subtitle,
+            authors,
+            date,
+            colophon,
+        } = cover_lines(doc);
 
         // The cover is one atomic flow item: a cover that does not fit on one
         // page is an overflow, never a spill onto page two. All spacing is
@@ -3509,6 +3543,7 @@ impl Builder<'_> {
             (styles.subtitle, subtitle),
             (styles.author, authors),
             (styles.date, date),
+            (styles.colophon, colophon),
         ] {
             let Some(text) = text else { continue };
             if text.trim().is_empty() {
@@ -3641,7 +3676,6 @@ impl Builder<'_> {
         front: &Generated,
         items: &mut Vec<FlowItem>,
     ) -> Result<(), LayoutError> {
-        let entry_style = self.styled.toc_style();
         let title_style = self.styled.toc_title_style();
 
         // A template can ask for a TOC unconditionally (the default does).
@@ -3655,6 +3689,7 @@ impl Builder<'_> {
 
         if let Some(title) = spec.title.as_deref().filter(|title| !title.is_empty()) {
             let node = self.generated_id();
+            let align = self.computed(title_style).align;
             let item = self.object_item_at(
                 node,
                 BoxKind::Paragraph,
@@ -3663,7 +3698,7 @@ impl Builder<'_> {
                 Slot {
                     x: Width::ZERO,
                     width: self.content_width,
-                    align: Align::Left,
+                    align,
                 },
             )?;
             items.push(item);
@@ -3672,15 +3707,10 @@ impl Builder<'_> {
         let step = Width::from_em_frac(3, 2);
         let entries = self.toc_entries.clone();
         for entry in &entries {
-            let indent = Width(step.0 * (entry.level.max(1) as i32 - 1));
-            self.toc_entry_row(
-                entry_style,
-                &entry.text,
-                &entry.page,
-                indent,
-                spec.leaders,
-                items,
-            )?;
+            let is_chapter = entry.level <= 1;
+            let style = self.styled.toc_entry_style(entry.level);
+            let indent = if is_chapter { Width::ZERO } else { step };
+            self.toc_entry_row(style, &entry.text, &entry.page, indent, spec.leaders, items)?;
         }
 
         for (list_title, entries) in [
@@ -3695,22 +3725,25 @@ impl Builder<'_> {
             }
             if !list_title.is_empty() {
                 let node = self.generated_id();
+                let list_title_style = self.styled.toc_list_title_style();
+                let align = self.computed(list_title_style).align;
                 let item = self.object_item_at(
                     node,
                     BoxKind::Paragraph,
                     list_title,
-                    title_style,
+                    list_title_style,
                     Slot {
                         x: Width::ZERO,
                         width: self.content_width,
-                        align: Align::Left,
+                        align,
                     },
                 )?;
                 items.push(item);
             }
+            let list_style = self.styled.toc_entry_style(2);
             for entry in entries {
                 self.toc_entry_row(
-                    entry_style,
+                    list_style,
                     &entry.text,
                     &entry.page,
                     step,
@@ -3753,6 +3786,8 @@ impl Builder<'_> {
         items: &mut Vec<FlowItem>,
     ) -> Result<(), LayoutError> {
         // Reserve four digits so a growing page count never reflows the rows.
+        let computed = self.computed(entry_style);
+        let gap_glue = self.before_glue(&computed);
         let reserve = self.metrics.advance("0000", entry_style).0.max(Width::EM.0);
         let gap = Width::from_em_frac(1, 2);
         let number_width = self.metrics.advance(page, entry_style);
@@ -3774,7 +3809,7 @@ impl Builder<'_> {
                     align: Align::Left,
                 },
             )?;
-            row.before = Glue::ZERO;
+            row.before = gap_glue;
             items.push(row);
             return Ok(());
         }
@@ -3845,7 +3880,7 @@ impl Builder<'_> {
         }
         row.height = row.height.max(Width(line_y.0 + number_item.height.0));
         row.blocks.append(&mut number_item.blocks);
-        row.before = Glue::ZERO;
+        row.before = gap_glue;
         items.push(row);
         Ok(())
     }
@@ -4281,17 +4316,38 @@ impl Builder<'_> {
         &mut self,
         node: NodeId,
         image: &soma_doc::meta::ImageRef,
+        alt: Option<&str>,
         style_id: StyleId,
     ) -> Result<FlowItem, LayoutError> {
         let computed = self.computed(style_id);
-        self.text
-            .mark_figure(node, &image.src, image.alt.as_deref());
-        let width = self.content_width;
+        self.text.mark_figure(node, image.src.as_str(), alt);
+        let policy = self.styled.figure();
+        let mut width = match policy.width {
+            soma_template::FigureWidth::Full => self.content_width,
+            soma_template::FigureWidth::Half => Width(self.content_width.0 / 2),
+            soma_template::FigureWidth::Natural => match image.intrinsic {
+                Some(intrinsic) if intrinsic.width_px > 0 => {
+                    // CSS pixels are 96 dpi; an em is `body_pt` points.
+                    let body = self.styled.body_pt();
+                    let units =
+                        intrinsic.width_px as i64 * 3 * 4096 * body.den() / (4 * body.num().max(1));
+                    Width(units.min(self.content_width.0 as i64) as i32)
+                }
+                _ => self.content_width,
+            },
+        };
+        width = Width(width.0.min(self.content_width.0).max(1));
         let height = match image.intrinsic {
             Some(intrinsic) if intrinsic.width_px > 0 => {
                 width.scale(intrinsic.height_px as i32, intrinsic.width_px as i32)
             }
             _ => width.scale(2, 3),
+        };
+        let free = self.content_width.0 - width.0;
+        let x = match policy.align {
+            soma_template::FigureAlign::Left => Width::ZERO,
+            soma_template::FigureAlign::Center => Width(free / 2),
+            soma_template::FigureAlign::Right => Width(free),
         };
         Ok(FlowItem {
             height,
@@ -4309,7 +4365,7 @@ impl Builder<'_> {
                 node,
                 kind: BoxKind::Figure,
                 style: style_id,
-                x: Width::ZERO,
+                x,
                 y: Width::ZERO,
                 width,
                 height,
@@ -4707,6 +4763,15 @@ fn margin_block(
         // column. Printing nothing is safer than overlapping the first line.
         return None;
     }
+    let computed = builder.computed(style);
+    let x = match computed.align {
+        Align::Left => Width::ZERO,
+        // A single margin line has nothing to justify. Templates that predate
+        // the running-head style inherit `justify`; keep their centred look.
+        Align::Center | Align::Justify => Width((content_width.0 - natural.0).max(0) / 2),
+        Align::Right => Width((content_width.0 - natural.0).max(0)),
+    };
+
     builder.text.insert(
         node,
         paragraph
@@ -4721,7 +4786,6 @@ fn margin_block(
             })
             .collect(),
     );
-    let x = Width((content_width.0 - natural.0).max(0) / 2);
 
     Some(PlacedBlock {
         node,
@@ -5099,14 +5163,15 @@ impl Numbering {
 }
 
 /// The four cover lines, taken from the document metadata.
-fn cover_lines(
-    doc: &Document,
-) -> (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-) {
+struct CoverText {
+    title: Option<String>,
+    subtitle: Option<String>,
+    authors: Option<String>,
+    date: Option<String>,
+    colophon: Option<String>,
+}
+
+fn cover_lines(doc: &Document) -> CoverText {
     let meta = &doc.meta;
     let cover = meta.cover.as_ref();
     let zh = meta
@@ -5145,7 +5210,24 @@ fn cover_lines(
             .date
             .map(|date| format!("{}-{:02}-{:02}", date.year, date.month, date.day)),
     };
-    (title, subtitle, authors, date)
+    // A colophon is a cover field, not a document property: the cover
+    // template decides whether to show it.
+    let colophon = cover
+        .and_then(|cover| {
+            cover
+                .fields
+                .iter()
+                .find(|field| field.key == "colophon")
+                .map(|field| field.value.clone())
+        })
+        .filter(|text| !text.is_empty());
+    CoverText {
+        title,
+        subtitle,
+        authors,
+        date,
+        colophon,
+    }
 }
 
 /// Environments that take an equation number. `aligned`/`split` are inner

@@ -30,10 +30,11 @@ pub use style::{
     StyleTable, StyledDoc, TableRules,
 };
 pub use template::{
-    parse_template, parse_template_inherit, CoverSpec, Declaration, FontSlant, FontWeight,
-    FootnoteNumbering, FootnoteSpec, FrontMatterNumbering, HeadingNumbering, IndexSort, IndexSpec,
-    MasterSpec, NumberingSpec, PageSize, PageSpec, Property, PropertyValue, RuleStyle, Selector,
-    StyleRule, SyntaxPalette, TableSpec, TableWidth, Template, TocSpec, ELEMENTS, SCHEMA,
+    parse_template, parse_template_inherit, CoverSpec, Declaration, FigureAlign, FigureSpec,
+    FigureWidth, FontSlant, FontWeight, FootnoteNumbering, FootnoteSpec, FrontMatterNumbering,
+    HeadingNumbering, IndexSort, IndexSpec, LayoutMode, MasterSpec, NumberingSpec, PageSize,
+    PageSpec, Property, PropertyValue, RuleStyle, Selector, StyleRule, SyntaxPalette, TableSpec,
+    TableWidth, Template, TocSpec, ELEMENTS, SCHEMA,
 };
 pub use units::{LengthSpec, LineHeightSpec, PageLength, Percent, Rational, Unit, UNITS_PER_EM};
 

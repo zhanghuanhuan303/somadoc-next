@@ -341,6 +341,43 @@ fn figure_uses_the_intrinsic_aspect_ratio() {
 }
 
 #[test]
+fn a_figure_policy_can_halve_and_align() {
+    const POLICY: &str = r#"
+name: figure-policy
+page:
+  size: custom
+  width: 100mm
+  height: 80mm
+  margin: 4mm
+figure:
+  width: half
+  align: right
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+"#;
+    let figure = Figure::new(
+        NodeMeta::synthesized(),
+        Image::new(
+            NodeMeta::synthesized(),
+            ImageRef::new("photo.png").with_intrinsic(200, 100),
+        ),
+    );
+    let doc = document(vec![Block::Figure(figure)]);
+    let styled = styled(&doc, POLICY);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+    let content = layout.page.content_width().0;
+
+    assert_eq!(block.width.0, content / 2);
+    assert_eq!(block.x.0, content - block.width.0);
+    assert_eq!(block.height.0, block.width.0 / 2);
+}
+
+#[test]
 fn a_figure_without_intrinsic_size_uses_three_by_two() {
     let figure = Figure::new(
         NodeMeta::synthesized(),

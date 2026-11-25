@@ -66,12 +66,66 @@ pub const ELEMENTS: &[&str] = &[
     // Generated index entries and their heading.
     "indexEntry",
     "indexTitle",
+    // Running head and folio; they are page furniture, not document content.
+    "runningHead",
+    "folio",
+    // Generated contents rows, by level, and the figure/table list heading.
+    "tocChapter",
+    "tocSection",
+    "tocListTitle",
     // Generated cover page.
     "coverTitle",
     "coverSubtitle",
     "coverAuthor",
     "coverDate",
+    "coverColophon",
 ];
+
+/// How a figure is sized and placed in the measure.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FigureSpec {
+    pub width: FigureWidth,
+    pub align: FigureAlign,
+}
+
+/// Figure width policy. `Natural` uses the image's intrinsic pixel size at
+/// 96 dpi, capped at the measure; it never invents a physical width.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FigureWidth {
+    Natural,
+    Half,
+    #[default]
+    Full,
+}
+
+impl FigureWidth {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Natural => "natural",
+            Self::Half => "half",
+            Self::Full => "full",
+        }
+    }
+}
+
+/// Horizontal placement of a figure narrower than the measure.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FigureAlign {
+    Left,
+    #[default]
+    Center,
+    Right,
+}
+
+impl FigureAlign {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Center => "center",
+            Self::Right => "right",
+        }
+    }
+}
 
 /// A parsed, validated template.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,6 +139,9 @@ pub struct Template {
     pub cover: Option<CoverSpec>,
     pub numbering: NumberingSpec,
     pub table: TableSpec,
+    pub figure: FigureSpec,
+    /// How chapters flow: one page each, or continuous for a sample sheet.
+    pub layout: LayoutMode,
     /// Token colors for highlighted code. Empty means no highlighting.
     pub syntax: SyntaxPalette,
     /// Named page masters beyond the default `page:` geometry.
@@ -123,6 +180,25 @@ impl Template {
     /// Hash of the canonical JSON; the style layer records it.
     pub fn template_hash(&self) -> crate::TemplateHash {
         crate::canonical::template_hash(self)
+    }
+}
+
+/// How a level-1 heading starts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LayoutMode {
+    /// A chapter always opens a new page.
+    #[default]
+    Book,
+    /// Chapters follow one another on the same page (capability sheets).
+    Sample,
+}
+
+impl LayoutMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Book => "book",
+            Self::Sample => "sample",
+        }
     }
 }
 
@@ -785,6 +861,8 @@ fn template_from_value(root: &Value) -> Result<Template, TemplateError> {
         "cover",
         "numbering",
         "table",
+        "figure",
+        "layout",
         "syntax",
         "masters",
         "styles",
@@ -826,6 +904,14 @@ fn template_from_value(root: &Value) -> Result<Template, TemplateError> {
         Some(value) if !value.is_null() => parse_table(value, "table")?,
         _ => TableSpec::default(),
     };
+    let layout = match fields.optional("layout") {
+        Some(value) if !value.is_null() => parse_layout(value, "layout")?,
+        _ => LayoutMode::default(),
+    };
+    let figure = match fields.optional("figure") {
+        Some(value) if !value.is_null() => parse_figure(value, "figure")?,
+        _ => FigureSpec::default(),
+    };
     let syntax = match fields.optional("syntax") {
         Some(value) if !value.is_null() => parse_syntax(value, "syntax")?,
         _ => SyntaxPalette::default(),
@@ -851,6 +937,8 @@ fn template_from_value(root: &Value) -> Result<Template, TemplateError> {
         cover,
         numbering,
         table,
+        figure,
+        layout,
         syntax,
         masters,
         styles,
@@ -1180,6 +1268,39 @@ fn parse_footnote(value: &Value, path: &str) -> Result<FootnoteSpec, TemplateErr
         }
     };
     Ok(FootnoteSpec { numbering })
+}
+
+fn parse_layout(value: &Value, path: &str) -> Result<LayoutMode, TemplateError> {
+    let fields = Fields::new(value, path)?;
+    fields.reject_unknown(&["mode"])?;
+    match fields.optional_str("mode")?.as_deref() {
+        None | Some("book") => Ok(LayoutMode::Book),
+        Some("sample") => Ok(LayoutMode::Sample),
+        Some(_) => Err(fields.error("layout.mode must be book or sample")),
+    }
+}
+
+fn parse_figure(value: &Value, path: &str) -> Result<FigureSpec, TemplateError> {
+    let fields = Fields::new(value, path)?;
+    fields.reject_unknown(&["width", "align"])?;
+    let mut spec = FigureSpec::default();
+    if let Some(width) = fields.optional_str("width")? {
+        spec.width = match width.as_str() {
+            "natural" => FigureWidth::Natural,
+            "half" => FigureWidth::Half,
+            "full" => FigureWidth::Full,
+            _ => return Err(fields.error("figure.width must be natural, half or full")),
+        };
+    }
+    if let Some(align) = fields.optional_str("align")? {
+        spec.align = match align.as_str() {
+            "left" => FigureAlign::Left,
+            "center" => FigureAlign::Center,
+            "right" => FigureAlign::Right,
+            _ => return Err(fields.error("figure.align must be left, center or right")),
+        };
+    }
+    Ok(spec)
 }
 
 fn parse_table(value: &Value, path: &str) -> Result<TableSpec, TemplateError> {

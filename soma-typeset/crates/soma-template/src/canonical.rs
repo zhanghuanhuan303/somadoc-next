@@ -175,6 +175,24 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
     }
     out.write_char('}')?;
 
+    // Book is the historical default; omit it so existing templates keep
+    // their canonical bytes. A sample sheet opts in explicitly.
+    if template.layout != crate::template::LayoutMode::Book {
+        out.write_str(",\"layout\":{\"mode\":\"")?;
+        out.write_str(template.layout.as_str())?;
+        out.write_str("\"}")?;
+    }
+
+    // Full-width, centred figures are the historical behaviour; only an
+    // explicit policy changes the canonical form.
+    if template.figure != crate::template::FigureSpec::default() {
+        out.write_str(",\"figure\":{\"width\":\"")?;
+        out.write_str(template.figure.width.as_str())?;
+        out.write_str("\",\"align\":\"")?;
+        out.write_str(template.figure.align.as_str())?;
+        out.write_str("\"}")?;
+    }
+
     if !template.syntax.is_empty() {
         out.write_str(",\"syntax\":{")?;
         for (index, (class, color)) in template.syntax.entries().enumerate() {
