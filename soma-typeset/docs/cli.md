@@ -17,6 +17,8 @@ soma render --input <file|-> [--from md|html|tex|docx] [--template <file>] [--en
             [--font-math <file[#index]>] [--font-fallback <file[#index]>] \
             [--hyphenation <patterns>] [--stats]
 soma check  --input <file> [--template <file>] [--engine <file>]
+soma diagram --input <file|-> [--from mermaid|dot] [--template <file>] \
+            [--metrics <file>] [--out <path>]
 soma --help
 soma --version
 ```
@@ -49,6 +51,11 @@ See [`docs/fonts.md`](fonts.md) and [`docs/mixed-font.md`](mixed-font.md).
 `check` parses and lays out, then prints document facts (`blocks`, `pages`,
 `overflow pages`, `non-normal blocks`, `canonical hash`). It writes no output
 file.
+
+`diagram` compiles one Mermaid/DOT source without a document wrapper and
+prints TikZ to stdout (or `--out`). `--from` accepts `mermaid`, `mmd`,
+`flowchart`, `dot`, or `graphviz`; without it, `.mmd`/`.mermaid` and
+`.dot`/`.gv` pick the dialect. See [`docs/diagrams.md`](diagrams.md).
 
 ## Input syntaxes
 

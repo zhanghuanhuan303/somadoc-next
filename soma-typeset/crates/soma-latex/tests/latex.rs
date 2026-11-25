@@ -277,7 +277,7 @@ fn parsing_is_deterministic() {
     let first = parse_latex(source).canonical_json();
     let second = parse_latex(source).canonical_json();
     assert_eq!(first, second);
-    assert!(first.starts_with("{\"schema\":\"soma.doc/2\""));
+    assert!(first.starts_with("{\"schema\":\"soma.doc/3\""));
 }
 
 #[test]
@@ -380,4 +380,10 @@ fn a_ruby_command_carries_base_and_reading() {
     );
     assert_eq!(paragraph_text(&document.blocks[0]), "正文汉字后文");
     document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn mermaid_environment_becomes_a_diagram() {
+    let document = parse_latex("\\begin{mermaid}\nflowchart TD\n  A --> B\n\\end{mermaid}\n");
+    assert!(matches!(document.blocks[0], Block::Diagram(_)));
 }

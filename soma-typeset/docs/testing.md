@@ -105,7 +105,7 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `a1_model.rs` | 9 | node coverage, renumbering, text projection |
 | `a1_raw.rs` | 4 | raw payload preservation |
 | `a1_validate.rs` | 26 | every DocIR invariant has a failing case (incl. table grid) |
-| `d31_reader.rs` | 9 | canonical JSON reader: rich round-trip, escapes/surrogates, unknown fields, malformed values |
+| `d31_reader.rs` | 10 | canonical JSON reader: rich round-trip, escapes/surrogates, unknown fields, malformed values |
 | `d34_date.rs` | 4 | Gregorian month days, leap years, canonical bytes unchanged |
 | `d35_traversal.rs` | 2 | shared and mutable meta traversals visit the same nodes |
 | `a2_template.rs` | 22 | YAML subset, validation, positions, hash, `within`, `table:`, `masters:`, `toc:`, `start-master`, `level`, `numbering:`, front matter, lists, the Plex reference design |
@@ -135,10 +135,10 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `effect.rs` (eval) | 7 | Gate Q′ structural claims on the scorecard |
 | `engine.rs` | 17 | `soma.engine/1`: parse, reject, canonical hash, preset selection, layout equivalence |
 | `corpus.rs` (eval) | 10 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
-| `a5_md.rs` | 23 |
+| `a5_md.rs` | 24 |
 | `link_reference.rs` | 5 | full/collapsed/image references, label normalization, undefined refs stay text | Markdown subset (nested lists, GFM tables with dash-derived column shares, setext headings), inlines (including GFM `~~`), spans, index/ruby extensions, front matter, validity |
-| `html.rs` (html) | 23 | HTML subset shapes incl. definition lists, `ins`, `sup`/`sub`, `hr`, figure/caption, table grid, degradation, recovery, pipeline |
-| `latex.rs` (latex) | 17 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, inline command opening a block, ruby, recovery, pipeline |
+| `html.rs` (html) | 24 | HTML subset shapes incl. definition lists, `ins`, `sup`/`sub`, `hr`, figure/caption, table grid, degradation, recovery, pipeline |
+| `latex.rs` (latex) | 18 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, inline command opening a block, ruby, recovery, pipeline |
 | `macros.rs` (latex) | 14 | source-level expansion: 0–2 argument macros, nesting, renew, depth limit, `\def`, counters (arabic/roman/alph), definitions vanish, comments, verbatim untouched |
 | `latex` unit | 8 | inline/block parsing helpers, macro expansion seams |
 | `math.rs` (soma-math) | 63 | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, TeX spacing table, Bin normalisation, style levels, rule 18, `\sin`/`\binom`/`\operatorname`/`\overline`/`\hat`, errors, italic variables, tags |
@@ -198,13 +198,14 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `abi.rs` (web) | 8 | the C ABI slice: compile/measure/break handles, parity with the native kernel, fallback policy |
 | `soma-md` unit | 1 | frontend-internal projection helper |
 | `render-pdf` unit | 28 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing, TikZ path fill state |
-| `studio.rs` (studio-core) | 4 | fragments follow pages and join the full document, probe samples come from layout faces, build determinism, hyphenation patterns reach the shared build |
+| `studio.rs` (studio-core) | 6 | fragments follow pages and join the full document, probe samples come from layout faces, build determinism, hyphenation patterns reach the shared build, a Mermaid fence becomes vector paths |
 | `soma-studio-ui` unit | 2 | assistant markdown escapes raw HTML and rejects `javascript:`/`data:` destinations |
 | `soma-studio` unit | 5 | origin allowlist: loopback default, concrete LAN host, wildcard `Host` matching, IPv6 literals, `--host` parsing |
+| `mermaid.rs` (diagram) | 6 | Mermaid and DOT layouts, paths/labels, TikZ round trip, detection rules, directions/shapes/classes, clusters and self-loops |
 
-Total: **936 tests passed** (`cargo test --workspace`), plus **1 ignored**
+Total: **947 tests passed** (`cargo test --workspace`), plus **1 ignored**
 (`perturbation.rs`, run with `--ignored`). Counting that ignored test, the
-workspace lists **937 test functions**. The standalone
+workspace lists **948 test functions**. The standalone
 `tools/metrics-gen` crate adds its own 5 (`cargo test --manifest-path tools/metrics-gen/Cargo.toml`).
 
 Still deferred: the human blind-test run (D01), a quality-labeled corpus
@@ -225,7 +226,7 @@ The script runs:
 1. `cargo fmt --all --check`
 2. `cargo clippy --workspace --all-targets -- -D warnings`
 3. `cargo test --workspace`
-4. `cargo check -p soma-core -p soma-doc -p soma-engine -p soma-metrics -p soma-highlight -p soma-template -p soma-layout -p soma-tikz -p soma-md -p soma-render-html -p soma-render-svg -p soma-render-pdf --target wasm32-unknown-unknown`
+4. `cargo check -p soma-core -p soma-doc -p soma-engine -p soma-metrics -p soma-highlight -p soma-template -p soma-layout -p soma-tikz -p soma-diagram -p soma-md -p soma-render-html -p soma-render-svg -p soma-render-pdf --target wasm32-unknown-unknown`
 5. native vs `wasm32-wasip1` canonical-byte comparison (`scripts/wasm-hash.sh`)
 6. a demo smoke render (`soma-demo` → temporary HTML, check `data-algorithm`)
 7. `cargo tree -p soma-core` dependency-boundary check

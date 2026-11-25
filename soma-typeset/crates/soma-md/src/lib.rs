@@ -29,6 +29,7 @@ use soma_doc::block::{
     BlockQuote, Cell, CodeBlock, Column, Heading, List, ListItem, Paragraph, RawBlock, Row, Table,
     ThematicBreak,
 };
+use soma_doc::block::{DiagramBlock, DiagramDialect};
 use soma_doc::inline::{
     Container, FootnoteRef, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link, RawInline,
     Ruby,
@@ -170,7 +171,11 @@ pub fn parse_markdown_with_meta(source: &str, meta: DocumentMeta) -> Document {
                 index += 1;
             }
             let meta = node(&lines[index.saturating_sub(1)], 1);
-            blocks.push(Block::CodeBlock(CodeBlock::new(meta, lang, value)));
+            if let Some(dialect) = DiagramDialect::detect(lang.as_deref(), &value) {
+                blocks.push(Block::Diagram(DiagramBlock::new(meta, dialect, value)));
+            } else {
+                blocks.push(Block::CodeBlock(CodeBlock::new(meta, lang, value)));
+            }
             continue;
         }
 

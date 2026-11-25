@@ -1,6 +1,6 @@
 # 内容能力矩阵（Gate C）
 
-状态：**Gate C 维护中**。代码是权威：`soma_md::CAPABILITIES`（当前 29 项）。
+状态：**Gate C 维护中**。代码是权威：`soma_md::CAPABILITIES`（当前 30 项）。
 本文件必须与代码逐条对应；`scripts/gate-c.sh` 会检查这一点。
 
 图例：
@@ -22,6 +22,7 @@
 | `link` | supported | `[text](url)` → `Link` |
 | `image` | supported | `![alt](src)` → `Image` |
 | `fenced_code` | supported | ``` ``` ``` / `~~~` → `CodeBlock`；info string 的第一个 token 选择语法着色（rust/c/cpp/shell/markdown/latex 等，ADR-0091） |
+| `diagram_fence` | supported | `mermaid`/`dot` 围栏、以及无标记但首行是 `flowchart`/`digraph` 的围栏 → `Diagram`；`text`/`plain` 围栏保持代码（ADR-0102） |
 | `list_unordered` | supported | `-`/`*`/`+`，只支持平铺列表 |
 | `list_ordered` | supported | `1.` / `1)`，保留起始编号 |
 | `blockquote` | supported | `>` 行合并为一个 `BlockQuote` 段落 |

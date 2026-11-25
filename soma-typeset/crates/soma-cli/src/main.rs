@@ -16,7 +16,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use soma_core::{BreakConfig, VerticalParams};
+use soma_core::{BreakConfig, StyleId, VerticalParams};
 use soma_doc::Document;
 use soma_engine::EngineConfig;
 use soma_layout::{BoxKind, PaginationStrategy, StyledMetrics, TextSource};
@@ -38,6 +38,8 @@ usage:
               [--font-math <file[#index]>] [--font-fallback <file[#index]>]
   soma check  --input <file|-> [--from md|html|tex|docx]
               [--template <file>] [--engine <file>]
+  soma diagram --input <file|-> [--from mermaid|dot]
+              [--template <file>] [--metrics <file>] [--out <path>]
   soma --version
 
   --input     .md / .markdown, .html / .htm, .tex / .latex, .docx;
@@ -153,6 +155,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     match command.as_str() {
         "render" => render(&args[1..]),
         "check" => check(&args[1..]),
+        "diagram" => diagram(&args[1..]),
         "-h" | "--help" | "help" => {
             print!("{USAGE}");
             Ok(())
@@ -478,6 +481,92 @@ fn print_stats(label: Option<&str>, pages: &soma_layout::PagedLayout) {
         Some(label) => eprintln!("{label}: {line}"),
         None => eprintln!("{line}"),
     }
+}
+
+fn diagram(args: &[String]) -> Result<(), String> {
+    let mut input: Option<String> = None;
+    let mut from: Option<String> = None;
+    let mut template_path: Option<String> = None;
+    let mut metrics_path: Option<String> = None;
+    let mut out: Option<String> = None;
+    let mut index = 0usize;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        let mut value = || -> Result<String, String> {
+            index += 1;
+            args.get(index)
+                .cloned()
+                .ok_or_else(|| format!("{arg} needs a value"))
+        };
+        match arg {
+            "--input" | "-i" => input = Some(value()?),
+            "--from" => from = Some(value()?),
+            "--template" | "-t" => template_path = Some(value()?),
+            "--metrics" => metrics_path = Some(value()?),
+            "--out" => out = Some(value()?),
+            "-h" | "--help" => {
+                print!("{USAGE}");
+                return Ok(());
+            }
+            other => return Err(format!("unknown diagram argument `{other}`")),
+        }
+        index += 1;
+    }
+    let input = input.ok_or_else(|| String::from("diagram needs --input"))?;
+    let source = if input == "-" {
+        let mut text = String::new();
+        std::io::stdin()
+            .read_to_string(&mut text)
+            .map_err(|error| format!("stdin: {error}"))?;
+        text
+    } else {
+        std::fs::read_to_string(&input).map_err(|error| format!("{input}: {error}"))?
+    };
+    let dialect = match from.as_deref() {
+        Some("mermaid") | Some("mmd") | Some("flowchart") => soma_doc::DiagramDialect::Mermaid,
+        Some("dot") | Some("graphviz") => soma_doc::DiagramDialect::Graphviz,
+        Some(other) => return Err(format!("unknown diagram dialect `{other}`")),
+        None if input.ends_with(".dot") || input.ends_with(".gv") => {
+            soma_doc::DiagramDialect::Graphviz
+        }
+        None => soma_doc::DiagramDialect::Mermaid,
+    };
+    let template_text = match template_path {
+        Some(path) => std::fs::read_to_string(&path).map_err(|error| format!("{path}: {error}"))?,
+        None => DEFAULT_TEMPLATE.to_string(),
+    };
+    let template = parse_template(&template_text).map_err(|error| error.to_string())?;
+    let document = Document::default();
+    let styled = resolve(&document, &template).map_err(|error| error.to_string())?;
+    let table = match metrics_path {
+        Some(path) => {
+            let bytes = std::fs::read(&path).map_err(|error| format!("{path}: {error}"))?;
+            MetricsTable::parse(&bytes).map_err(|error| error.to_string())?
+        }
+        None => MetricsTable::embedded(),
+    };
+    let styled_metrics = soma_layout::StyledMetrics::new(&table, &styled);
+    let style = styled
+        .style(StyleId(0))
+        .cloned()
+        .unwrap_or_else(soma_template::ComputedStyle::base);
+    let options = soma_diagram::Options {
+        label_size: style.font_size,
+        line_gap: style.line_height,
+        line_width: soma_core::Width::from_em_frac(1, 25),
+        max_label_width: style.font_size.scale(16, 1),
+    };
+    let mut text = soma_layout::DiagramText::new(&style, &styled_metrics, StyleId(0));
+    let layout = soma_diagram::layout(dialect, &source, &options, &mut text)
+        .map_err(|error| error.to_string())?;
+    let tikz = soma_diagram::to_tikz(&layout);
+    match out {
+        Some(path) if path != "-" => {
+            std::fs::write(&path, tikz).map_err(|error| format!("{path}: {error}"))?
+        }
+        _ => print!("{tikz}"),
+    }
+    Ok(())
 }
 
 fn check(args: &[String]) -> Result<(), String> {

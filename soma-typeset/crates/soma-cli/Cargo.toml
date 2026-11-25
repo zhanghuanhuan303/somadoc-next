@@ -18,6 +18,7 @@ soma-latex = { path = "../soma-latex" }
 soma-docx = { path = "../soma-docx" }
 soma-hyphen = { path = "../soma-hyphen" }
 soma-layout = { path = "../soma-layout" }
+soma-diagram = { path = "../soma-diagram" }
 soma-md = { path = "../soma-md" }
 soma-metrics = { path = "../soma-metrics" }
 soma-render-html = { path = "../soma-render-html" }

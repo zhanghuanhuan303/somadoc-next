@@ -120,6 +120,7 @@ only).
 | [0099](0099-radical-variant-measurement.md) | CFF variant ink drops the optional Type 2 width; HTML/SVG place the fallback glyph at the variant's ink top and advance | Accepted |
 | [0100](0100-studio-host-binding.md) | `--host` opts Studio out of loopback; the `/api` Origin allowlist follows the bound host while `cross-site` stays refused | Accepted |
 | [0101](0101-studio-hyphenation.md) | Studio loads TeX hyphenation patterns from `--hyphenation` or `hyphen-en.pat` and feeds native and wasm builds | Accepted |
+| [0102](0102-diagram-compiler.md) | Mermaid/DOT are `Block::Diagram`; `soma-diagram` compiles them to the TikZ vector box, with a strict source fallback and a TikZ export | Accepted |
 
 ## Rules
 

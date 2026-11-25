@@ -18,8 +18,8 @@ const BOOK: &str = include_str!(concat!(
 #[test]
 fn reference_templates_keep_their_canonical_hashes() {
     let plex = parse_template(PLEX).expect("plex reference template");
-    assert_eq!(plex.template_hash().0, 4_467_990_681_682_398_639);
-    assert_eq!(plex.canonical_json().len(), 13_637);
+    assert_eq!(plex.template_hash().0, 1_032_299_983_268_492_809);
+    assert_eq!(plex.canonical_json().len(), 14_118);
 
     let book = parse_template(BOOK).expect("book reference template");
     assert_eq!(book.template_hash().0, 17_119_048_038_987_802_348);

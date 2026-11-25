@@ -78,6 +78,10 @@ fn write_block(out: &mut String, block: &Block) {
             out.push_str(&node.source);
             out.push('\n');
         }
+        Block::Diagram(node) => {
+            out.push_str(&node.source);
+            out.push('\n');
+        }
         Block::Figure(node) => {
             if node.caption.is_empty() {
                 write_image_ref(out, &node.image.source);

@@ -133,6 +133,19 @@ impl Context<'_> {
                 &format!("{path}.source"),
                 "math source must not be empty",
             ),
+            Block::Diagram(node) => {
+                if node.source.len() > crate::block::MAX_DIAGRAM_SOURCE {
+                    return Err(DocError::new(
+                        format!("{path}.source"),
+                        "diagram source is too large",
+                    ));
+                }
+                require_non_empty_reason(
+                    &node.source,
+                    &format!("{path}.source"),
+                    "diagram source must not be empty",
+                )
+            }
             Block::Figure(node) => {
                 validate_image_ref(&node.image.source, &format!("{path}.image"))?;
                 self.node_meta(&node.image.meta, &format!("{path}.image"), child_depth)?;

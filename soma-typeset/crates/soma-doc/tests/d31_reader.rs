@@ -4,10 +4,24 @@
 mod common;
 
 use common::{maximal_document, small_document};
-use soma_doc::block::{Column, Paragraph, Table};
+use soma_doc::block::{Column, DiagramBlock, DiagramDialect, Paragraph, Table};
 use soma_doc::meta::DocumentMeta;
 use soma_doc::node::NodeMeta;
 use soma_doc::{Block, CellAlign, Document, Text};
+
+#[test]
+fn reader_round_trips_a_diagram_block() {
+    let mut document = Document::default();
+    document.blocks.push(Block::Diagram(DiagramBlock::new(
+        NodeMeta::synthesized().with_id(soma_doc::NodeId(1)),
+        DiagramDialect::Mermaid,
+        "flowchart TD\nA[开始] --> B[结束]",
+    )));
+    document.validate().expect("diagram is valid");
+    let json = document.canonical_json();
+    let parsed = Document::from_canonical_json(&json).expect("reader accepts diagrams");
+    assert_eq!(parsed, document);
+}
 
 #[test]
 fn reader_round_trips_every_node_kind() {

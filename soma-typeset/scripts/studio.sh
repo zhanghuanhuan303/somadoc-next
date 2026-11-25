@@ -182,6 +182,13 @@ printf '%s' "$project_json" | grep -q '"customHyphenation":true' \
     || fail "project did not report the discovered hyphen-en.pat"
 curl -sf "http://127.0.0.1:$PORT/api/hyphenation" | grep -q 'hy3ph' \
     || fail "/api/hyphenation did not serve the patterns"
+cat > "$WORK/diagram.json" <<'EOF'
+{"source":"# 图\n\n```mermaid\nflowchart TD\n  A[开始] --> B{判断}\n  B -->|是| C[结束]\n```\n","format":"markdown"}
+EOF
+diagram_summary="$(curl -sf -X POST -H 'content-type: application/json' --data-binary @"$WORK/diagram.json" "http://127.0.0.1:$PORT/api/verify")" \
+    || fail "native diagram verify failed"
+printf '%s' "$diagram_summary" | grep -q '"pages":' || fail "diagram verify has no pages"
+printf '%s' "$diagram_summary" | grep -q '"hash":' || fail "diagram verify has no hash"
 summary="$(curl -sf -X POST -H 'content-type: application/json' -d '{}' "http://127.0.0.1:$PORT/api/verify")"
 native_pages="$(printf '%s' "$summary" | sed -n 's/.*"pages":\([0-9]*\).*/\1/p')"
 native_hash="$(printf '%s' "$summary" | sed -n 's/.*"hash":"\([0-9a-f]*\)".*/\1/p')"

@@ -429,7 +429,7 @@ fn canonical_json_is_stable() {
     let first = document.canonical_json();
     let second = document.canonical_json();
     assert_eq!(first, second);
-    assert!(first.contains("\"schema\":\"soma.doc/2\""));
+    assert!(first.contains("\"schema\":\"soma.doc/3\""));
 }
 
 #[test]

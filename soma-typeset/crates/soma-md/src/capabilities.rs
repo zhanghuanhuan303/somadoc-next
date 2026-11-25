@@ -97,6 +97,11 @@ pub const CAPABILITIES: &[Capability] = &[
         note: "``` ``` ``` / `~~~` become `CodeBlock`",
     },
     Capability {
+        syntax: "diagram_fence",
+        status: CapabilityStatus::Supported,
+        note: "`mermaid`/`dot` fences (and an untagged `flowchart`/`digraph` header) become `Diagram`; text fences stay code (ADR-0102)",
+    },
+    Capability {
         syntax: "list_unordered",
         status: CapabilityStatus::Supported,
         note: "`-`, `*`, `+`; flat lists only",

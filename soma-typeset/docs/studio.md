@@ -69,6 +69,12 @@ soma-studio --input … --host 10.0.0.6 --port 7070 \
 behaviour. Use `--dist` when the binary runs outside the source checkout, and
 keep the font and metrics paths absolute (or shipped next to the binary).
 
+Mermaid `flowchart`/`graph` and Graphviz DOT fences are compiled by
+`soma-diagram` into the same vector box as TikZ; the proof, the browser build
+and the native verify/PDF path all draw them. Unsupported diagram syntax shows
+its source, never a partial picture. `soma diagram --input chart.mmd` exports a
+standalone diagram as TikZ; see [`docs/diagrams.md`](diagrams.md).
+
 ## Views
 
 Every tab is built with its own frontend. Opening `notes.md`, `page.html` or
@@ -220,5 +226,9 @@ directory; `examples/` is not modified.
 - **PDF compatibility:** Firefox/pdf.js and Poppler render the CJK TrueType
   subset correctly; Ghostscript currently maps some CJK glyphs to the wrong
   shapes (D106). The PDF is not blank in the browser or in `pdftoppm`.
+- **Diagrams are flowchart-shaped only (D107).** Mermaid `flowchart`/`graph`
+  and a DOT subset are vector; sequence/class/state/ER diagrams and subgraph
+  rank constraints are not implemented. A wide or too-tall diagram falls back
+  to its source rather than overflowing the page.
 - **AI is local rules only.** It reads the exported line facts and proposes
   template YAML; it does not call a network model.

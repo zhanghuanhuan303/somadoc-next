@@ -57,7 +57,7 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
 - A minimal CJK/Latin rule compiler: CJK atoms, Latin runs, spaces as glue,
   punctuation classes, basic 避头尾 (forbidden line-start/line-end) rules,
   edge trim caps, and `paragraph_from_lines` for hard-broken source lines.
-- A1 DocIR (`soma-doc`, schema `soma.doc/2`): 13 block and 17 inline kinds with
+- A1 DocIR (`soma-doc`, schema `soma.doc/3`): 14 block and 17 inline kinds with
   `NodeId`/`SourceSpan`/`Attrs`, footnotes, figures, tables, math source, raw
   payload preservation, structural validation, canonical JSON, and two hashes
   (`docHash` for exact reproduction, `contentHash` for content identity). The
@@ -163,6 +163,12 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   external TeX pattern file (`soma render --hyphenation en.pat`). A broken line
   ends in a real hyphen whose width is charged to the line; a document without
   patterns is byte-identical to before.
+- Diagrams (ADR-0102): Mermaid `flowchart`/`graph` and Graphviz DOT fences
+  (or `mermaid`/`dot` environments) become semantic `Block::Diagram` blocks.
+  `soma-diagram` lays them out deterministically and emits the same integer
+  vector box as TikZ, so PDF/SVG/HTML draw them without a JavaScript runtime;
+  `soma diagram --input chart.mmd` exports the computed geometry as TikZ.
+  Unsupported constructs fall back to their source, never to a wrong picture.
 - Word input (ADR-0063/ADR-0066): `soma render --input draft.docx` reads the
   archive with a dependency-free zip/inflate and maps paragraphs, headings
   (by style name, through `basedOn` chains), inline emphasis, tables, lists,
@@ -319,6 +325,7 @@ crates/
   soma-cli/    # `soma`: source + template -> HTML/SVG/PDF/canonical JSON
   soma-math/   # TeX subset -> integer math boxes (symbols + rules)
   soma-tikz/   # core PGF drawing language -> integer vector paths
+  soma-diagram/ # Mermaid/DOT -> integer diagram paths, TikZ export
   soma-render-html/ # PagedLayout -> absolutely positioned HTML
   soma-render-svg/  # PagedLayout -> SVG (Gate V/R)
   soma-render-pdf/  # PagedLayout -> PDF (TrueType subset, bookmarks)
@@ -440,7 +447,7 @@ scripts/gates.sh
 scripts/studio.sh   # S1-S11 for the web workbench (needs chromium)
 ```
 
-The gate runs format, clippy, 936 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 947 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-highlight`, `soma-template`,
 `soma-layout`, `soma-tikz`, `soma-md`, `soma-render-html`, `soma-render-svg`, and
 `soma-render-pdf`, a

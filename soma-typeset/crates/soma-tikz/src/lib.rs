@@ -391,6 +391,7 @@ fn read_braced(source: &str) -> Result<(&str, &str), TikzError> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Anchor {
     Center,
+    Base,
     North,
     South,
     East,
@@ -569,6 +570,7 @@ impl Opts {
                 "anchor" => {
                     self.anchor = match value.unwrap_or("") {
                         "center" => Anchor::Center,
+                        "base" => Anchor::Base,
                         "north" => Anchor::North,
                         "south" => Anchor::South,
                         "east" => Anchor::East,
@@ -858,6 +860,7 @@ impl<'a> Engine<'a> {
                 break;
             }
             if parser.eat("--") {
+                parser.skip_ws();
                 if parser.eat("cycle") {
                     if let Some(builder) = builder.as_mut() {
                         builder.close();
@@ -1294,7 +1297,11 @@ impl<'a> Engine<'a> {
         let half_w = width / 2;
         let half_h = height / 2;
         let anchor = anchor_offset(request.opts.anchor, half_w, half_h, outer);
-        let center = request.at.sub(anchor);
+        let mut center = request.at.sub(anchor);
+        if request.opts.anchor == Anchor::Base {
+            // The baseline sits at the requested point, not the box centre.
+            center.y = request.at.y + (from_width(text_height) - from_width(text_depth)) / 2;
+        }
 
         if request.opts.circle {
             let radius = half_w.max(half_h);
@@ -1872,6 +1879,9 @@ fn anchor_offset(anchor: Anchor, half_w: i64, half_h: i64, outer: i64) -> TPoint
     let y = half_h + outer;
     match anchor {
         Anchor::Center => TPoint::ZERO,
+        // `base` keeps the node's text baseline at the anchor point; the
+        // vertical placement is handled in `place_node`.
+        Anchor::Base => TPoint::ZERO,
         Anchor::North => TPoint::new(0, y),
         Anchor::South => TPoint::new(0, -y),
         Anchor::East => TPoint::new(x, 0),

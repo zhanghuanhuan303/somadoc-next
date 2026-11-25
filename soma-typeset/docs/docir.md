@@ -1,6 +1,6 @@
 # DocIR 规范（`soma-doc`）
 
-状态：**A1 已落地，索引标记已加**（crate `soma-doc`，schema `soma.doc/2`，`docIrVersion = 2`）。
+状态：**A1 已落地，索引标记已加**（crate `soma-doc`，schema `soma.doc/3`，`docIrVersion = 3`）。
 本文件描述冻结后的语义 IR 契约；代码是权威，本文解释意图与不变量。
 
 参考：`docs/architecture-v2.md` §5、ADR-0001（两层 IR）、ADR-0008（DocIR 迁移）、
@@ -52,6 +52,7 @@ ADR-0009（语义/呈现边界）。
 | `BlockQuote` | `blocks` |
 | `CodeBlock` | `lang`、`value` |
 | `MathBlock` | `source`（交给 `soma-math` 解析成数学盒，内核不解析） |
+| `Diagram` | `dialect`（mermaid / dot）+ `source`；布局交给 `soma-diagram` 编译成与 TikZ 相同的矢量盒（ADR-0102） |
 | `Figure` | `image`、`caption`、`label` |
 | `Table` | `columns`、`rows`、`caption`、`label` |
 | `Column` | `align`；`share` 是可选的相对宽度千分比（0 = 按内容），不是物理长度 |
@@ -111,7 +112,7 @@ Attrs    { role, classes, anchor, lang }
 一个文档：
 
 ```json
-{"schema":"soma.doc/2","docIrVersion":2,"nodeCount":4,
+{"schema":"soma.doc/3","docIrVersion":3,"nodeCount":4,
  "meta":{"title":null,"authors":[],"language":"zh-Hans","date":null,
          "keywords":[],"template":null,"cover":null,"fields":[]},
  "blocks":[{"kind":"paragraph","id":1,

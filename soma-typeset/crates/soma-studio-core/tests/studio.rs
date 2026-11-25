@@ -157,3 +157,34 @@ fn build_is_deterministic() {
         "same input must produce the same canonical hash"
     );
 }
+
+#[test]
+fn a_mermaid_fence_becomes_a_vector_block() {
+    let template = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../examples/templates/plex.yaml"
+    ))
+    .expect("plex template");
+    let source =
+        "# 图\n\n```mermaid\nflowchart TD\n  A[开始] --> B{判断}\n  B -->|是| C[结束]\n```\n";
+    let parsed = parse_document(SourceFormat::Markdown, source.as_bytes()).expect("parse");
+    let build = build(
+        parsed,
+        BuildOptions {
+            template: &template,
+            engine: None,
+            metrics: None,
+            hyphenation: None,
+        },
+    )
+    .expect("build");
+    let has_paths = build.pages.pages.iter().any(|page| {
+        page.blocks.iter().any(|block| {
+            block
+                .math
+                .as_ref()
+                .is_some_and(|math| !math.paths.is_empty())
+        })
+    });
+    assert!(has_paths, "the diagram must reach the page as vector paths");
+}

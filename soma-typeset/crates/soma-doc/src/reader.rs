@@ -17,8 +17,8 @@ use alloc::vec::Vec;
 
 use crate::attrs::Attrs;
 use crate::block::{
-    Block, Cell, CellAlign, CodeBlock, Column, GeneratedBlock, GeneratedKind, Heading, List,
-    ListItem, MathBlock, Paragraph, RawBlock, Row, Section, Table,
+    Block, Cell, CellAlign, CodeBlock, Column, DiagramBlock, DiagramDialect, GeneratedBlock,
+    GeneratedKind, Heading, List, ListItem, MathBlock, Paragraph, RawBlock, Row, Section, Table,
 };
 use crate::doc::{Document, FootnoteDef, DOC_IR_VERSION, SCHEMA};
 use crate::ids::{NodeId, SourceId, SourceInfo, SourceKind, SourceMap, SourceSpan};
@@ -733,6 +733,20 @@ impl<'a> Parser<'a> {
                 self.field("source", path)?;
                 let source = self.string(path)?;
                 Block::MathBlock(MathBlock { meta, source })
+            }
+            "diagram" => {
+                self.comma(path)?;
+                self.field("dialect", path)?;
+                let dialect = self.string(path)?;
+                let dialect = match dialect.as_str() {
+                    "mermaid" => DiagramDialect::Mermaid,
+                    "dot" => DiagramDialect::Graphviz,
+                    _ => return self.error(path, "unknown diagram dialect"),
+                };
+                self.comma(path)?;
+                self.field("source", path)?;
+                let source = self.string(path)?;
+                Block::Diagram(DiagramBlock::new(meta, dialect, source))
             }
             "figure" => {
                 self.comma(path)?;

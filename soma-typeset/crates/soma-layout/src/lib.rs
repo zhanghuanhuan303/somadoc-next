@@ -19,8 +19,11 @@
 extern crate alloc;
 
 pub mod canonical;
+mod diagram;
 pub mod index;
 pub mod math;
+
+pub use diagram::DiagramText;
 pub mod metrics;
 mod pagination;
 
@@ -990,6 +993,7 @@ fn layout_once(pass: &Pass<'_>) -> Result<(PagedLayout, Generated), LayoutError>
         engine,
         hyphen,
         content_width,
+        page_height: page.content_height(),
         text: TextIndex::default(),
         notes: NoteMap::build(doc),
         headings: Vec::new(),
@@ -1742,6 +1746,9 @@ struct Builder<'a> {
     /// Hyphenation patterns, when the host supplied a set.
     hyphen: Option<&'a soma_hyphen::Patterns>,
     content_width: Width,
+    /// Height of the page content box; an unbreakable object taller than this
+    /// would overflow every page, so diagrams fall back to their source.
+    page_height: Width,
     /// Indent contributed by enclosing quotes and lists: a block inside a
     /// quote is narrowed by the quote's `indent-left`/`indent-right` as well as
     /// by its own.
@@ -1948,6 +1955,18 @@ impl Builder<'_> {
                         self.code_item(node.meta.id, node.lang.as_deref(), &node.value, style)?
                     {
                         items.push(item);
+                    }
+                }
+                Block::Diagram(node) => {
+                    let style = self.style(node.meta.id, fallback);
+                    match self.diagram_item(node.meta.id, node.dialect, &node.source, style)? {
+                        Some(item) => items.push(item),
+                        None => items.push(self.object_item(
+                            node.meta.id,
+                            BoxKind::Math,
+                            &node.source,
+                            style,
+                        )?),
                     }
                 }
                 Block::MathBlock(node) => {
@@ -4185,6 +4204,78 @@ impl Builder<'_> {
         })
     }
 
+    fn diagram_item(
+        &mut self,
+        node: NodeId,
+        dialect: soma_doc::DiagramDialect,
+        source: &str,
+        style_id: StyleId,
+    ) -> Result<Option<FlowItem>, LayoutError> {
+        let computed = self.computed(style_id);
+        let options = soma_diagram::Options {
+            label_size: computed.font_size,
+            line_gap: computed.line_height,
+            line_width: Width::from_em_frac(1, 25),
+            max_label_width: computed.font_size.scale(16, 1),
+        };
+        let mut text = DiagramText::new(&computed, self.metrics, style_id);
+        let Ok(layout) = soma_diagram::layout(dialect, source, &options, &mut text) else {
+            return self.code_item(node, Some(dialect.source_language()), source, style_id);
+        };
+        let available = self.content_width;
+        let scale = if layout.tikz.width.0 > available.0 && layout.tikz.width.0 > 0 {
+            (available.0 as i64 * 1000 / layout.tikz.width.0 as i64) as i32
+        } else {
+            1000
+        };
+        if scale < 600 || layout.tikz.width.0 <= 0 || layout.tikz.height.0 <= 0 {
+            return self.code_item(node, Some(dialect.source_language()), source, style_id);
+        }
+        let layout = soma_diagram::scale(&layout, scale);
+        if layout.tikz.height.0 > self.page_height.0 {
+            return self.code_item(node, Some(dialect.source_language()), source, style_id);
+        }
+        let height = layout.tikz.height;
+        let x = Width((available.0 - layout.tikz.width.0).max(0) / 2);
+        Ok(Some(FlowItem {
+            height,
+            before: self.before_glue(&computed),
+            after: self.after_glue(&computed),
+            keep_with_next: computed.keep_with_next,
+            page_break_before: computed.page_break_before,
+            forced_break: false,
+            section_start: false,
+            footnotes: Vec::new(),
+            parts: Vec::new(),
+            master: self.current_master,
+            table: None,
+            blocks: vec![PlacedBlock {
+                node,
+                kind: BoxKind::Math,
+                style: style_id,
+                x,
+                y: Width::ZERO,
+                width: layout.tikz.width,
+                height,
+                lines: Vec::new(),
+                marks: Vec::new(),
+                line_offset: 0,
+                lines_total: 0,
+                stage: FallbackStage::Normal,
+                inline_math: Vec::new(),
+                ruby: Vec::new(),
+                math: Some(MathBox {
+                    width: layout.tikz.width,
+                    height,
+                    baseline: layout.tikz.baseline,
+                    items: layout.tikz.items,
+                    rules: layout.tikz.rules,
+                    paths: layout.tikz.paths,
+                }),
+            }],
+        }))
+    }
+
     fn figure_item(
         &mut self,
         node: NodeId,
@@ -4404,6 +4495,7 @@ fn block_index_terms(block: &Block, terms: &mut Vec<index::IndexTerm>) {
         }
         Block::CodeBlock(_)
         | Block::MathBlock(_)
+        | Block::Diagram(_)
         | Block::ThematicBreak(_)
         | Block::PageBreak(_)
         | Block::Section(_)

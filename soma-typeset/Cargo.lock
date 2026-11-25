@@ -1603,6 +1603,7 @@ name = "soma-cli"
 version = "0.1.0"
 dependencies = [
  "soma-core",
+ "soma-diagram",
  "soma-doc",
  "soma-docx",
  "soma-engine",
@@ -1634,6 +1635,16 @@ dependencies = [
  "soma-layout",
  "soma-metrics",
  "soma-rules",
+]
+
+[[package]]
+name = "soma-diagram"
+version = "0.1.0"
+dependencies = [
+ "soma-core",
+ "soma-doc",
+ "soma-math",
+ "soma-tikz",
 ]
 
 [[package]]
@@ -1710,6 +1721,7 @@ version = "0.1.0"
 dependencies = [
  "soma-collate",
  "soma-core",
+ "soma-diagram",
  "soma-doc",
  "soma-highlight",
  "soma-hyphen",

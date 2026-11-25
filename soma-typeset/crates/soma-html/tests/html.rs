@@ -426,7 +426,7 @@ fn parsing_is_deterministic() {
     let first = parse_html(html).canonical_json();
     let second = parse_html(html).canonical_json();
     assert_eq!(first, second);
-    assert!(first.starts_with("{\"schema\":\"soma.doc/2\""));
+    assert!(first.starts_with("{\"schema\":\"soma.doc/3\""));
 }
 
 #[test]
@@ -464,4 +464,10 @@ styles:
     assert!(text.contains("标题"), "{text}");
     assert!(text.contains("正文"), "{text}");
     assert!(text.contains("重点"), "{text}");
+}
+
+#[test]
+fn pre_mermaid_class_becomes_a_diagram() {
+    let document = parse_html("<pre class=\"mermaid\">flowchart TD\n  A --> B</pre>");
+    assert!(matches!(document.blocks[0], Block::Diagram(_)));
 }

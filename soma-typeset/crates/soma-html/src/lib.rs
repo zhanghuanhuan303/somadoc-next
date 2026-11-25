@@ -33,8 +33,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use soma_doc::block::{
-    BlockQuote, Cell, CodeBlock, Column, Figure, Heading, List, ListItem, Paragraph, Row, Table,
-    ThematicBreak,
+    BlockQuote, Cell, CodeBlock, Column, DiagramBlock, DiagramDialect, Figure, Heading, List,
+    ListItem, Paragraph, Row, Table, ThematicBreak,
 };
 use soma_doc::inline::{Container, Image, Inline, LineBreak, LineBreakKind, Link, Ruby};
 use soma_doc::meta::{DocumentMeta, ImageRef};
@@ -611,11 +611,40 @@ fn build_block(element: &Element, out: &mut Vec<Block>) {
         "pre" => {
             let value = raw_text(&element.children);
             let value = value.strip_suffix('\n').unwrap_or(&value);
-            let lang = element
-                .class_names()
+            let classes: Vec<&str> = element.class_names().collect();
+            let lang = classes
+                .iter()
                 .find_map(|class| class.strip_prefix("language-"))
-                .map(|lang| lang.to_ascii_lowercase());
-            out.push(Block::CodeBlock(CodeBlock::new(meta, lang, value)));
+                .map(|lang| lang.to_ascii_lowercase())
+                .or_else(|| {
+                    classes
+                        .iter()
+                        .find(|class| {
+                            matches!(
+                                **class,
+                                "mermaid" | "mermaid-source" | "dot" | "dot-source" | "graphviz"
+                            )
+                        })
+                        .map(|class| String::from(*class))
+                });
+            if let Some(dialect) = DiagramDialect::detect(lang.as_deref(), value) {
+                out.push(Block::Diagram(DiagramBlock::new(meta, dialect, value)));
+            } else {
+                out.push(Block::CodeBlock(CodeBlock::new(meta, lang, value)));
+            }
+        }
+        "div"
+            if element
+                .class_names()
+                .any(|class| matches!(class, "mermaid" | "dot" | "graphviz")) =>
+        {
+            let value = raw_text(&element.children);
+            let value = value.strip_suffix('\n').unwrap_or(&value);
+            if let Some(dialect) = DiagramDialect::detect(None, value) {
+                out.push(Block::Diagram(DiagramBlock::new(meta, dialect, value)));
+            } else {
+                build_blocks(&element.children, out);
+            }
         }
         "hr" => out.push(Block::ThematicBreak(ThematicBreak::new(meta))),
         "table" => {

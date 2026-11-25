@@ -11,3 +11,6 @@ examples/book/*.fls
 examples/book/*.fdb_latexmk
 examples/book/*.synctex.gz
 examples/templates/out/
+
+examples/diagram/*.pdf
+examples/diagram/showcase-*.png

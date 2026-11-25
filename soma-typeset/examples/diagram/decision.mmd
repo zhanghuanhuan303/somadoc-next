@@ -1,0 +1,7 @@
+flowchart TD
+  start([开始]) --> parse[解析源文件]
+  parse --> check{语法有效?}
+  check -->|是| layout[K-P 排版]
+  check -->|否| error[回退源码]
+  layout --> done([输出])
+  error --> done

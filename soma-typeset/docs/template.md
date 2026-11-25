@@ -264,6 +264,14 @@ DocIR 的 `Section.page_template: <name>` 选择母版；换母版会强制新�
 值取自 Rust book：`background: "#f6f7f6"`，水平 `0.8em`（代码字号）、
 垂直 `0.5em`，等宽族 `mono`。
 
+### 6.2 流程图
+
+`Block::Diagram` 的样式元素是 `diagram`。它没有自己的内容子节点，因此只取
+`font-size`、`line-height`、`space-before`/`space-after`、左右缩进等块属性；
+节点填充、描边与箭头由 `soma-diagram` 的内置黑白印刷默认值决定，Mermaid 的
+`classDef`/`style` 可以逐节点覆盖。Plex 默认给 `diagram` 10 pt 标签与
+`0.8em` 上下间距（ADR-0102）。
+
 ### 6.2 语法配色
 
 顶层 `syntax:` 是**可选的**逐个 token 类的颜色表：

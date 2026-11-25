@@ -904,6 +904,7 @@ impl Resolver<'_> {
             Block::Generated(node) => self.blocks(&node.blocks, style, ancestors),
             Block::CodeBlock(_)
             | Block::MathBlock(_)
+            | Block::Diagram(_)
             | Block::ThematicBreak(_)
             | Block::PageBreak(_)
             | Block::Raw(_) => Ok(()),
@@ -1138,6 +1139,7 @@ fn block_element(block: &Block) -> &'static str {
         Block::BlockQuote(_) => "blockQuote",
         Block::CodeBlock(_) => "codeBlock",
         Block::MathBlock(_) => "mathBlock",
+        Block::Diagram(_) => "diagram",
         Block::Figure(_) => "figure",
         Block::Table(_) => "table",
         Block::ThematicBreak(_) => "thematicBreak",

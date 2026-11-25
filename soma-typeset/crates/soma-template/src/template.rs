@@ -28,6 +28,7 @@ pub const ELEMENTS: &[&str] = &[
     "blockQuote",
     "codeBlock",
     "mathBlock",
+    "diagram",
     "figure",
     "table",
     "column",

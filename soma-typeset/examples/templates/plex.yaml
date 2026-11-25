@@ -286,6 +286,17 @@ styles:
       space-before: 0.5em
       space-after: 0.5em
 
+  # Vector diagrams (Mermaid/DOT) are display figures: body-sized labels,
+  # centred, with breathing room before and after (ADR-0102).
+  - selector:
+      element: diagram
+    declarations:
+      font-size: 10pt
+      line-height: 1.25
+      space-before: 0.8em
+      space-after: 0.8em
+      align: center
+
   - selector:
       element: toc
     declarations:

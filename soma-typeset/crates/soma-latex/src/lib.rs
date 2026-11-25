@@ -35,8 +35,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use soma_doc::block::{
-    BlockQuote, Cell, CodeBlock, Column, Figure, Heading, List, ListItem, MathBlock, PageBreak,
-    Paragraph, Row, Table,
+    BlockQuote, Cell, CodeBlock, Column, DiagramBlock, DiagramDialect, Figure, Heading, List,
+    ListItem, MathBlock, PageBreak, Paragraph, Row, Table,
 };
 use soma_doc::inline::FootnoteRef;
 use soma_doc::inline::{
@@ -769,6 +769,20 @@ impl<'a> Parser<'a> {
                 vec![Block::MathBlock(MathBlock::new(
                     NodeMeta::synthesized(),
                     body.trim().to_string(),
+                ))]
+            }
+            // Diagram source is kept verbatim; the layout compiler recognises
+            // the dialect from the environment name (ADR-0102).
+            "mermaid" | "dot" | "graphviz" => {
+                let body = self.environment_body(&env);
+                let dialect = match env.as_str() {
+                    "mermaid" => DiagramDialect::Mermaid,
+                    _ => DiagramDialect::Graphviz,
+                };
+                vec![Block::Diagram(DiagramBlock::new(
+                    NodeMeta::synthesized(),
+                    dialect,
+                    body.trim(),
                 ))]
             }
             // TikZ is a display vector object, not text. Keeping the wrapper

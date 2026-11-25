@@ -376,3 +376,19 @@ fn a_table_needs_a_delimiter_row() {
     let document = parse_markdown("| 甲 | 乙 |\n| 丙 | 丁 |\n");
     assert!(matches!(document.blocks[0], Block::Paragraph(_)));
 }
+
+#[test]
+fn recognises_diagram_fences_and_keeps_text_codes() {
+    let document = parse_markdown(
+        "```mermaid\nflowchart TD\n  A[开始] --> B[结束]\n```\n\n\
+         ```\nflowchart LR\n  X --> Y\n```\n\n\
+         ```text\nflowchart TD\n  A --> B\n```\n",
+    );
+    assert!(matches!(document.blocks[0], Block::Diagram(_)));
+    assert!(matches!(document.blocks[1], Block::Diagram(_)));
+    assert!(matches!(document.blocks[2], Block::CodeBlock(_)));
+    assert_eq!(
+        soma_doc::block::DiagramDialect::detect(Some("text"), "flowchart TD\nA --> B"),
+        None
+    );
+}

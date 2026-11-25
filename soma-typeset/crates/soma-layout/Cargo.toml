@@ -18,3 +18,4 @@ soma-metrics = { path = "../soma-metrics" }
 soma-rules = { path = "../soma-rules" }
 soma-template = { path = "../soma-template" }
 soma-tikz = { path = "../soma-tikz" }
+soma-diagram = { path = "../soma-diagram" }

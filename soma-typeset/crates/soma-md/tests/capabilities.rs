@@ -137,7 +137,7 @@ fn supported_constructs_produce_structure() {
 #[test]
 fn the_matrix_is_stable() {
     // Pinning the count makes an accidental silent removal visible.
-    assert_eq!(CAPABILITIES.len(), 29);
+    assert_eq!(CAPABILITIES.len(), 30);
 }
 
 #[test]
