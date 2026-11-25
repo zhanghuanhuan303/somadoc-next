@@ -27,6 +27,7 @@
 | `thematic_break` | supported | `---`/`***`/`___` → `ThematicBreak` |
 | `footnote_def` | supported | `[^label]: text` → `FootnoteDef` |
 | `footnote_ref` | supported | `[^label]` → `FootnoteRef` |
+| `index_marker` | supported | `[[index:term]]` → `Inline::Index` |
 | `escape` | supported | 反斜杠转义下一个字符 |
 | `nested_list` | degraded | 缩进项并入父项文本 |
 | `setext_heading` | degraded | 下划线标题退化为段落 + 分隔线 |

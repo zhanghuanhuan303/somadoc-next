@@ -1,0 +1,264 @@
+//! Gate R: the SVG renderer must paint exactly the layout coordinates, and the
+//! HTML renderer must cover the same atoms. Gate V: the SVG bytes are a visual
+//! regression lock.
+
+use soma_core::{BreakConfig, Width};
+use soma_layout::{layout, PagedLayout, PlacedBlock, StyledMetrics, TextSource};
+use soma_md::parse_markdown;
+use soma_metrics::MetricsTable;
+use soma_render_svg::render;
+use soma_template::{parse_template, resolve, StyledDoc};
+
+const TEMPLATE: &str = r#"
+name: svg-fixture
+page:
+  size: A5
+  margin: 14mm
+  header: 6mm
+  footer: 8mm
+  folio: "第 {page} 页 / 共 {pages} 页"
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+      align: justify
+  - selector:
+      element: paragraph
+    declarations:
+      first-indent: 2em
+  - selector:
+      element: heading
+    declarations:
+      font-size: 15pt
+      space-before: 1em
+      keep-with-next: true
+  - selector:
+      element: footnote
+    declarations:
+      font-size: 8pt
+"#;
+
+const MARKDOWN: &str = r##"# 标题
+
+正文 **强调**，脚注[^1]。中文排版需要断行与对齐，标点不能出现在行首。
+
+第二段用来制造更多行，看看页面如何填充。Mixed English 与数字 123 也要能排。
+
+[^1]: 脚注内容。
+"##;
+
+struct Fixture {
+    layout: PagedLayout,
+    styled: StyledDoc,
+}
+
+fn fixture() -> Fixture {
+    let doc = parse_markdown(MARKDOWN);
+    let template = parse_template(TEMPLATE).expect("template");
+    let styled = resolve(&doc, &template).expect("styles");
+    let table = MetricsTable::embedded();
+    let metrics = StyledMetrics::new(&table, &styled);
+    let layout = layout(&doc, &styled, &metrics, &BreakConfig::default()).expect("layout");
+    Fixture { layout, styled }
+}
+
+fn attr<'a>(line: &'a str, name: &str) -> Option<&'a str> {
+    let needle = format!("{name}=\"");
+    let start = line.find(&needle)? + needle.len();
+    let rest = &line[start..];
+    let end = rest.find('"')?;
+    Some(&rest[..end])
+}
+
+fn text_elements(svg: &str) -> Vec<(&str, &str, &str, &str)> {
+    svg.lines()
+        .filter(|line| line.starts_with("<text "))
+        .map(|line| {
+            (
+                attr(line, "data-node").expect("node"),
+                attr(line, "data-atom").expect("atom"),
+                attr(line, "x").expect("x"),
+                attr(line, "y").expect("y"),
+            )
+        })
+        .collect()
+}
+
+fn em(width: Width) -> String {
+    let units = width.0;
+    let sign = if units < 0 { "-" } else { "" };
+    let absolute = units.abs();
+    format!(
+        "{}{}.{:03}em",
+        sign,
+        absolute / 4096,
+        (absolute % 4096) * 1000 / 4096
+    )
+}
+
+fn find_atom(
+    layout: &PagedLayout,
+    page: &soma_layout::Page,
+    node: u32,
+    atom: u32,
+) -> Option<(i32, i32)> {
+    let mut collections: Vec<(&PlacedBlock, i32)> = Vec::new();
+    for block in &page.blocks {
+        collections.push((block, 0));
+    }
+    for block in &page.header {
+        collections.push((block, 0));
+    }
+    for block in &page.footer {
+        collections.push((block, 0));
+    }
+    let footnote_top = layout.page.content_height().0 - page.footnote_height.0;
+    for block in &page.footnotes {
+        collections.push((block, footnote_top.max(0)));
+    }
+
+    for (block, extra) in collections {
+        if block.node.0 != node {
+            continue;
+        }
+        for placed in &block.lines {
+            if let Some(candidate) = placed.line.boxes.iter().find(|item| item.atom == atom) {
+                return Some((
+                    layout.page.margin_left.0 + block.x.0 + candidate.x.0,
+                    layout.page.margin_top.0
+                        + block.y.0
+                        + extra
+                        + placed.y.0
+                        + placed.line.ascent.0,
+                ));
+            }
+        }
+    }
+    None
+}
+
+#[test]
+fn every_atom_is_painted_exactly_once() {
+    let fixture = fixture();
+    let svg = render(
+        &fixture.layout,
+        fixture.styled.table(),
+        &fixture.layout.text,
+    );
+    let painted = text_elements(&svg).len();
+
+    let mut expected = 0;
+    for page in &fixture.layout.pages {
+        for block in page
+            .blocks
+            .iter()
+            .chain(page.header.iter())
+            .chain(page.footer.iter())
+            .chain(page.footnotes.iter())
+        {
+            for placed in &block.lines {
+                for atom in &placed.line.boxes {
+                    if !fixture
+                        .layout
+                        .text
+                        .atom_text(block.node, atom.atom)
+                        .is_empty()
+                    {
+                        expected += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(painted, expected, "one <text> per visible atom");
+    assert!(expected > 20, "the fixture must be substantial");
+}
+
+#[test]
+fn svg_coordinates_equal_the_layout_coordinates() {
+    let fixture = fixture();
+    let svg = render(
+        &fixture.layout,
+        fixture.styled.table(),
+        &fixture.layout.text,
+    );
+
+    let mut checked = 0;
+    for line in svg.lines().filter(|line| line.starts_with("<text ")) {
+        let node: u32 = attr(line, "data-node").unwrap().parse().unwrap();
+        let atom: u32 = attr(line, "data-atom").unwrap().parse().unwrap();
+        let x = attr(line, "x").unwrap();
+        let y = attr(line, "y").unwrap();
+
+        let mut found = None;
+        for page in &fixture.layout.pages {
+            if let Some(coords) = find_atom(&fixture.layout, page, node, atom) {
+                found = Some(coords);
+                break;
+            }
+        }
+        let (expected_x, expected_y) = found.expect("atom in the layout");
+        assert_eq!(x, em(Width(expected_x)), "x for node {node} atom {atom}");
+        assert_eq!(y, em(Width(expected_y)), "y for node {node} atom {atom}");
+        checked += 1;
+    }
+    assert!(checked > 20);
+}
+
+#[test]
+fn html_and_svg_cover_the_same_atoms() {
+    let fixture = fixture();
+    let svg = render(
+        &fixture.layout,
+        fixture.styled.table(),
+        &fixture.layout.text,
+    );
+    let html = soma_render_html::render(
+        &fixture.layout,
+        fixture.styled.table(),
+        &fixture.layout.text,
+    );
+
+    let mut svg_atoms: Vec<(String, String)> = text_elements(&svg)
+        .into_iter()
+        .map(|(node, atom, _, _)| (String::from(node), String::from(atom)))
+        .collect();
+    let mut html_atoms: Vec<(String, String)> = html
+        .lines()
+        .filter(|line| line.contains("class=\"atom\""))
+        .map(|line| {
+            (
+                String::from(attr(line, "data-node").expect("node")),
+                String::from(attr(line, "data-atom").expect("atom")),
+            )
+        })
+        .collect();
+    svg_atoms.sort();
+    html_atoms.sort();
+    assert_eq!(
+        svg_atoms, html_atoms,
+        "both renderers must paint the same atoms"
+    );
+}
+
+#[test]
+fn svg_bytes_are_a_visual_regression_lock() {
+    let fixture = fixture();
+    let svg = render(
+        &fixture.layout,
+        fixture.styled.table(),
+        &fixture.layout.text,
+    );
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in svg.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    assert!(svg.lines().count() > 40);
+    assert_eq!(hash, GOLDEN_SVG_HASH, "SVG bytes changed; review the diff");
+}
+
+/// Updated deliberately when the visual output changes.
+const GOLDEN_SVG_HASH: u64 = 12285066011052527538;

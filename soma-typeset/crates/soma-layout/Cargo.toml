@@ -10,5 +10,7 @@ description = "Layout box tree, paragraph boxes over the frozen inline kernel, p
 [dependencies]
 soma-core = { path = "../soma-core" }
 soma-doc = { path = "../soma-doc" }
+soma-math = { path = "../soma-math" }
+soma-metrics = { path = "../soma-metrics" }
 soma-rules = { path = "../soma-rules" }
 soma-template = { path = "../soma-template" }

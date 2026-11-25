@@ -19,6 +19,7 @@ pub mod params;
 pub mod preset;
 pub mod result;
 pub mod units;
+pub mod vertical;
 
 pub use breaker::{
     break_paragraph, break_paragraph_greedy, break_paragraph_traced, BreakConfig, BreakError,
@@ -35,3 +36,4 @@ pub use params::{
 };
 pub use result::{AtomBox, BreakerKind, CjkLatinAdjust, FallbackStage, LayoutResult, Line};
 pub use units::{Cost, Width, UNITS_PER_EM};
+pub use vertical::VerticalParams;

@@ -124,7 +124,7 @@ impl ParamSet {
         Self {
             preset: PresetId("default-v1"),
             model_version: 1,
-            rules_version: 0,
+            rules_version: 1,
             metrics_version: 0,
             break_params: BreakParams {
                 tolerance: Permille(3000),
@@ -165,6 +165,16 @@ impl ParamSet {
                 forced_breaks: true,
             },
         }
+    }
+
+    /// Chinese publishing defaults: the same cost model as `default-v1` with
+    /// a tighter normal-path tolerance. The engine ships this preset; the
+    /// blind test and the interviews decide whether it stays.
+    pub fn publish_v1() -> Self {
+        let mut params = Self::default_v1();
+        params.preset = PresetId("publish-v1");
+        params.break_params.tolerance = Permille(1_500);
+        params
     }
 
     /// Validate ranges and cross-field constraints.
@@ -401,5 +411,30 @@ impl ParamHasher {
 
     fn finish(self) -> ParamHash {
         ParamHash(self.state)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn publish_v1_only_tightens_the_tolerance() {
+        let base = ParamSet::default_v1();
+        let publish = ParamSet::publish_v1();
+        assert_eq!(publish.preset.0, "publish-v1");
+        assert_eq!(publish.break_params.tolerance, Permille(1_500));
+        assert_eq!(
+            publish.break_params.costs.line,
+            base.break_params.costs.line
+        );
+        assert_eq!(
+            publish.break_params.costs.badness_scale,
+            base.break_params.costs.badness_scale
+        );
+        assert_eq!(publish.break_params.fallback, base.break_params.fallback);
+        assert_eq!(publish.rules_version, 1, "the trim table changed");
+        publish.validate().expect("publish-v1 must be valid");
+        assert_ne!(publish.param_hash(), base.param_hash());
     }
 }

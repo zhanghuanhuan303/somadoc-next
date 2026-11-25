@@ -52,6 +52,20 @@ pub trait Metrics: Sync {
 
     fn line_metrics(&self, style: StyleId) -> LineMetrics;
 
+    /// Version of the metrics source. `0` means "not a versioned table"
+    /// (the synthetic test adapter). Table-backed implementations return the
+    /// format version they were built for.
+    fn version(&self) -> u16 {
+        0
+    }
+
+    /// Content hash of the metrics source. `0` for adapters without one. The
+    /// page result carries this value so a table swap is visible in canonical
+    /// bytes even when the version does not change.
+    fn hash(&self) -> u64 {
+        0
+    }
+
     /// Per-glyph metrics used by the line box. The default derives them from
     /// `advance` and `line_metrics`; hosts with richer font data override it.
     fn glyph_metrics(&self, text: &str, style: StyleId) -> GlyphMetrics {
@@ -70,6 +84,60 @@ pub trait Metrics: Sync {
     /// Optional kerning hook. MVP implementations return zero.
     fn kerning(&self, _left: &str, _right: &str, _style: StyleId) -> Width {
         Width::ZERO
+    }
+
+    /// Gap between the glyph outline and the right edge of its advance, in
+    /// 1/4096 em. For a Latin run this is the last character's bearing. `None`
+    /// when the source has no outline data; the layout then keeps the rule
+    /// table's constant (`compress_right`).
+    ///
+    /// Every atom can be the last one on a line (ADR-0038), so every atom is
+    /// asked, not only marks.
+    fn ink_right(&self, _text: &str, _style: StyleId) -> Option<Width> {
+        None
+    }
+
+    /// Gap between the left edge of a glyph's advance and its outline. For a
+    /// Latin run this is the first character's bearing.
+    fn ink_left(&self, _text: &str, _style: StyleId) -> Option<Width> {
+        None
+    }
+
+    /// True when a rescue face draws this text rather than the style's own.
+    /// The renderer asks the same question the breaker asked, so the two agree
+    /// on which face produced the widths (docs/mixed-font.md).
+    fn uses_fallback(&self, _text: &str, _style: StyleId) -> bool {
+        false
+    }
+
+    /// Advance of one math symbol at the style's size.
+    ///
+    /// Hosts with a dedicated math face override this so formula symbols come
+    /// from that face; the default uses the text face.
+    fn math_advance(&self, text: &str, style: StyleId) -> Width {
+        self.advance(text, style)
+    }
+
+    /// Line metrics of the math face. The default reuses the text metrics.
+    fn math_metrics(&self, style: StyleId) -> LineMetrics {
+        self.line_metrics(style)
+    }
+
+    /// Advance of an unbreakable object atom (`AtomKind::InlineObject`).
+    ///
+    /// Hosts that typeset objects themselves (inline math, inline images with
+    /// known geometry) override this so the object's box — not the placeholder
+    /// text — enters line breaking. The default measures the text, which keeps
+    /// adapters without object support byte-identical.
+    fn object_advance(&self, text: &str, style: StyleId) -> Width {
+        self.advance(text, style)
+    }
+
+    /// Vertical metrics of an unbreakable object atom. The default mirrors
+    /// [`Self::glyph_metrics`], so the line box only changes when a host opts
+    /// in.
+    fn object_metrics(&self, text: &str, style: StyleId) -> GlyphMetrics {
+        self.glyph_metrics(text, style)
     }
 
     /// Width of a space boundary. Defaults to the advance of `" "`.

@@ -1,0 +1,17 @@
+[package]
+name = "soma-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "soma.engine/1: engine configuration parsed from a fixed-shape YAML document"
+
+[dependencies]
+soma-core = { path = "../soma-core" }
+
+[dev-dependencies]
+soma-doc = { path = "../soma-doc" }
+soma-layout = { path = "../soma-layout" }
+soma-metrics = { path = "../soma-metrics" }
+soma-template = { path = "../soma-template" }

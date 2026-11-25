@@ -24,7 +24,9 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use soma_doc::block::{BlockQuote, CodeBlock, Heading, List, ListItem, Paragraph, ThematicBreak};
-use soma_doc::inline::{Container, FootnoteRef, Image, Inline, LineBreak, LineBreakKind, Link};
+use soma_doc::inline::{
+    Container, FootnoteRef, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link,
+};
 use soma_doc::meta::{DocumentMeta, ImageRef};
 use soma_doc::node::NodeMeta;
 use soma_doc::{
@@ -466,6 +468,29 @@ pub fn parse_inlines(text: &str, offset: u32) -> Vec<Inline> {
                 plain.push(escaped);
                 cursor += 1 + escaped.len_utf8();
                 continue;
+            }
+        }
+
+        if let Some(after) = rest.strip_prefix("[[index:") {
+            if let Some(close) = after.find("]]") {
+                let term = after[..close].trim();
+                if !term.is_empty() {
+                    let length = "[[index:".len() + close + 2;
+                    flush!();
+                    out.push(
+                        IndexRef::new(
+                            NodeMeta::at(SourceSpan::at(
+                                SourceId(1),
+                                offset + cursor as u32,
+                                offset + cursor as u32 + length as u32,
+                            )),
+                            term,
+                        )
+                        .into(),
+                    );
+                    cursor += length;
+                    continue;
+                }
             }
         }
 

@@ -1,0 +1,11 @@
+[package]
+name = "soma-math"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "TeX subset math parser and integer math box layout"
+
+[dependencies]
+soma-core = { path = "../soma-core" }

@@ -17,7 +17,7 @@ fn empty_document_is_valid_and_fully_determined() {
     assert!(document.validate().is_ok());
     assert_eq!(
         document.canonical_json(),
-        "{\"schema\":\"soma.doc/1\",\"docIrVersion\":1,\"nodeCount\":0,\
+        "{\"schema\":\"soma.doc/2\",\"docIrVersion\":2,\"nodeCount\":0,\
 \"meta\":{\"title\":null,\"authors\":[],\"language\":null,\"date\":null,\
 \"keywords\":[],\"template\":null,\"cover\":null,\"fields\":[]},\
 \"blocks\":[],\"footnotes\":[],\"sourceMap\":[]}"

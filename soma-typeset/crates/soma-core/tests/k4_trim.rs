@@ -234,32 +234,71 @@ fn double_trim_still_overfull_fallback() {
 }
 
 #[test]
-fn trim_not_applied_when_underfull() {
+fn an_underfull_line_drops_the_bearing_without_paying_for_it() {
+    let stretchy = || Boundary {
+        glue: Glue {
+            stretch: Width::from_em(2),
+            ..Glue::default()
+        },
+        ..allowed_boundary()
+    };
     let paragraph = Paragraph {
-        style: style(Width::from_em(2)),
-        atoms: vec![atom(
-            "中",
-            AtomKind::Cjk,
-            PunctClass::None,
-            Width::from_em_frac(1, 4),
-            Width::from_em_frac(1, 2),
-        )],
-        boundaries: vec![],
+        style: style(Width::from_em_frac(7, 2)),
+        atoms: vec![
+            atom(
+                "中",
+                AtomKind::Cjk,
+                PunctClass::None,
+                Width::ZERO,
+                Width::ZERO,
+            ),
+            atom(
+                "中",
+                AtomKind::Cjk,
+                PunctClass::None,
+                Width::ZERO,
+                Width::ZERO,
+            ),
+            atom(
+                "，",
+                AtomKind::Other,
+                PunctClass::Middle,
+                Width::ZERO,
+                Width::from_em_frac(1, 2),
+            ),
+            atom(
+                "中",
+                AtomKind::Cjk,
+                PunctClass::None,
+                Width::ZERO,
+                Width::ZERO,
+            ),
+        ],
+        boundaries: vec![stretchy(), forbidden_boundary(), stretchy()],
     };
 
-    let result = break_paragraph(
+    let (result, trace) = break_paragraph_traced(
         &paragraph,
         &SyntheticMetrics::default(),
         &BreakConfig::default(),
     )
     .unwrap();
 
+    assert_eq!(result.lines.len(), 2, "the period must end the first line");
     let line = &result.lines[0];
     assert!(line.natural_width < line.target_width);
+    assert!(!line.emergency, "the stretch covers the deficit");
+    // The breaker reads `compress_right`, not the punctuation class: a short
+    // line still gives up the trailing bearing so the ink sits on the edge.
+    assert_eq!(line.trim_right, Width::from_em_frac(1, 2));
     assert_eq!(line.trim_left, Width::ZERO);
-    assert_eq!(line.trim_right, Width::ZERO);
-    assert_eq!(line.boxes[0].x, Width::ZERO);
-    assert_eq!(line.boxes[0].advance, Width::EM);
+    assert_eq!(line.boxes[2].advance, Width::from_em_frac(1, 2));
+    // Optical alignment is not compensation, so a short line is not charged.
+    assert_eq!(trace.lines[0].compression_cost, 0);
+
+    // The ragged last line is left aligned and does not overrun, so it keeps
+    // its advance untouched.
+    assert_eq!(result.lines[1].trim_right, Width::ZERO);
 }
 
 #[test]

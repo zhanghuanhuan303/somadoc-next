@@ -1,18 +1,39 @@
 # Blind-test protocol and tooling
 
-Status: the tooling is implemented; **no human blind test has been run**. Gate Q
-remains `Inconclusive` until real, pre-registered data exists.
+Status: the kit generator, the analysis, and a **simulated dry run** are
+implemented; **no human blind test has been run**. Gate Q remains
+`Inconclusive` until real, pre-registered data exists. See
+[`blind-dry-run.md`](blind-dry-run.md) for the mechanism check.
 
 ## What is compared
 
 Each sample paragraph is rendered twice by the demo/participant tool:
 
-- **A** — the candidate (Knuth-Plass with `default-v1`);
+- **A** — the candidate (Knuth-Plass with `publish-v1`);
 - **B** — the baseline (Greedy-F, furthest fit).
 
 The evaluator sees the two layouts without algorithm labels and chooses A or B.
-The ordering is randomized by the experiment runner; this repository only
-consumes the resulting choices.
+The sheet generator randomizes the side deterministically from a seed, and the
+analysis step undoes that mapping with the kit's key, so the report keeps
+counting A as the candidate.
+
+## Generating the kit
+
+```sh
+cargo run -p soma-demo -- --blind-kit corpus/blind/samples.txt \
+  --out corpus/blind/kit --seed 20261120 --width-em 40
+```
+
+`corpus/blind/samples.txt` is the frozen 30-paragraph set. The command writes:
+
+- `sheet.html` — 30 groups, each with two unlabeled renderings. Algorithm names
+  never appear in the file;
+- `key.csv` — `paragraph,kp_side`: which side (A or B) holds the K-P candidate.
+  Keep this away from evaluators;
+- `ratings.template.csv` — `paragraph,evaluator,choice` with 30 × 5 blank rows.
+
+The order is deterministic for a given seed. Do not change the samples or the
+seed after collecting ratings; if you must, regenerate the kit and re-run.
 
 ## CSV format
 
@@ -32,10 +53,38 @@ paragraph,evaluator,choice
 Run:
 
 ```sh
-cargo run -p soma-eval --release -- blind preferences.csv
+cargo run -p soma-eval --release -- blind preferences.csv --key corpus/blind/dry-run/kit-key.csv \
+  --out corpus/blind/report.md
 ```
 
+`--out` writes a committable Markdown report (inputs, counts, interval, kappa,
+decision, the rule). Without it the tool prints the same numbers to stdout.
+
+`--key` is optional for hand-built matrices where A always means the candidate.
+When the kit placed the candidate on side B for a paragraph, the tool swaps that
+paragraph's A/B before computing the report.
+
 Exit codes: `0` pass, `1` fail, `2` inconclusive.
+
+## Runbook for the real panel
+
+1. **Freeze** `corpus/blind/samples.txt` and the seed. Regenerating the kit
+   after collecting ratings invalidates them.
+2. **Generate the kit** and hand `sheet.html` to evaluators; keep `key.csv`
+   away from them.
+3. **Pilot** with 5–8 evaluators × 8–10 paragraphs; measure kappa.
+   - kappa < 0.20: calibrate the judgment examples (what counts as "松紧不匀",
+     "行尾空洞", "标点挤压") and re-run the pilot.
+4. **Collect** 30 paragraphs × 5 evaluators into
+   `corpus/blind/kit/ratings.template.csv` (rename to `preferences.csv`).
+5. **Analyse** with the command above and `--out`.
+6. **Commit** the CSV, the key, and the generated report together. A report
+   without its CSV is not reproducible.
+7. If the Wilson interval still crosses 50% at 30 paragraphs, extend to the
+   pre-registered 60; if it still crosses, record **Inconclusive** and stop.
+
+The dry run (`corpus/blind/dry-run/`) exercises steps 2–5 mechanically; only
+steps 3–4 need people.
 
 ## Decision rule
 

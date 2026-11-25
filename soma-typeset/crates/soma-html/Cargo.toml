@@ -1,0 +1,17 @@
+[package]
+name = "soma-html"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "HTML subset front end: HTML -> DocIR"
+
+[dependencies]
+soma-doc = { path = "../soma-doc" }
+
+[dev-dependencies]
+soma-core = { path = "../soma-core" }
+soma-layout = { path = "../soma-layout" }
+soma-render-html = { path = "../soma-render-html" }
+soma-template = { path = "../soma-template" }

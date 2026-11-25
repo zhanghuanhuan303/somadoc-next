@@ -136,7 +136,14 @@ Gate Q 仍为 **Inconclusive**（无真实盲测与质量标注语料），Gate 
 | D12 | K7 fitness/rhythm 未做 | 相邻行松紧节奏不建模 | 仅当评估证明需要 |
 | D14 | ~~`soma-core::semantic` / `text` legacy~~ | 已在 A1 删除（ADR-0008） | ✅ 已关闭 |
 
-## 6. 复现命令
+## 6. 精度敏感性
+
+1/4096 em 的整数量化不会改变断行质量：在 `corpus/zh` + 表格/公式/书稿
+（606 块、1213 行）上，对每个字形做 ±1 单位的确定性扰动，真实舍入形态
+（`jitter`）下断点变化 **0%**；把所有字宽系统性 +1/−1，行位置变化也只有
+0.17% / 1.40%。详见 [`docs/precision.md`](precision.md)。
+
+## 7. 复现命令
 
 ```sh
 bash scripts/kp-verify.sh                  # gates + 基准 + 长度策略
@@ -146,4 +153,5 @@ bash scripts/wasm-hash.sh                  # native vs wasm32-wasip1
 cargo run -p soma-eval --release -- inspect --kind mixed --atoms 500
 cargo run -p soma-eval --release -- sweep-tolerance
 cargo run -p soma-eval --release -- sweep-weight --param badness_scale
+cargo test -p soma-eval --test perturbation -- --ignored --nocapture  # 精度敏感性
 ```

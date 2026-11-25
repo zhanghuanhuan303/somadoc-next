@@ -1,0 +1,16 @@
+[package]
+name = "soma-render-pdf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "LayoutResult -> PDF with embedded TrueType subsets, bookmarks and page labels"
+
+[dependencies]
+soma-core = { path = "../soma-core" }
+soma-layout = { path = "../soma-layout" }
+soma-template = { path = "../soma-template" }
+
+[dev-dependencies]
+soma-doc = { path = "../soma-doc" }

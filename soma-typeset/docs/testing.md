@@ -29,8 +29,8 @@ refactor that keeps the public behavior should not break a test.
 The K1 contract tests currently live in:
 
 - `crates/soma-core/tests/k1_contract.rs` — parameter preset, validation, hash.
-- `crates/soma-core/tests/k1_breaker.rs` — Justify support, non-Justify
-  rejection, final-line penalty zero.
+- `crates/soma-core/tests/k1_breaker.rs` — Justify and Left support, Center and
+  Right rejection, final-line penalty zero.
 
 The first K1 slice is green:
 
@@ -38,8 +38,9 @@ The first K1 slice is green:
   covered by `k1_contract.rs`.
 - `BreakConfig` now holds a `ParamSet`; layout validates it and carries the
   parameter hash/versions.
-- The production breaker rejects non-Justify alignment with
-  `BreakError::UnsupportedAlign`; `k1_breaker.rs` covers it.
+- The production breaker accepts Justify and Left and rejects Center/Right with
+  `BreakError::UnsupportedAlign`; the layout shifts centred lines after breaking
+  (ADR-0031), so `k1_breaker.rs` covers both sides of the contract.
 - The cost model uses the frozen normalized `line`, `badness`,
   `break_penalty`, and `short_last` terms; `brute_force_matches_dp` and
   `tie_break_prefers_the_longer_last_line` lock the reference behavior.
@@ -91,7 +92,7 @@ Cumulative public test files:
 | File | Tests | Covers |
 |---|---|---|
 | `k1_contract.rs` | 5 | preset, validation, override, hash |
-| `k1_breaker.rs` | 4 | Justify only, all non-justify variants, final-line penalty zero |
+| `k1_breaker.rs` | 4 | Justify and Left accepted, Center/Right rejected, final-line penalty zero |
 | `k1_fixtures.rs` | 10 | public-seam fixtures |
 | `k2_boundary.rs` | 5 | boundary role, deviation, trace |
 | `k3_styles.rs` | 6 | glyph metrics, line boxes, height cost |
@@ -99,35 +100,76 @@ Cumulative public test files:
 | `k5_forced.rs` | 7 | forced breaks and segments |
 | `k6_reporting.rs` | 7 | breaker/stage/length flags |
 | `k6_fallback.rs` | 4 | emergency and forbidden rescue |
-| `a1_canonical.rs` | 8 | DocIR canonical bytes, escaping, hash modes |
+| `a1_canonical.rs` | 10 | DocIR canonical bytes, escaping, hash modes, index markers |
 | `a1_model.rs` | 9 | node coverage, renumbering, text projection |
 | `a1_raw.rs` | 4 | raw payload preservation |
-| `a1_validate.rs` | 23 | every DocIR invariant has a failing case |
-| `a2_template.rs` | 10 | YAML subset, validation, positions, hash |
+| `a1_validate.rs` | 26 | every DocIR invariant has a failing case (incl. table grid) |
+| `a2_template.rs` | 20 | YAML subset, validation, positions, hash, `within`, `table:`, `masters:`, `toc:`, `start-master`, `level`, `numbering:`, front matter, lists |
 | `a2_units.rs` | 7 | exact conversion, truncation, strict grammar |
-| `a2_resolve.rs` | 11 | cascade, inheritance, page geometry, style hash |
+| `a2_resolve.rs` | 12 | cascade, inheritance, page geometry, style hash, heading levels |
+| `a2_cell_context.rs` | 1 | `within: cell` overrides body rules and sets cell padding |
 | `a3_layout.rs` | 7 | paragraph boxes match the kernel, text index, stacking |
-| `a4_pagination.rs` | 12 | vertical K-P optimality, page breaks, keep-with-next, overflow |
-| `a6_blocks.rs` | 10 | code, math, figures, tables, rules, raw, footnotes |
-| `a5_md.rs` | 11 | Markdown subset, inlines, spans, validity |
+| `a4_pagination.rs` | 13 | vertical K-P optimality, page breaks, keep-with-next, splitting, overflow |
+| `a6_blocks.rs` | 12 | code, display math box, figures, tables (+colspan), rules, raw, footnotes |
+| `metrics.rs` (layout) | 9 | table-backed metrics, per-style scaling, bold face, determinism, outline ink, rescue face |
+| `e2_split.rs` | 7 | line conservation, widows/orphans, footnote lines, glue, vertical hash |
+| `e3_typography.rs` | 2 | hanging punctuation is post-processing and respects the cap |
+| `e4_master.rs` | 6 | header/footer bands, folio, running title, margin limits |
+| `e5_grid.rs` | 3 | baseline grid alignment, unchanged text, wider grid leading |
+| `e7_tables.rs` | 2 | rowspan coverage without overlap, repeated header on every table page |
+| `e8_table_split.rs` | 4 | row bands continue across pages, spanning rows stay whole, tall cells are moved not clipped |
+| `e9_table_rules.rs` | 8 | outer/header/internal rules, continuation headers, spanning/colspan skips, frame, dashes, color |
+| `e10_masters.rs` | 4 | section masters, forced page start, shared content box, unknown names |
+| `gate_r.rs` (svg) | 4 | Gate V/R: SVG golden, coordinates = layout, HTML/SVG atom parity |
+| `table_rules.rs` (svg) | 1 | rules are painted at layout coordinates |
+| `table_rules.rs` (html) | 1 | rules reach the HTML renderer as positioned boxes |
+| `effect.rs` (eval) | 7 | Gate Q′ structural claims on the scorecard |
+| `engine.rs` | 15 | `soma.engine/1`: parse, reject, canonical hash, layout equivalence |
+| `corpus.rs` (eval) | 9 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
+| `a5_md.rs` | 12 | Markdown subset, inlines, spans, index extension, validity |
+| `html.rs` (html) | 9 | HTML subset shapes, table grid, degradation, recovery, pipeline |
+| `latex.rs` (latex) | 15 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, recovery, pipeline |
+| `math.rs` (soma-math) | 26 | scripts, fractions, radicals, big operators, fences, matrices, aligned, cases, spacing, styles, errors |
+| `e11_math.rs` (layout) | 8 | centring, baseline inside the box, flow, canonical `math` field |
+| `e12_inline_math.rs` (layout) | 11 | marker atoms, line-box growth, text style, placeholder, canonical `inlineMath` |
+| `e13_toc.rs` (layout) | 13 | TOC depth, page numbers, row shape, leaders, wrapped rows, forced page, figure/table lists, section-start master |
+| `e14_alignment.rs` (layout) | 6 | left/center/right placement, first-indent interaction, justify unchanged |
+| `e15_cover.rs` (layout) | 7 | cover metadata, master, centring, fallbacks, unknown master error |
+| `e16_numbering.rs` (layout) | 8 | chinese-chapter, arabic-dotted, depth, figure/table counters, numbered TOC entries |
+| `e17_front_matter.rs` (layout) | 5 | continuous/roman/hidden labels, `{pages}` = body pages, no folio on hidden pages |
+| `e18_captions.rs` (layout) | 4 | figure/table caption elements, indent reset, emphasis keeps the caption base |
+| `e19_outline.rs` (layout) | 3 | one bookmark per heading, printed labels, empty document |
+| `e20_index.rs` (layout) | 5 | sorted unique terms, page lists, own page, entry styles, empty index |
+| `e21_line_end_punctuation.rs` (layout) | 6 | trailing bearing trimmed on justified lines, ink on the text edge, ragged lines untouched |
+| `cli.rs` (soma-cli) | 17 | render md/tex to html/svg/json/pdf, template geometry, TOC template, example book, fonts, `--metrics`, `--out`, check, error paths |
+| `blind_pipeline.rs` (eval) | 3 | dry-run fixture through key + statistics + decision |
+| `k7_object_metrics.rs` | 4 | object hooks vs text paths, default-hook equivalence |
+| `pdf.rs` (render-pdf) | 5 | TrueType cmap/subset, CFF rejection, PDF objects, bookmarks, byte determinism |
+| `math.rs` (svg) | 4 | exact formula coordinates |
+| `inline_math.rs` (svg) | 2 | inline items on the line baseline, marker never drawn |
+| `math.rs` (html) | 4 | formula preview spans, placeholder fallback |
+| `inline_math.rs` (html) | 2 | inline preview positions, marker never drawn |
 | `a5_render.rs` | 6 | absolute positions, escaping, no re-breaking |
 | `capabilities.rs` (md) | 7 | Gate C matrix, degradation promise, docs parity |
 | `safety.rs` (render) | 3 | Gate C: no scripts, links, images, or URLs |
 | `pipeline.rs` (md) | 3 | Markdown -> DocIR -> pages -> HTML |
 | `spans.rs` (rules) | 6 | span compiler agrees with the text compiler |
 | `soma-doc` doc-test | 1 | crate-level usage example |
-| `soma-eval` unit | 10 | bench, sweep, Wilson, kappa, blind, `length_limited` share |
-| `soma-demo` unit | 3 | HTML geometry and escaping |
+| `soma-eval` unit | 11 | bench, sweep, Wilson, kappa, blind, kit key translation, `length_limited` share |
+| `perturbation.rs` (eval, ignored) | 1 | ±1/4096 advance sensitivity on the corpus; run with `--ignored` |
+| `soma-demo` unit | 6 | HTML geometry, escaping, anonymized blind sheet, deterministic sides |
 | `soma-wasm` unit | 1 | fixture determinism + forced end + DocIR |
 | `vertical_slice.rs` (rules) | 6 | end-to-end rules + trim + hard break |
-| `soma-rules` unit | 13 | segmentation, punctuation, trim caps, rule inventory |
-| core unit | 23 | IR, units, breaker, result |
+| `soma-rules` unit | 17 | segmentation, punctuation, half-width bearings, pair trim, hyphen breaks, rule inventory |
+| `soma-metrics` unit | 13 | table round-trip, CJK/Latin widths, regular/bold/math faces, hash, truncation, ink sections, v1/v2 compatibility |
+| `soma-core` vertical unit | 1 | vertical cost model hash |
+| core unit | 24 | IR, units, breaker, result, presets |
+| layout unit | 5 | trim scaling at body and non-body sizes; math metric adapter |
 
-Total: **252 tests**.
+Total: **550 tests**.
 
-Still deferred: the `Overfull` fallback stage, a quality-labeled calibration
-corpus, the human blind-test run, Markdown syntax parsing, and calibrated trim
-ratios.
+Still deferred: a quality-labeled calibration corpus, the human blind-test run,
+kerning pairs, italic faces, tracking fallback, and calibrated trim ratios.
 
 ## Repository gates
 
@@ -142,9 +184,9 @@ The script runs:
 1. `cargo fmt --all --check`
 2. `cargo clippy --workspace --all-targets -- -D warnings`
 3. `cargo test --workspace`
-4. `cargo check -p soma-core -p soma-doc -p soma-template -p soma-layout -p soma-md -p soma-render-html --target wasm32-unknown-unknown`
+4. `cargo check -p soma-core -p soma-doc -p soma-template -p soma-layout -p soma-md -p soma-render-html -p soma-render-pdf --target wasm32-unknown-unknown`
 5. native vs `wasm32-wasip1` canonical-byte comparison (`scripts/wasm-hash.sh`);
-   the fixture now contains both `soma.doc/1` and `soma.layout/6` output
+   the fixture now contains both `soma.doc/2` and `soma.layout/6` output
 6. a demo smoke render (`soma-demo` → temporary HTML, check `data-algorithm`)
 7. `cargo tree -p soma-core` dependency-boundary check
 8. clean-room reference check: active files must not mention the deleted prior project

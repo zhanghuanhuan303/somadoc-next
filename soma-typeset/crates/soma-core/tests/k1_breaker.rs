@@ -1,7 +1,8 @@
 //! K1 breaker behavior tests.
 //!
-//! The non-justify case is intentionally red until K1 removes the
-//! diagnostic `Align::Left` path from the production breaker.
+//! Justify and Left are supported. Left keeps the justified breakpoints but
+//! places boxes at their natural widths; Center and Right are applied by
+//! `soma-layout` after breaking, so the kernel rejects them.
 
 use soma_core::{
     break_paragraph, Align, Atom, AtomKind, Boundary, BoundaryKind, BreakConfig, BreakError,
@@ -54,23 +55,29 @@ fn justify_is_supported() {
 }
 
 #[test]
-fn non_justify_is_unsupported() {
+fn left_alignment_places_boxes_without_adjustment() {
     let paragraph = two_atom_paragraph(Align::Left);
     let metrics = SyntheticMetrics::default();
     let config = BreakConfig::default();
 
-    let error = break_paragraph(&paragraph, &metrics, &config).unwrap_err();
-    assert_eq!(error, BreakError::UnsupportedAlign(Align::Left));
+    let result = break_paragraph(&paragraph, &metrics, &config).expect("left is supported");
+    let line = &result.lines[0];
+    assert_eq!(line.adjustment, 0);
+    assert_eq!(line.boxes[0].x, Width::ZERO);
+    assert_eq!(line.boxes[1].x, Width::EM);
+    // The breakpoints come from the justified model, so the natural width is
+    // the full 2em rather than the 10em target.
+    assert_eq!(line.natural_width, Width::from_em(2));
 }
 
 #[test]
-fn every_non_justify_align_variant_is_unsupported() {
+fn centered_and_right_are_rejected_by_the_kernel() {
     let metrics = SyntheticMetrics::default();
     let config = BreakConfig::default();
 
-    // The enum keeps the full set so adding Left/Center/Right later is not a
-    // breaking schema change; model v1 only implements Justify.
-    for align in [Align::Left, Align::Center, Align::Right] {
+    // Centering and right-alignment are layout-level line shifts; the frozen
+    // DP only knows Justify and Left.
+    for align in [Align::Center, Align::Right] {
         let paragraph = two_atom_paragraph(align);
         assert_eq!(
             break_paragraph(&paragraph, &metrics, &config).unwrap_err(),

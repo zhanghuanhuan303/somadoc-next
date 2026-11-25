@@ -8,7 +8,7 @@
 
 use alloc::vec::Vec;
 
-use crate::ir::{Align, BoundaryKind, BoundaryRole, Breakability, IrError, Paragraph};
+use crate::ir::{Align, AtomKind, BoundaryKind, BoundaryRole, Breakability, IrError, Paragraph};
 use crate::metrics::Metrics;
 use crate::params::{ParamError, ParamHash, ParamSet, BADNESS_RATIO_CLAMP};
 use crate::result::{AtomBox, BreakerKind, CjkLatinAdjust, FallbackStage, LayoutResult, Line};
@@ -301,7 +301,10 @@ fn break_with_stats(
         return Err(BreakError::UnsupportedWindow(config.window()));
     }
     config.params().validate().map_err(BreakError::Params)?;
-    if paragraph.style.align != Align::Justify {
+    // Left is accepted: the boxes are placed without justification, while the
+    // breakpoints still come from the same cost model. Centering and
+    // right-alignment are applied to the finished lines by `soma-layout`.
+    if matches!(paragraph.style.align, Align::Center | Align::Right) {
         return Err(BreakError::UnsupportedAlign(paragraph.style.align));
     }
     paragraph.validate()?;
@@ -412,7 +415,13 @@ impl<'a> Shaped<'a> {
 
         let mut atom_width = Vec::with_capacity(atom_count);
         for atom in &paragraph.atoms {
-            atom_width.push(metrics.advance(&atom.text, atom.style).0 as i64);
+            // Object atoms have host-supplied geometry (inline math); text atoms
+            // go through the font path.
+            let width = match atom.kind {
+                AtomKind::InlineObject => metrics.object_advance(&atom.text, atom.style),
+                _ => metrics.advance(&atom.text, atom.style),
+            };
+            atom_width.push(width.0 as i64);
         }
 
         let mut glue = Vec::with_capacity(boundary_count);
@@ -533,7 +542,10 @@ impl<'a> Shaped<'a> {
 
         for index in start..end {
             let atom = &self.paragraph.atoms[index];
-            let glyph = self.metrics.glyph_metrics(&atom.text, atom.style);
+            let glyph = match atom.kind {
+                AtomKind::InlineObject => self.metrics.object_metrics(&atom.text, atom.style),
+                _ => self.metrics.glyph_metrics(&atom.text, atom.style),
+            };
             ascent = ascent.max(glyph.ascent.0 as i64 + glyph.baseline_shift.0 as i64);
             descent = descent.max(glyph.descent.0 as i64 - glyph.baseline_shift.0 as i64);
             leading = leading.max(glyph.leading.0 as i64);
@@ -744,18 +756,49 @@ impl<'a> Shaped<'a> {
         let mut compress_cost = 0i64;
         let mut effective = natural;
 
-        if natural > target && config.params().features.edge_trim {
-            let excess = natural - target;
-            let right_cap = self.paragraph.atoms[end - 1].compress_right.0.max(0) as i64;
-            let left_cap = self.paragraph.atoms[start].compress_left.0.max(0) as i64;
-            let c_end = excess.min(right_cap);
-            let c_start = (excess - c_end).min(left_cap);
-            let c = c_end + c_start;
+        // A justified line always drops the trailing bearing so its ink lands
+        // on the text edge (ADR-0036). A ragged line (paragraph end, forced
+        // break) is left aligned: it only trims when it would otherwise
+        // overrun, which keeps its punctuation inside the block.
+        let justified = end_kind == LineEnd::Justified;
+        if config.params().features.edge_trim && (justified || natural > target) {
+            // Never trim more than the mark's own advance, even if a rule table
+            // and a metrics table disagree about its side bearing. A real
+            // outline can give up more than half an em (a comma's ink sits in
+            // the left third), and that is exactly what lands it on the edge.
+            let mark_width = self.atom_width(end - 1);
+            let right_cap =
+                (self.paragraph.atoms[end - 1].compress_right.0.max(0) as i64).min(mark_width);
+            let start_width = self.atom_width(start);
+            let left_cap =
+                (self.paragraph.atoms[start].compress_left.0.max(0) as i64).min(start_width);
+
+            // The em box, not the ink, is what native Chinese punctuation draws
+            // with. Trimming here (rather than at the renderer) keeps badness,
+            // adjustment and the box coordinates in agreement; a justified line
+            // then grows the inter-character glue by the same amount, so the
+            // ink lands on the text edge.
+            let c_end = right_cap;
             trim_right = c_end as i32;
-            trim_left = c_start as i32;
-            effective = natural - c;
-            compress_cost = compression_cost(c, costs.compress_amount.0, costs.compress_count.0);
-            cost += compress_cost;
+            effective = natural - c_end;
+
+            // Only an overfull line needs to give up the leading mark's side
+            // bearing as well, and only an originally overfull line pays for
+            // the trim: the trailing bearing of a short line is optical
+            // alignment, not compensation.
+            let mut c = c_end;
+            if effective > target {
+                let excess = effective - target;
+                let c_start = excess.min(left_cap);
+                trim_left = c_start as i32;
+                effective -= c_start;
+                c += c_start;
+            }
+            if natural > target {
+                compress_cost =
+                    compression_cost(c, costs.compress_amount.0, costs.compress_count.0);
+                cost += compress_cost;
+            }
         }
 
         if end_kind != LineEnd::Justified {
@@ -1209,11 +1252,14 @@ fn build_result(
         };
         // A single atom has no internal boundary to stretch or shrink.
         // Keep the signed adjustment only when it can actually be distributed.
-        let adjustment = if end.saturating_sub(*start) <= 1 {
-            0
-        } else {
-            eval.adjustment
-        };
+        // Left-aligned text is never adjusted: the breakpoints still come from
+        // the justified cost model, but the boxes keep their natural widths.
+        let adjustment =
+            if end.saturating_sub(*start) <= 1 || shaped.paragraph.style.align == Align::Left {
+                0
+            } else {
+                eval.adjustment
+            };
         let trim_left = Width(eval.trim_left);
         let trim_right = Width(eval.trim_right);
         let boxes = build_boxes(

@@ -9,3 +9,8 @@ use crate::params::ParamSet;
 pub fn default_v1() -> ParamSet {
     ParamSet::default_v1()
 }
+
+/// Chinese publishing defaults (tighter tolerance than `default-v1`).
+pub fn publish_v1() -> ParamSet {
+    ParamSet::publish_v1()
+}

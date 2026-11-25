@@ -15,7 +15,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use soma_core::Width;
-use soma_layout::{BoxKind, PagedLayout, PlacedBlock, TextSource};
+use soma_layout::{BoxKind, MathBox, PagedLayout, PlacedBlock, TextSource};
 use soma_template::{ComputedStyle, FontSlant, FontWeight, StyleTable};
 
 const UNITS_PER_EM: i32 = 4096;
@@ -30,8 +30,11 @@ pub fn render(layout: &PagedLayout, styles: &StyleTable, text: &dyn TextSource) 
 .page{position:relative;background:#fff;margin:1em auto;box-shadow:0 0 4px #bbb;overflow:hidden;}\
 .block{position:absolute;white-space:pre;}\
 .atom{position:absolute;white-space:pre;}\
+.math{position:absolute;white-space:pre;}\
+.math-rule{position:absolute;}\
 .figure{position:absolute;background:#eee;border:1px solid #ccc;}\
 .rule{position:absolute;border-top:1px solid #333;}\
+.table-rule{position:absolute;background:#333;}\
 .code{font-family:monospace;}\
 ",
     );
@@ -46,6 +49,12 @@ pub fn render(layout: &PagedLayout, styles: &StyleTable, text: &dyn TextSource) 
         ));
 
         for block in &page.blocks {
+            render_block(&mut html, layout, styles, text, block, 0, 0);
+        }
+        for block in &page.header {
+            render_block(&mut html, layout, styles, text, block, 0, 0);
+        }
+        for block in &page.footer {
             render_block(&mut html, layout, styles, text, block, 0, 0);
         }
 
@@ -92,6 +101,21 @@ fn render_block(
             ));
             return;
         }
+        BoxKind::TableRule => {
+            let paint = style
+                .and_then(|style| style.color)
+                .map(|color| format!("#{color:06x}"))
+                .unwrap_or_else(|| String::from("#333"));
+            html.push_str(&format!(
+                "<div class=\"table-rule\" style=\"left:{};top:{};width:{};height:{};background:{};\"></div>\n",
+                em(Width(left)),
+                em(Width(top)),
+                em(block.width),
+                em(block.height),
+                paint
+            ));
+            return;
+        }
         BoxKind::Figure => {
             html.push_str(&format!(
                 "<div class=\"figure\" style=\"left:{};top:{};width:{};height:{};\"></div>\n",
@@ -100,6 +124,10 @@ fn render_block(
                 em(block.width),
                 em(block.height)
             ));
+            return;
+        }
+        BoxKind::Math if block.math.is_some() => {
+            render_math(html, style, block, left, top);
             return;
         }
         _ => {}
@@ -123,6 +151,14 @@ fn render_block(
 
     for placed in &block.lines {
         for atom in &placed.line.boxes {
+            // Inline formulas replace their marker atom: the box is drawn at
+            // the atom origin, on the line baseline.
+            if let Some(inline) = block.inline_math.iter().find(|m| m.atom == atom.atom) {
+                let left = left + atom.x.0;
+                let baseline = top + placed.y.0 + placed.line.ascent.0;
+                paint_math(html, style, left, baseline, &inline.math);
+                continue;
+            }
             let atom_text = text.atom_text(block.node, atom.atom);
             if atom_text.is_empty() {
                 continue;
@@ -144,7 +180,9 @@ fn render_block(
                 _ => String::new(),
             };
             html.push_str(&format!(
-                "<span class=\"atom\" style=\"left:{};top:{};{}\">{}{}</span>\n",
+                "<span class=\"atom\" data-node=\"{}\" data-atom=\"{}\" style=\"left:{};top:{};{}\">{}{}</span>\n",
+                block.node.0,
+                atom.atom,
                 em(atom.x),
                 em(placed.y),
                 font,
@@ -155,6 +193,68 @@ fn render_block(
     }
 
     html.push_str("</div>\n");
+}
+
+/// Draw a display formula as absolutely positioned spans and rules.
+///
+/// Item `y` is measured from the formula baseline. CSS has no baseline
+/// positioning, so the span top is approximated as `baseline - 7/8 em` of the
+/// item size: the metric faces sit at about 0.875 em ascent, and the browser
+/// then places its own baseline inside that line box. SVG output is exact.
+fn render_math(
+    html: &mut String,
+    style: Option<&ComputedStyle>,
+    block: &PlacedBlock,
+    left: i32,
+    top: i32,
+) {
+    let Some(math) = block.math.as_ref() else {
+        return;
+    };
+    paint_math(html, style, left, top + math.baseline.0, math);
+}
+
+/// Paint one formula whose baseline is at `baseline`. Shared by display math
+/// (block top + `MathBox.baseline`) and inline math (line top + line ascent).
+fn paint_math(
+    html: &mut String,
+    style: Option<&ComputedStyle>,
+    left: i32,
+    baseline: i32,
+    math: &MathBox,
+) {
+    let paint = style
+        .and_then(|style| style.color)
+        .map(|color| format!("#{color:06x}"))
+        .unwrap_or_else(|| String::from("#000"));
+
+    for item in &math.items {
+        let x = left + item.x.0;
+        let y = baseline + item.y.0 - ascent_proxy(item.size);
+        html.push_str(&format!(
+            "<span class=\"math\" style=\"left:{};top:{};font-size:{};color:{};\">{}</span>\n",
+            em(Width(x)),
+            em(Width(y)),
+            em(item.size),
+            paint,
+            escape(&item.text)
+        ));
+    }
+    for rule in &math.rules {
+        html.push_str(&format!(
+            "<div class=\"math-rule\" style=\"left:{};top:{};width:{};height:{};background:{};\"></div>\n",
+            em(Width(left + rule.x.0)),
+            em(Width(baseline + rule.y.0)),
+            em(rule.width),
+            em(rule.thickness),
+            paint
+        ));
+    }
+}
+
+/// Line-box top for a font size: `7/8 em`, the ascent the metric faces use.
+fn ascent_proxy(size: Width) -> i32 {
+    size.0 / 8 * 7
 }
 
 fn style_attributes(style: Option<&ComputedStyle>, base: Width) -> String {

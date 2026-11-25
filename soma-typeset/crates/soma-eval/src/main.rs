@@ -9,10 +9,13 @@
 
 use std::process::ExitCode;
 
-use soma_core::{break_paragraph_traced, BreakConfig, ParamSet, SyntheticMetrics, Width};
+use soma_core::{
+    break_paragraph_traced, BreakConfig, ParamSet, Permille, SyntheticMetrics, Weight, Width,
+};
 use soma_eval::{
-    bench, blind_report, build_paragraph, parse_observations, peak_rss_kb, sweep_tolerance,
-    sweep_weight, AggregateMetrics, BlindDecision, CorpusKind, WeightParam,
+    apply_key, bench, blind_report, build_paragraph, parse_key, parse_observations, peak_rss_kb,
+    sweep_tolerance, sweep_weight, AggregateMetrics, BlindDecision, BlindReport, CorpusKind,
+    WeightParam,
 };
 
 const DEFAULT_SIZES: &[usize] = &[100, 500, 1_000, 2_000, 4_000];
@@ -28,6 +31,9 @@ fn main() -> ExitCode {
         Some("sweep-weight") => sweep_weight_command(&args[1..]),
         Some("blind") => blind_command(&args[1..]),
         Some("inspect") => inspect_command(&args[1..]),
+        Some("score") => score_command(&args[1..]),
+        Some("corpus") => corpus_command(&args[1..]),
+        Some("calibrate") => calibrate_command(&args[1..]),
         Some("help") | Some("--help") | None => {
             print_help();
             ExitCode::SUCCESS
@@ -45,8 +51,11 @@ fn print_help() {
     println!("  bench [--repeats N] [--sizes a,b,c] [--max-kp-atoms N] [--check]");
     println!("  sweep-tolerance [--atoms N] [--tolerances a,b,c] [--scales a,b,c]");
     println!("  sweep-weight --param NAME [--values a,b,c] [--atoms N]");
-    println!("  blind <preferences.csv>");
+    println!("  blind <preferences.csv> [--key key.csv]");
     println!("  inspect [--kind pure-cjk|mixed|punct-dense] [--atoms N]");
+    println!("  score [--paragraphs N]   (Q' effect scorecard, CSV)");
+    println!("  corpus [--dir PATH] [--tolerance N] [--badness-scale N]");
+    println!("  calibrate [--dir PATH] [--tolerances a,b,c] [--scales a,b,c]");
     println!();
     println!("weight names: line, break_penalty, compress_amount, compress_count,");
     println!("              boundary_deviation, short_last_scale");
@@ -314,7 +323,34 @@ fn inspect_command(args: &[String]) -> ExitCode {
 }
 
 fn blind_command(args: &[String]) -> ExitCode {
-    let Some(path) = args.first() else {
+    let mut path: Option<&str> = None;
+    let mut key_path: Option<&str> = None;
+    let mut out_path: Option<&str> = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--key" => {
+                let Some(value) = args.get(index + 1) else {
+                    return fail("missing value for --key");
+                };
+                key_path = Some(value);
+                index += 2;
+            }
+            "--out" => {
+                let Some(value) = args.get(index + 1) else {
+                    return fail("missing value for --out");
+                };
+                out_path = Some(value);
+                index += 2;
+            }
+            other if !other.starts_with('-') && path.is_none() => {
+                path = Some(other);
+                index += 1;
+            }
+            other => return fail(&format!("unknown argument {other}")),
+        }
+    }
+    let Some(path) = path else {
         return fail("missing preferences.csv");
     };
     let input = match std::fs::read_to_string(path) {
@@ -324,10 +360,26 @@ fn blind_command(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let observations = match parse_observations(&input) {
+    let mut observations = match parse_observations(&input) {
         Ok(observations) => observations,
         Err(error) => return fail(&error),
     };
+    if let Some(key_path) = key_path {
+        let key_input = match std::fs::read_to_string(key_path) {
+            Ok(input) => input,
+            Err(error) => {
+                eprintln!("cannot read {key_path}: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let key = match parse_key(&key_input) {
+            Ok(key) => key,
+            Err(error) => return fail(&error),
+        };
+        if let Err(error) = apply_key(&mut observations, &key) {
+            return fail(&error);
+        }
+    }
     let report = match blind_report(&observations) {
         Ok(report) => report,
         Err(error) => return fail(&error),
@@ -354,6 +406,14 @@ fn blind_command(args: &[String]) -> ExitCode {
     println!("sample_ok={}", report.sample_ok);
     println!("decision={}", report.decision.as_str());
 
+    if let Some(out_path) = out_path {
+        let markdown = blind_markdown(path, key_path, &report);
+        if let Err(error) = std::fs::write(out_path, markdown) {
+            eprintln!("cannot write {out_path}: {error}");
+            return ExitCode::FAILURE;
+        }
+    }
+
     match report.decision {
         BlindDecision::Pass => ExitCode::SUCCESS,
         BlindDecision::Inconclusive => ExitCode::from(2),
@@ -366,6 +426,44 @@ fn option(args: &[String], name: &str) -> Option<String> {
         .position(|arg| arg == name)
         .and_then(|index| args.get(index + 1))
         .cloned()
+}
+
+/// A committable report of one blind run: inputs, counts, statistics, decision.
+fn blind_markdown(preferences: &str, key: Option<&str>, report: &crate::BlindReport) -> String {
+    let kappa = report
+        .kappa
+        .map(|value| format!("{value:.4}"))
+        .unwrap_or_else(|| String::from("undefined"));
+    let mut out = String::new();
+    out.push_str("# Blind test report\n\n");
+    out.push_str(&format!("- preferences: `{preferences}`\n"));
+    out.push_str(&format!(
+        "- key: {}\n",
+        key.map(|path| format!("`{path}`"))
+            .unwrap_or_else(|| String::from("(none)"))
+    ));
+    out.push_str("- protocol: 30 paragraphs x 5 evaluators, majority per paragraph\n");
+    out.push_str("- candidate: A = Knuth-Plass `publish-v1`; baseline: B = Greedy-F\n\n");
+    out.push_str(&format!("**Decision: `{}`**\n\n", report.decision.as_str()));
+    out.push_str("| metric | value |\n|---|---|\n");
+    out.push_str(&format!("| paragraphs | {} |\n", report.paragraphs));
+    out.push_str(&format!("| evaluators | {} |\n", report.evaluators));
+    out.push_str(&format!("| A wins | {} |\n", report.a_wins));
+    out.push_str(&format!("| B wins | {} |\n", report.b_wins));
+    out.push_str(&format!("| ties | {} |\n", report.ties));
+    out.push_str(&format!("| unanimous B | {} |\n", report.unanimous_b));
+    out.push_str(&format!("| point | {:.4} |\n", report.point));
+    out.push_str(&format!(
+        "| Wilson 95% | [{:.4}, {:.4}] |\n",
+        report.wilson_low, report.wilson_high
+    ));
+    out.push_str(&format!("| Fleiss kappa | {kappa} |\n"));
+    out.push_str(&format!("| sample ok | {} |\n\n", report.sample_ok));
+    out.push_str("Rule: pass needs >= 30 paragraphs, no unanimous B, point >= 0.60,\n");
+    out.push_str("Wilson lower bound > 0.50, and kappa >= 0.20. Fail on a unanimous B\n");
+    out.push_str("paragraph or a Wilson upper bound below 0.50. Anything else is\n");
+    out.push_str("inconclusive and blocks only the public quality claim.\n");
+    out
 }
 
 fn flag(args: &[String], name: &str) -> bool {
@@ -382,4 +480,97 @@ fn parse_list<T: std::str::FromStr>(value: &str) -> Vec<T> {
 fn fail(message: &str) -> ExitCode {
     eprintln!("{message}");
     ExitCode::FAILURE
+}
+
+fn score_command(args: &[String]) -> ExitCode {
+    let paragraphs = match option(args, "--paragraphs") {
+        Some(value) => match value.parse::<usize>() {
+            Ok(value) => value,
+            Err(_) => {
+                eprintln!("--paragraphs must be a number");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => 40,
+    };
+    match soma_eval::score::scorecard(paragraphs) {
+        Some(card) => {
+            print!("{}", card.csv());
+            ExitCode::SUCCESS
+        }
+        None => {
+            eprintln!("scorecard failed to lay out the corpus");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn corpus_command(args: &[String]) -> ExitCode {
+    let dir = option(args, "--dir").unwrap_or_else(|| String::from("corpus/zh"));
+    let mut params = ParamSet::publish_v1();
+    if let Some(value) = option(args, "--tolerance") {
+        match value.parse::<u16>() {
+            Ok(value) => params.break_params.tolerance = Permille(value),
+            Err(_) => {
+                eprintln!("--tolerance must be a number");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    if let Some(value) = option(args, "--badness-scale") {
+        match value.parse::<u32>() {
+            Ok(value) => params.break_params.costs.badness_scale = Weight(value),
+            Err(_) => {
+                eprintln!("--badness-scale must be a number");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    match soma_eval::corpus::evaluate_all(std::path::Path::new(&dir), &params) {
+        Ok(report) => {
+            print!("{}", report.csv());
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn calibrate_command(args: &[String]) -> ExitCode {
+    let dir = option(args, "--dir").unwrap_or_else(|| String::from("corpus/zh"));
+    let tolerances: Vec<u16> = match option(args, "--tolerances") {
+        Some(value) => match soma_eval::corpus::parse_list(&value) {
+            Ok(values) => values,
+            Err(error) => {
+                eprintln!("{error}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => vec![1_500, 2_000, 2_500, 3_000],
+    };
+    let scales: Vec<u32> = match option(args, "--scales") {
+        Some(value) => match soma_eval::corpus::parse_list(&value) {
+            Ok(values) => values,
+            Err(error) => {
+                eprintln!("{error}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => vec![50, 100, 200],
+    };
+    match soma_eval::corpus::calibrate(std::path::Path::new(&dir), &tolerances, &scales) {
+        Ok(rows) => {
+            println!("{}", soma_eval::corpus::SweepRow::csv_header());
+            for row in &rows {
+                println!("{}", row.csv());
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
 }

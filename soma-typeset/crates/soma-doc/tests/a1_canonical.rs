@@ -6,7 +6,7 @@ use common::{small_document, text};
 use soma_doc::block::Paragraph;
 use soma_doc::meta::{DocumentMeta, TemplateRef};
 use soma_doc::node::NodeMeta;
-use soma_doc::{Block, Document, Text};
+use soma_doc::{Block, Document, IndexRef, Inline, Text};
 
 #[test]
 fn small_document_matches_the_golden_bytes() {
@@ -43,6 +43,42 @@ fn canonical_json_escapes_strings() {
     let json = document.canonical_json();
     let expected = r#""text":"a\"b\\c\nd\te\u0001""#;
     assert!(json.contains(expected), "escaping mismatch in {json}");
+}
+
+#[test]
+fn an_index_marker_round_trips_through_canonical_json() {
+    let marker = IndexRef::new(NodeMeta::synthesized(), "排版");
+    let mut document = Document::new(DocumentMeta::new());
+    document.push_block(Block::Paragraph(Paragraph::new(
+        NodeMeta::synthesized(),
+        vec![
+            Text::new(NodeMeta::synthesized(), "正文").into(),
+            Inline::Index(marker),
+        ],
+    )));
+    document.renumber();
+    document.validate().expect("valid DocIR");
+
+    let json = document.canonical_json();
+    assert!(json.contains(r#""kind":"index""#), "{json}");
+    assert!(json.contains(r#""term":"排版""#), "{json}");
+    assert_eq!(
+        document.plain_text().trim_end(),
+        "正文",
+        "a marker is not text"
+    );
+}
+
+#[test]
+fn an_empty_index_term_is_rejected() {
+    let mut document = Document::new(DocumentMeta::new());
+    document.push_block(Block::Paragraph(Paragraph::new(
+        NodeMeta::synthesized(),
+        vec![Inline::Index(IndexRef::new(NodeMeta::synthesized(), ""))],
+    )));
+    document.renumber();
+    let error = document.validate().expect_err("empty terms are invalid");
+    assert!(error.reason.contains("index term"), "{error}");
 }
 
 #[test]

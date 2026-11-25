@@ -102,9 +102,46 @@ fn blocks_start_at_the_top_of_every_page() {
 }
 
 #[test]
-fn a_block_taller_than_the_page_is_marked_as_overflow() {
+fn a_long_paragraph_splits_across_pages_instead_of_overflowing() {
     let long = "长".repeat(400);
     let doc = document(vec![paragraph(&long)]);
+    let styled = styled(&doc, TIGHT);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+
+    assert!(layout.page_count() > 1, "the paragraph must span pages");
+    assert!(
+        layout.pages.iter().all(|page| !page.overflow),
+        "splitting removes the overflow"
+    );
+
+    // Line conservation: every line of the paragraph appears exactly once.
+    let mut seen = Vec::new();
+    let mut total = None;
+    for page in &layout.pages {
+        for block in page.blocks.iter().filter(|block| !block.lines.is_empty()) {
+            total = Some(block.lines_total);
+            for offset in 0..block.lines.len() {
+                seen.push(block.line_offset as usize + offset);
+            }
+        }
+    }
+    let total = total.expect("a paragraph");
+    seen.sort_unstable();
+    assert_eq!(seen, (0..total as usize).collect::<Vec<_>>());
+}
+
+#[test]
+fn an_atomic_block_taller_than_the_page_is_marked_as_overflow() {
+    use soma_doc::block::Figure;
+    use soma_doc::inline::Image;
+    use soma_doc::meta::ImageRef;
+    use soma_doc::node::NodeMeta;
+
+    let figure = Figure::new(
+        NodeMeta::synthesized(),
+        Image::new(NodeMeta::synthesized(), ImageRef::new("tall.png")),
+    );
+    let doc = document(vec![Block::Figure(figure)]);
     let styled = styled(&doc, TIGHT);
     let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
 

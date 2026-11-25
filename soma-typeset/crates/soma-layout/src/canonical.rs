@@ -9,7 +9,7 @@ use core::fmt::{self, Write};
 
 use crate::PagedLayout;
 
-pub(crate) const SCHEMA: &str = "soma.pages/1";
+pub(crate) const SCHEMA: &str = "soma.pages/9";
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -53,8 +53,12 @@ fn write_layout(out: &mut impl Write, layout: &PagedLayout) -> fmt::Result {
     out.write_str(layout.pagination.as_str())?;
     write!(
         out,
-        "\",\"engineHash\":{},\"rulesVersion\":{},\"metricsVersion\":{}",
-        layout.engine_hash, layout.rules_version, layout.metrics_version
+        "\",\"engineHash\":{},\"rulesVersion\":{},\"metricsVersion\":{},\"metricsHash\":{},\"verticalHash\":{}",
+        layout.engine_hash,
+        layout.rules_version,
+        layout.metrics_version,
+        layout.metrics_hash,
+        layout.vertical_hash
     )?;
 
     let page = layout.page;
@@ -77,11 +81,27 @@ fn write_layout(out: &mut impl Write, layout: &PagedLayout) -> fmt::Result {
             out.write_char(',')?;
         }
         write!(out, "{{\"number\":{}", page.number)?;
+        out.write_str(",\"printed\":")?;
+        write_string(out, &page.printed)?;
         write!(out, ",\"usedHeight\":{}", page.used_height.0)?;
         write!(out, ",\"footnoteHeight\":{}", page.footnote_height.0)?;
         write!(out, ",\"overflow\":{}", page.overflow)?;
         out.write_str(",\"blocks\":[")?;
         for (block_index, block) in page.blocks.iter().enumerate() {
+            if block_index > 0 {
+                out.write_char(',')?;
+            }
+            write_block(out, block)?;
+        }
+        out.write_str("],\"header\":[")?;
+        for (block_index, block) in page.header.iter().enumerate() {
+            if block_index > 0 {
+                out.write_char(',')?;
+            }
+            write_block(out, block)?;
+        }
+        out.write_str("],\"footer\":[")?;
+        for (block_index, block) in page.footer.iter().enumerate() {
             if block_index > 0 {
                 out.write_char(',')?;
             }
@@ -97,19 +117,51 @@ fn write_layout(out: &mut impl Write, layout: &PagedLayout) -> fmt::Result {
         out.write_str("]}")?;
     }
 
-    out.write_str("]}")
+    out.write_str("],\"toc\":")?;
+    match &layout.toc {
+        None => out.write_str("null")?,
+        Some(toc) => write!(
+            out,
+            "{{\"passes\":{},\"stable\":{},\"entries\":{},\"figures\":{},\"tables\":{}}}",
+            toc.passes, toc.stable, toc.entries, toc.figures, toc.tables
+        )?,
+    }
+    out.write_str(",\"index\":")?;
+    match &layout.index {
+        None => out.write_str("null")?,
+        Some(index) => write!(
+            out,
+            "{{\"passes\":{},\"stable\":{},\"entries\":{}}}",
+            index.passes, index.stable, index.entries
+        )?,
+    }
+    out.write_str(",\"outline\":[")?;
+    for (position, entry) in layout.outline.iter().enumerate() {
+        if position > 0 {
+            out.write_char(',')?;
+        }
+        write!(out, "{{\"level\":{},\"text\":", entry.level)?;
+        write_string(out, &entry.text)?;
+        write!(out, ",\"page\":{},\"printed\":", entry.page)?;
+        write_string(out, &entry.printed)?;
+        out.write_char('}')?;
+    }
+    out.write_str("]")?;
+    out.write_char('}')
 }
 
 fn write_block(out: &mut impl Write, block: &crate::PlacedBlock) -> fmt::Result {
     write!(
         out,
-        "{{\"node\":{},\"kind\":\"{}\",\"x\":{},\"y\":{},\"width\":{},\"height\":{},\"stage\":\"{}\"",
+        "{{\"node\":{},\"kind\":\"{}\",\"x\":{},\"y\":{},\"width\":{},\"height\":{},\"lineOffset\":{},\"linesTotal\":{},\"stage\":\"{}\"",
         block.node.0,
         block.kind.as_str(),
         block.x.0,
         block.y.0,
         block.width.0,
         block.height.0,
+        block.line_offset,
+        block.lines_total,
         block.stage.as_str()
     )?;
 
@@ -118,7 +170,11 @@ fn write_block(out: &mut impl Write, block: &crate::PlacedBlock) -> fmt::Result 
         if index > 0 {
             out.write_char(',')?;
         }
-        write!(out, "{{\"atom\":{},\"number\":{}}}", mark.atom, mark.number)?;
+        write!(
+            out,
+            "{{\"atom\":{},\"number\":{},\"line\":{}}}",
+            mark.atom, mark.number, mark.line
+        )?;
     }
     out.write_str("],\"lines\":[")?;
 
@@ -126,10 +182,89 @@ fn write_block(out: &mut impl Write, block: &crate::PlacedBlock) -> fmt::Result 
         if index > 0 {
             out.write_char(',')?;
         }
-        write!(out, "{{\"y\":{},\"line\":", placed.y.0)?;
+        write!(
+            out,
+            "{{\"y\":{},\"hang\":{},\"line\":",
+            placed.y.0, placed.hang
+        )?;
         placed.line.write_canonical(out)?;
         out.write_char('}')?;
     }
 
+    out.write_str("],\"math\":")?;
+    write_math(out, block.math.as_ref())?;
+    out.write_str(",\"inlineMath\":[")?;
+    for (index, inline) in block.inline_math.iter().enumerate() {
+        if index > 0 {
+            out.write_char(',')?;
+        }
+        write!(out, "{{\"atom\":{},\"source\":", inline.atom)?;
+        write_string(out, &inline.source)?;
+        out.write_str(",\"math\":")?;
+        write_math_payload(out, &inline.math)?;
+        out.write_char('}')?;
+    }
+    out.write_char(']')?;
+    out.write_char('}')
+}
+
+/// `null` or the display-formula geometry. Item and rule `y` are relative to
+/// `baseline`, which is measured from the block top.
+fn write_math(out: &mut impl Write, math: Option<&crate::MathBox>) -> fmt::Result {
+    match math {
+        Some(math) => write_math_payload(out, math),
+        None => out.write_str("null"),
+    }
+}
+
+fn write_math_payload(out: &mut impl Write, math: &crate::MathBox) -> fmt::Result {
+    write!(
+        out,
+        "{{\"width\":{},\"height\":{},\"baseline\":{},\"items\":[",
+        math.width.0, math.height.0, math.baseline.0
+    )?;
+    for (index, item) in math.items.iter().enumerate() {
+        if index > 0 {
+            out.write_char(',')?;
+        }
+        out.write_str("{\"text\":")?;
+        write_string(out, &item.text)?;
+        write!(
+            out,
+            ",\"x\":{},\"y\":{},\"size\":{}}}",
+            item.x.0, item.y.0, item.size.0
+        )?;
+    }
+    out.write_str("],\"rules\":[")?;
+    for (index, rule) in math.rules.iter().enumerate() {
+        if index > 0 {
+            out.write_char(',')?;
+        }
+        write!(
+            out,
+            "{{\"x\":{},\"y\":{},\"width\":{},\"thickness\":{}}}",
+            rule.x.0, rule.y.0, rule.width.0, rule.thickness.0
+        )?;
+    }
     out.write_str("]}")
+}
+
+/// JSON string with the escapes the canonical form needs. Formula text is a
+/// short symbol run, so the allocation-free loop is enough.
+fn write_string(out: &mut impl Write, text: &str) -> fmt::Result {
+    out.write_char('"')?;
+    for character in text.chars() {
+        match character {
+            '"' => out.write_str("\\\"")?,
+            '\\' => out.write_str("\\\\")?,
+            '\n' => out.write_str("\\n")?,
+            '\r' => out.write_str("\\r")?,
+            '\t' => out.write_str("\\t")?,
+            character if (character as u32) < 0x20 => {
+                write!(out, "\\u{:04x}", character as u32)?;
+            }
+            character => out.write_char(character)?,
+        }
+    }
+    out.write_char('"')
 }

@@ -4,7 +4,7 @@
 //! The same binary runs natively and under `wasm32-wasip1`. The hash gate
 //! compares the two byte streams; no floating point or platform API is used.
 
-use soma_core::{break_paragraph, BreakConfig, StyleId, SyntheticMetrics, Width};
+use soma_core::{break_paragraph, BreakConfig, StyleId, Width};
 use soma_doc::block::{Heading, Paragraph};
 use soma_doc::inline::{Container, FootnoteRef};
 use soma_doc::meta::{DocumentMeta, TemplateRef};
@@ -13,8 +13,10 @@ use soma_doc::{
     Block, Document, FootnoteDef, Inline, SourceId, SourceInfo, SourceKind, SourceSpan,
 };
 use soma_doc::{SourceMap, Text};
-use soma_layout::layout;
+use soma_engine::EngineConfig;
+use soma_layout::{layout_with, PaginationStrategy, StyledMetrics, TableMetrics};
 use soma_md::parse_markdown;
+use soma_metrics::MetricsTable;
 use soma_rules::{justified_style, paragraph_from_lines};
 use soma_template::{parse_template, resolve};
 
@@ -77,12 +79,10 @@ pub fn fixture_layout_json() -> String {
     let style = justified_style(Width::from_em_frac(13, 2));
     let paragraph =
         paragraph_from_lines(LINES, style, StyleId(0)).expect("built-in wasm fixture must compile");
-    let result = break_paragraph(
-        &paragraph,
-        &SyntheticMetrics::default(),
-        &BreakConfig::default(),
-    )
-    .expect("built-in wasm fixture must break");
+    let table = MetricsTable::embedded();
+    let metrics = TableMetrics::new(&table, 0, Width::EM);
+    let result = break_paragraph(&paragraph, &metrics, &BreakConfig::default())
+        .expect("built-in wasm fixture must break");
     result.canonical_json()
 }
 
@@ -117,16 +117,41 @@ styles:
       font-size: 8pt
 "#;
 
+/// Fixed engine configuration for the pipeline fixture. Every value matches
+/// `default-v1`, so the canonical bytes stay identical to the hand-built path.
+const ENGINE: &str = r#"
+schema: soma.engine/1
+preset: default-v1
+window: paragraph
+max_kp_atoms: null
+fallback:
+  allow_emergency: true
+  allow_forbidden: true
+  allow_overfull: true
+  emergency_stretch: 3em
+vertical:
+  page_weight: 0
+  badness_scale: 100
+  overflow_penalty: 1000000
+  club_penalty: 10000
+  widow_penalty: 10000
+"#;
+
 /// Canonical page JSON for the fixed Markdown fixture.
 pub fn fixture_pages_json() -> String {
     let document = parse_markdown(MARKDOWN);
     let template = parse_template(TEMPLATE).expect("built-in template must parse");
     let styled = resolve(&document, &template).expect("built-in styles must resolve");
-    let pages = layout(
+    let table = MetricsTable::embedded();
+    let metrics = StyledMetrics::new(&table, &styled);
+    let engine = EngineConfig::parse(ENGINE).expect("built-in engine config must parse");
+    let pages = layout_with(
         &document,
         &styled,
-        &SyntheticMetrics::default(),
-        &BreakConfig::default(),
+        &metrics,
+        &engine.break_config(),
+        PaginationStrategy::VerticalKp,
+        engine.vertical(),
     )
     .expect("built-in pipeline must lay out");
     pages.canonical_json()
@@ -151,10 +176,11 @@ mod tests {
         let first = fixture_json();
         let second = fixture_json();
         assert_eq!(first, second);
-        assert!(first.contains("\"schema\":\"soma.doc/1\""));
+        assert!(first.contains("\"schema\":\"soma.doc/2\""));
         assert!(first.contains("\"schema\":\"soma.layout/6\""));
         assert!(first.contains("\"forcedEnd\":true"));
         assert!(first.contains("\"footnoteDef\""));
-        assert!(first.contains("\"schema\":\"soma.pages/1\""));
+        assert!(first.contains("\"schema\":\"soma.pages/9\""));
+        assert!(first.contains("\"metricsHash\":"));
     }
 }

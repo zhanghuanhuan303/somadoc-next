@@ -1,6 +1,6 @@
 # DocIR 规范（`soma-doc`）
 
-状态：**A1 已落地**（crate `soma-doc`，schema `soma.doc/1`，`docIrVersion = 1`）。
+状态：**A1 已落地，索引标记已加**（crate `soma-doc`，schema `soma.doc/2`，`docIrVersion = 2`）。
 本文件描述冻结后的语义 IR 契约；代码是权威，本文解释意图与不变量。
 
 参考：`docs/architecture-v2.md` §5、ADR-0001（两层 IR）、ADR-0008（DocIR 迁移）、
@@ -51,7 +51,7 @@ ADR-0009（语义/呈现边界）。
 | `ListItem` | `blocks`（可嵌套列表/段落） |
 | `BlockQuote` | `blocks` |
 | `CodeBlock` | `lang`、`value` |
-| `MathBlock` | `source`（交给 math 适配器，核心不解析） |
+| `MathBlock` | `source`（交给 `soma-math` 解析成数学盒，内核不解析） |
 | `Figure` | `image`、`caption`、`label` |
 | `Table` | `columns`、`rows`、`caption`、`label` |
 | `Column` | `align`（宽度是排版决定，不在 IR） |
@@ -75,6 +75,7 @@ ADR-0009（语义/呈现边界）。
 | `Image` | `src`、`alt`、`title`、`intrinsic`（像素，仅用于宽高比） |
 | `MathInline` | `source` |
 | `FootnoteRef` | `target`、`label`（作者写的标记，不是显示编号） |
+| `Index` | `term`（非空；索引词条标记，不占宽度、不产生文本） |
 | `Ruby` | `base`、`annotation`（纯字符串：注音不是富文本） |
 | `LineBreak` | `kind`（soft / hard；hard 在段落 IR 里变成 `Forced`） |
 | `RawInline` | 同 `RawBlock` |
@@ -110,7 +111,7 @@ Attrs    { role, classes, anchor, lang }
 一个文档：
 
 ```json
-{"schema":"soma.doc/1","docIrVersion":1,"nodeCount":4,
+{"schema":"soma.doc/2","docIrVersion":2,"nodeCount":4,
  "meta":{"title":null,"authors":[],"language":"zh-Hans","date":null,
          "keywords":[],"template":null,"cover":null,"fields":[]},
  "blocks":[{"kind":"paragraph","id":1,

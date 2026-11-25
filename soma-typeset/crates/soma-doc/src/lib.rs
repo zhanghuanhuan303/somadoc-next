@@ -55,8 +55,8 @@ pub use doc::{Document, FootnoteDef, DOC_IR_VERSION, SCHEMA};
 pub use hash::{content_hash, document_hash, fnv1a_64, DocHash};
 pub use ids::{NodeId, SourceId, SourceInfo, SourceKind, SourceMap, SourceSpan};
 pub use inline::{
-    Code, Container, FootnoteRef, Image, Inline, LineBreak, LineBreakKind, Link, MathInline,
-    RawInline, Ruby, Text,
+    Code, Container, FootnoteRef, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link,
+    MathInline, RawInline, Ruby, Text,
 };
 pub use meta::{
     Author, CoverData, Date, DocumentMeta, ImageIntrinsic, ImageRef, MetaField, TemplateRef,

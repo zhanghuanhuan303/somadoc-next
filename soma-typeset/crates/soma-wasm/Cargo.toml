@@ -11,6 +11,8 @@ description = "WASI/native fixture runner for cross-target byte-identical verifi
 soma-core = { path = "../soma-core" }
 soma-layout = { path = "../soma-layout" }
 soma-md = { path = "../soma-md" }
+soma-metrics = { path = "../soma-metrics" }
 soma-template = { path = "../soma-template" }
 soma-doc = { path = "../soma-doc" }
+soma-engine = { path = "../soma-engine" }
 soma-rules = { path = "../soma-rules" }

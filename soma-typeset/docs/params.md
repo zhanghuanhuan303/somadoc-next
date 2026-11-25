@@ -347,8 +347,9 @@ pub struct ParamError {
 
 Preset 是数据，不是算法分支：
 
-- `default-v1`：当前推荐起点。
-- `publish-v1`：更紧的 tolerance、更保守的 emergency（质量优先）。
+- `default-v1`：冻结的 K-P 参考（`tolerance = 3000`）。
+- `publish-v1`：**引擎默认**（ADR-0023）：`default-v1` + `tolerance = 1500`，其余权重与回退完全相同；母语出版优先。
+- ~~更保守的 emergency~~：实测没有必要，回退阶梯保持 `default-v1`。
 - `mobile-v1`：更低 `max_lines`、更少 feature（延迟优先）。
 - `debug`：启用 trace、保留所有候选统计（不用于发布）。
 
@@ -471,7 +472,7 @@ pub struct EvalParams {
 | `emergency_tolerance` | 10000 | 0..=10000 | 工程 | fallback 最大 ratio |
 | `max_lines` | none | 1..=10000 | 工程 | 调用方保护 |
 | `max_kp_atoms` | none | `None` 或 1..=10000 | 工程 | 超过后改用 Greedy-C；K6 实测 4,000 atoms 已在 native 预算内，默认保留 `None` |
-| `trim_priority` | EndFirst | enum | 规则 | 行尾先裁 |
+| `trim_priority` | EndFirst | enum | 规则 | 行尾先裁；行尾标点的侧空在两端对齐行上恒裁（ADR-0036），行首侧空只在行超宽时裁 |
 | `tie_break` | CostLineStart | enum | 固定 | 代价→行数→起点更小 |
 | `features.edge_trim` | true | bool | 规则 | K4 启用 |
 | `features.boundary_deviation` | true | bool | 规则 | K2 启用 |
@@ -492,6 +493,10 @@ pub struct EvalParams {
 | `badness_exponent` | 3 | 1..=5 | 否（高级） | 默认 3 |
 | `break_penalty` | 100 | 0..=1e9 | 是 | `penalty=100` 时 cost=100（10 行） |
 | `compress_amount` | 20 | 0..=1e9 | 是 | 每 1 em trim；0.25em = 5 |
+
+> `publish-v1` 只改 `tolerance`（1500）；`badness_scale=100`、权重、fallback 与
+> 短末行阈值都与 `default-v1` 相同，便于对照。`rules_version = 1` 对应
+> 开标点行首 trim 从 1/4 em 改为 1/2 em（ADR-0023）。
 | `compress_count` | 5 | 0..=1e9 | 是 | 每次裁剪；0.25em 事件合计约 10 |
 | `boundary_deviation` | 50 | 0..=1e9 | 是 | 每 1 个 ideal gap 的平均偏差；满 gap = 5 行 |
 | `short_last_scale` | 1_000_000 | 0..=1e9 | 是 | 短末行；0 宽末行的 cost |
@@ -543,7 +548,7 @@ pub struct EvalParams {
 
 > 规则比例属于 `RuleSet`，有来源和版本；不要从 `CostParams` 里改。
 > 这些比例都是 **base em**。如果业务希望按字号缩放（例如大字号标点的 trim 更大），规则层用 `font_scale` 乘一下再写入 IR；breaker 只看最终宽度。
-> **K4 状态：** `soma-rules` 已把 `open_trim_left` / `close_trim_right` / `middle_trim_left` / `middle_trim_right` 写进 `Atom.compress_*`，并在行超宽时生效；`pair_trim_table` 与按字号缩放尚未实现。数值仍为 `ParamOnly`（未标定），不参与 Gate Q 的硬断言。
+> **K4 状态：** `soma-rules` 已把 `open_trim_left` / `close_trim_right` / `middle_trim_left` / `middle_trim_right` 写进 `Atom.compress_*`。行尾收尾标点的右侧侧空在**两端对齐行上恒裁**，与宽窄无关（ADR-0036）；行首侧空只在行超宽时裁。半角标点的侧空为 `125‰`（`LATIN_TRIM`，代码常量，不在 Tier B 表内）。这两组数值是**回退值**：`soma.metrics/2` 表若带标点轮廓（`ink_right`），`scale_trim` 用真实墨迹覆盖它们（ADR-0037）。`pair_trim_table` 尚未作为表实现（`PAIR_TRIM` 是代码常量，只在 `Join::Normal` 生效）。数值仍为 `ParamOnly`（未标定），不参与 Gate Q 的硬断言。
 > **K6 状态：** `soma_rules::RULES` 提供 `id / status / source` 盘点表；`RuleStatus` 为 `Verified | Tbd | ParamOnly`。当前盘点为 **8 `Verified` / 0 `Tbd` / 6 `ParamOnly`**：标点硬规则已引用 GB/T 15834-2011 via W3C clreq §6.1.1（basic）并升为 `Verified`；trim/gap 比例仍为 `ParamOnly`，Gate Q 不得把比例数值当作已核实来源。
 > **每条规则带 `rule_id` / `source` / `status: Verified | Tbd | ParamOnly`。** `Tbd` 只能产生 `Allowed` + penalty/trim，不能产生 `Forbidden`/`Forced`；`ParamOnly` 只提供参数，不产生断点规则。K0 交付 `ruleId × source × status × golden` 盘点表；Gate Q 只对 `Verified` 断言。
 
