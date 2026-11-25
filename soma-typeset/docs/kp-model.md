@@ -11,7 +11,7 @@
 1. **采用 K-P 的全局 DP 结构，但用加法加权代价，不用 TeX 的平方 demerits。** 这样才能满足 F6「每类惩罚有独立权重」，也更容易标定。
 2. **输入是 `Atom` + `Boundary`；box/glue/penalty 是内部编译产物。** 中文规则在 IR 构建时编译进边界，breaker 保持脚本无关。
 3. **`Forbidden` 是硬约束；`Forced` 单独建模。** 不要用负 penalty 模拟强制换行。
-4. **标点挤压是行边裁剪，不是全局 glue。** 只在行超宽时裁剪行首/行尾；line cost 仍只依赖 `(i, j)`，DP 不受影响。
+4. **标点挤压是行边裁剪，不是全局 glue。** 行尾只在超宽时裁；行首开标点在 justified 行、以及左对齐/ragged 行的行首做贴墨裁剪（ADR-0082/ADR-0105）。line cost 仍只依赖 `(i, j)`，DP 不受影响。
 5. **中英边界间距偏差用「比例分配 + 前缀和」做 O(1) 聚合。** 不逐边界遍历。
 6. **MVP 不把相邻行 fitness 放进 DP 状态。** 先测行间调整量方差；有证据再升级到 `(breakpoint, fitness)`。
 7. **边裁剪会破坏行宽单调性，所以先不要上 TeX 式 active-node 剪枝。** 先 O(n²) + 前缀和，correctness first。
@@ -165,7 +165,7 @@ E < 0   → 行不足（underfull）
 因此：
 
 - `Atom` 带 `compress_left` / `compress_right`，表示该原子在行边最多能裁掉多少侧边距。
-- 裁剪只在**行超宽**时发生。
+- 行尾裁剪只在线**超宽**时发生；行首开标点还有一条**光学对齐**规则：justified 行总是裁首个原子的左侧空，左对齐/ragged 行在首原子是开标点时也裁（ADR-0082/ADR-0105）。
 - 裁剪量进入 line cost，但仍然是 `(i, j)` 的函数，所以 DP 不需要额外状态。
 
 #### 裁剪顺序
@@ -177,12 +177,12 @@ c       = c_end + c_start
 E'      = E - c
 ```
 
-- **先裁行尾，再裁行首。** 行尾标点是常见情况；行首裁剪留给开引号/开括号。
+- **先裁行尾，再裁行首。** 行尾标点是常见情况；行首裁剪留给开引号/开括号。行首开标点在 justified 与左对齐行都会贴墨对齐，不要求该行超宽。
 - **model v1 只实现 `TrimPriority::EndFirst`。** `StartFirst` / `Balanced` 在 `ParamSet::validate` 阶段报错，不静默退化成 EndFirst；新增顺序要升 `modelVersion`。
 - `Line.ratio_milli` 是**裁剪后**的 stretch/shrink 比例，直接用于 badness；末行与 forced 段尾不齐行，固定为 0。
 - K4 起规则层把 `open_trim_left=250‰` / `close_trim_right=500‰` / `middle_trim_left/right=500‰` 写入 `Atom.compress_*`。这些**比例**仍是 `ParamOnly`，不是 Gate Q 硬断言；规则本身（行首禁开标点、行尾禁关标点）已是 `Verified`。
 - 两侧都裁时，`Line.trim_left` / `Line.trim_right` 分别记录，便于渲染和评估。
-- 如果 `E <= 0`，`c = 0`，**不裁剪**；不足的行应该用 stretch，而不是先裁再拉。
+- 超宽补偿只在 `E > 0` 时按上面的公式裁；行首开标点的光学裁剪是独立的，`E <= 0` 也可能发生（ADR-0082/ADR-0105）。
 - 单原子行没有内部 glue，但仍允许裁剪两侧；`adjustment = 0`，只影响行宽和渲染。
 
 #### 渲染坐标约定

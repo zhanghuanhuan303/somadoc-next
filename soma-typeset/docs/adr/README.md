@@ -123,6 +123,7 @@ only).
 | [0102](0102-diagram-compiler.md) | Mermaid/DOT are `Block::Diagram`; `soma-diagram` compiles them to the TikZ vector box, with a strict source fallback and a TikZ export | Accepted |
 | [0103](0103-studio-tikz-export.md) | Studio exports the first compiled diagram as natural-size TikZ through `/api/tikz`; page scaling and figure selection stay out of the source export | Accepted |
 | [0104](0104-mixed-markdown-latex-html.md) | Markdown is a compound frontend: math, LaTeX commands/environments and semantic HTML map into the same DocIR through the peer frontends | Accepted |
+| [0105](0105-ragged-line-opening-trim.md) | A ragged or left-aligned line also trims an opening mark at its start; centered/right text undoes the optical trim | Accepted; extends ADR-0082 |
 
 ## Rules
 

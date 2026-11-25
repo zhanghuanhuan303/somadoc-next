@@ -4894,6 +4894,18 @@ fn align_lines(lines: &mut [Line], align: Align) {
         return;
     }
     for line in lines {
+        // The kernel supports Justify/Left only, so centered and right-aligned
+        // paragraphs are laid out through the Left path. A leading opening
+        // mark is optically trimmed there; a centered line has no common left
+        // text edge to align to, so undo that shift before centering. A line
+        // that was genuinely overfull keeps its trim.
+        if line.natural_width <= line.target_width && line.trim_left.0 > 0 {
+            let trim = line.trim_left.0;
+            for atom in &mut line.boxes {
+                atom.x = Width(atom.x.0 + trim);
+            }
+            line.trim_left = Width::ZERO;
+        }
         let full = line.target_width.0 + line.indent.0;
         let slack = full - line.natural_width.0;
         if slack <= 0 {

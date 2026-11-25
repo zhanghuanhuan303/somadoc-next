@@ -473,7 +473,7 @@ pub struct EvalParams {
 | `emergency_tolerance` | 10000 | 0..=10000 | 工程 | fallback 最大 ratio |
 | `max_lines` | none | 1..=10000 | 工程 | 调用方保护 |
 | `max_kp_atoms` | none | `None` 或 1..=10000 | 工程 | 超过后改用 Greedy-C；K6 实测 4,000 atoms 已在 native 预算内，默认保留 `None` |
-| `trim_priority` | EndFirst | enum | 规则 | 行尾先裁；行尾标点的侧空在两端对齐行上恒裁（ADR-0036），行首侧空只在行超宽时裁 |
+| `trim_priority` | EndFirst | enum | 规则 | 行尾先裁；行尾标点的侧空在两端对齐行上恒裁（ADR-0036），行首开标点在两端对齐与左对齐行上贴墨裁（ADR-0082/0105），其余行首侧空只在行超宽时裁 |
 | `tie_break` | CostLineStart | enum | 固定 | 代价→行数→起点更小 |
 | `features.edge_trim` | true | bool | 规则 | K4 启用 |
 | `features.boundary_deviation` | true | bool | 规则 | K2 启用 |
@@ -549,7 +549,7 @@ pub struct EvalParams {
 
 > 规则比例属于 `RuleSet`，有来源和版本；不要从 `CostParams` 里改。
 > 这些比例都是 **base em**。如果业务希望按字号缩放（例如大字号标点的 trim 更大），规则层用 `font_scale` 乘一下再写入 IR；breaker 只看最终宽度。
-> **K4 状态：** `soma-rules` 已把 `open_trim_left` / `close_trim_right` / `middle_trim_left` / `middle_trim_right` 写进 `Atom.compress_*`。行尾收尾标点的右侧侧空在**两端对齐行上恒裁**，与宽窄无关（ADR-0036）；行首侧空只在行超宽时裁。半角标点的侧空为 `125‰`（`LATIN_TRIM`，代码常量，不在 Tier B 表内）。这两组数值是**回退值**：`soma.metrics/2` 表若带标点轮廓（`ink_right`），`scale_trim` 用真实墨迹覆盖它们（ADR-0037）。`pair_trim_table` 尚未作为表实现（`PAIR_TRIM` 是代码常量，只在 `Join::Normal` 生效）。数值仍为 `ParamOnly`（未标定），不参与 Gate Q 的硬断言。
+> **K4 状态：** `soma-rules` 已把 `open_trim_left` / `close_trim_right` / `middle_trim_left` / `middle_trim_right` 写进 `Atom.compress_*`。行尾收尾标点的右侧侧空在**两端对齐行上恒裁**，与宽窄无关（ADR-0036）；行首开标点在两端对齐与左对齐/ragged 行上都贴墨裁（ADR-0082/0105），其余行首侧空只在行超宽时裁。半角标点的侧空为 `125‰`（`LATIN_TRIM`，代码常量，不在 Tier B 表内）。这两组数值是**回退值**：`soma.metrics/2` 表若带标点轮廓（`ink_right`），`scale_trim` 用真实墨迹覆盖它们（ADR-0037）。`pair_trim_table` 尚未作为表实现（`PAIR_TRIM` 是代码常量，只在 `Join::Normal` 生效）。数值仍为 `ParamOnly`（未标定），不参与 Gate Q 的硬断言。
 > **K6 状态：** `soma_rules::RULES` 提供 `id / status / source` 盘点表；`RuleStatus` 为 `Verified | Tbd | ParamOnly`。当前盘点为 **8 `Verified` / 0 `Tbd` / 6 `ParamOnly`**：标点硬规则已引用 GB/T 15834-2011 via W3C clreq §6.1.1（basic）并升为 `Verified`；trim/gap 比例仍为 `ParamOnly`，Gate Q 不得把比例数值当作已核实来源。
 > **每条规则带 `rule_id` / `source` / `status: Verified | Tbd | ParamOnly`。** `Tbd` 只能产生 `Allowed` + penalty/trim，不能产生 `Forbidden`/`Forced`；`ParamOnly` 只提供参数，不产生断点规则。K0 交付 `ruleId × source × status × golden` 盘点表；Gate Q 只对 `Verified` 断言。
 

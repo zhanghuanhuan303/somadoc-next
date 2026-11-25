@@ -8,7 +8,9 @@
 
 use alloc::vec::Vec;
 
-use crate::ir::{Align, AtomKind, BoundaryKind, BoundaryRole, Breakability, IrError, Paragraph};
+use crate::ir::{
+    Align, AtomKind, BoundaryKind, BoundaryRole, Breakability, IrError, Paragraph, PunctClass,
+};
 use crate::metrics::Metrics;
 use crate::params::{ParamError, ParamHash, ParamSet, BADNESS_RATIO_CLAMP};
 use crate::result::{AtomBox, BreakerKind, CjkLatinAdjust, FallbackStage, LayoutResult, Line};
@@ -835,40 +837,40 @@ impl<'a> Shaped<'a> {
         // break) is left aligned: it only trims when it would otherwise
         // overrun, which keeps its punctuation inside the block.
         let justified = end_kind == LineEnd::Justified;
-        if config.params().features.edge_trim && (justified || natural > target) {
-            // Never trim more than the mark's own advance, even if a rule table
-            // and a metrics table disagree about its side bearing. A real
-            // outline can give up more than half an em (a comma's ink sits in
-            // the left third), and that is exactly what lands it on the edge.
-            let mark_width = self.atom_width(end - 1);
-            let right_cap =
-                (self.paragraph.atoms[end - 1].compress_right.0.max(0) as i64).min(mark_width);
+        let leading_open = start + 1 < end && self.paragraph.atoms[start].class == PunctClass::Open;
+        if config.params().features.edge_trim && (justified || natural > target || leading_open) {
+            let mut c = 0i64;
+
+            // Trailing trim is a right-edge alignment: it belongs to a
+            // justified line, or to any line that would overrun.
+            if justified || natural > target {
+                // Never trim more than the mark's own advance, even if a rule
+                // table and a metrics table disagree about its side bearing. A
+                // real outline can give up more than half an em (a comma's ink
+                // sits in the left third), and that is exactly what lands it
+                // on the edge.
+                let mark_width = self.atom_width(end - 1);
+                let right_cap =
+                    (self.paragraph.atoms[end - 1].compress_right.0.max(0) as i64).min(mark_width);
+                trim_right = right_cap as i32;
+                effective = natural - right_cap;
+                c += right_cap;
+            }
+
             let start_width = self.atom_width(start);
             let left_cap =
                 (self.paragraph.atoms[start].compress_left.0.max(0) as i64).min(start_width);
 
-            // The em box, not the ink, is what native Chinese punctuation draws
-            // with. Trimming here (rather than at the renderer) keeps badness,
-            // adjustment and the box coordinates in agreement; a justified line
-            // then grows the inter-character glue by the same amount, so the
-            // ink lands on the text edge.
-            let c_end = right_cap;
-            trim_right = c_end as i32;
-            effective = natural - c_end;
-
-            // A justified line also aligns its leading mark: an opening
-            // quote or bracket draws its ink inside the em box, so charging
-            // the full advance leaves the quote visibly indented against the
-            // lines above and below. Trimming the empty side bearing lets the
-            // extra glue fill the line and puts the ink on the text edge
-            // (ADR-0082). A ragged line has no text edge to align to, so it
-            // still trims its leading mark only when it would overrun.
-            let mut c = c_end;
-            if justified && start + 1 < end {
-                let c_start = left_cap;
-                trim_left = c_start as i32;
-                effective -= c_start;
-                c += c_start;
+            // A justified line aligns any leading glyph (ADR-0082). A
+            // ragged/left-aligned line has no right edge, but it still has a
+            // left text edge: an opening quote or bracket must put its ink on
+            // that edge too. Only 开标点 get the full optical trim here; other
+            // first glyphs keep their natural position. A single-atom line
+            // still spends the left cap when it would overrun.
+            if start + 1 < end && (justified || (natural <= target && leading_open)) {
+                trim_left = left_cap as i32;
+                effective -= left_cap;
+                c += left_cap;
             } else if effective > target {
                 let excess = effective - target;
                 let c_start = excess.min(left_cap);

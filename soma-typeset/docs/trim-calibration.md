@@ -47,7 +47,8 @@ cargo run -p soma-metrics --example punct -- examples/book/out/metrics-pdf.smt
 
 ## 3. 结论：常量是预算，不是空档
 
-`compress_left/right` 只在线需要救急时被消耗；真正的字形位移由 ADR-0037 的墨迹上限
+`compress_right` 只在行尾需要救急时被消耗；`compress_left` 还承担行首开标点的光学对齐
+（justified 行与左对齐行，ADR-0082/ADR-0105）。真正的字形位移由 ADR-0037 的墨迹上限
 逐字夹住（有轮廓数据时用真实侧空，没有才回退到类别常量）。所以：
 
 - 常量给大一点不会让标点压进字形——墨迹那道闸门保证这一点；

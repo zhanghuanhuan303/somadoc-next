@@ -97,7 +97,7 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `k1_fixtures.rs` | 10 | public-seam fixtures |
 | `k2_boundary.rs` | 5 | boundary role, deviation, trace |
 | `k3_styles.rs` | 6 | glyph metrics, line boxes, height cost |
-| `k4_trim.rs` | 11 | edge trim and coordinates, including line-start opening marks |
+| `k4_trim.rs` | 13 | edge trim and coordinates, including justified and ragged line-start opening marks |
 | `k5_forced.rs` | 7 | forced breaks and segments |
 | `k6_reporting.rs` | 7 | breaker/stage/length flags |
 | `k6_fallback.rs` | 4 | emergency and forbidden rescue |
@@ -151,7 +151,7 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `d92_body_height.rs` (layout) | 3 | automatic vs explicit body height, page-break choice, vertical hash |
 | `tikz.rs` (soma-tikz) | 11 | centimetre unit, shift/scale, circle/arc cubics, named coordinates and anchors, `\foreach` and its tail, grid lattice and step, a filled grid has no area, node measurement, orthogonal paths |
 | `e13_toc.rs` (layout) | 13 | TOC depth, page numbers, row shape, leaders, wrapped rows, forced page, figure/table lists, section-start master |
-| `e14_alignment.rs` (layout) | 6 | left/center/right placement, first-indent interaction, justify unchanged |
+| `e14_alignment.rs` (layout) | 7 | left/center/right placement, first-indent interaction, justify unchanged, centered quote keeps centring |
 | `e15_cover.rs` (layout) | 7 | cover metadata, master, centring, fallbacks, unknown master error |
 | `e16_numbering.rs` (layout) | 8 | chinese-chapter, arabic-dotted, depth, figure/table counters, numbered TOC entries |
 | `e17_front_matter.rs` (layout) | 5 | continuous/roman/hidden labels, `{pages}` = body pages, no folio on hidden pages |
@@ -204,9 +204,9 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `soma-studio` unit | 5 | origin allowlist: loopback default, concrete LAN host, wildcard `Host` matching, IPv6 literals, `--host` parsing |
 | `mermaid.rs` (diagram) | 6 | Mermaid and DOT layouts, paths/labels, TikZ round trip, detection rules, directions/shapes/classes, clusters and self-loops |
 
-Total: **966 tests passed** (`cargo test --workspace`), plus **1 ignored**
+Total: **969 tests passed** (`cargo test --workspace`), plus **1 ignored**
 (`perturbation.rs`, run with `--ignored`). Counting that ignored test, the
-workspace lists **967 test functions**. The standalone
+workspace lists **970 test functions**. The standalone
 `tools/metrics-gen` crate adds its own 5 (`cargo test --manifest-path tools/metrics-gen/Cargo.toml`).
 
 Still deferred: the human blind-test run (D01), a quality-labeled corpus
