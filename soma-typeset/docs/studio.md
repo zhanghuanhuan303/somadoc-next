@@ -42,7 +42,7 @@ Options:
 |---|---|
 | `--input`, `-i` | The project input. Required. Its parent directory is the project root and the file tree. |
 | `--template`, `-t` | Template YAML. Omitted: the built-in Plex reference. |
-| `--engine` | `soma.engine/1` YAML. Omitted: the preset defaults. |
+| `--engine` | `soma.engine/1` YAML. Omitted: the built-in `book-v1` preset (Chinese book defaults: tighter tolerance plus a short-last-line charge). The command-line tool still defaults to `latex-v1` (ADR-0069, ADR-0111). |
 | `--metrics` | Metrics table. Omitted: the embedded `soma.metrics/7` table. The browser fetches the same bytes from `/api/metrics`. |
 | `--hyphenation` | TeX pattern file (e.g. `hyphen-en.pat`) for Liang hyphenation of Latin words. Omitted: the server uses `<project root>/hyphen-en.pat` when present, otherwise no word is broken. The browser fetches the same text from `/api/hyphenation`. |
 | `--font`, `--font-bold`, `--font-sans`, `--font-sans-bold`, `--font-mono`, `--font-mono-bold`, `--font-math`, `--font-fallback` | Optional font files for PDF and for `@font-face` in the proof. `path#index` selects a TTC face. Math is bundled when omitted. When a body face is omitted, the server probes fontconfig (`fc-match`) for Noto Serif/Sans CJK SC and Noto Sans Mono; a face must cover `中` (or `A` for mono) to be accepted. Auto faces are referenced by family name in the proof and subset into the PDF, so a missing `--font` does not produce a blank export. |

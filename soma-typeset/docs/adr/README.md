@@ -129,6 +129,7 @@ only).
 | [0108](0108-math-font-commands-and-details.md) | Font-selection math commands are transparent, matrices get a half-em gutter, `<details>/<summary>` are semantic blocks | Accepted |
 | [0109](0109-svg-proof.md) | The Studio proof is SVG rendered from `PagedLayout`; PDF stays download-only | Accepted; implements `docs/proposal-svg-proof.md` |
 | [0110](0110-colophon-block.md) | The colophon is a ruled multi-line block; `\colophon{a\\b}` splits lines | Accepted |
+| [0111](0111-inline-code-and-separator-breaks.md) | Inline code breaks at its spaces and separators (`CODE_BREAK_PENALTY`); Latin `-`/`/` breaks are priced (`WORD_BREAK_PENALTY`); the Studio defaults to `book-v1` | Accepted; addresses the TACTUS line-breaking review |
 
 ## Rules
 

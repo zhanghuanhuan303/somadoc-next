@@ -366,8 +366,12 @@ pub fn build(parsed: ParsedDocument, options: BuildOptions<'_>) -> Result<Build,
             let config = EngineConfig::parse(source).map_err(|error| error.to_string())?;
             (config.break_config(), config.vertical())
         }
+        // The Studio is the Chinese-first workbench: its fallback preset is
+        // the Chinese book preset (publish-v1's tighter tolerance plus a 3em
+        // short-last-line charge), not the LaTeX-compatible `latex-v1` that
+        // the command line keeps as its default (ADR-0111).
         None => (
-            BreakConfig::from_params(ParamSet::latex_v1()),
+            BreakConfig::from_params(ParamSet::book_v1()),
             VerticalParams::default_v1(),
         ),
     };
@@ -807,4 +811,50 @@ pub struct TreeResponse {
 #[serde(rename_all = "camelCase")]
 pub struct SaveRequest {
     pub text: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEMPLATE: &str = r#"
+name: studio-default
+page:
+  size: A4
+  margin: 20mm
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+      align: justify
+"#;
+
+    #[test]
+    fn the_studio_defaults_to_the_chinese_book_preset() {
+        // ADR-0111: the Studio is the Chinese-first workbench, so its fallback
+        // is `book-v1`; only the command line keeps `latex-v1` (ADR-0069).
+        let parsed =
+            parse_document(SourceFormat::Markdown, "中文段落。".as_bytes()).expect("parse");
+        let build = build(
+            parsed,
+            BuildOptions {
+                template: TEMPLATE,
+                engine: None,
+                metrics: None,
+                hyphenation: None,
+            },
+        )
+        .expect("build");
+        assert_eq!(build.params.preset.0, "book-v1");
+        assert_eq!(
+            build.params.break_params.costs.short_last_threshold,
+            Width::from_em(3)
+        );
+        assert_eq!(
+            build.params.break_params.tolerance,
+            soma_core::Permille(1_500)
+        );
+    }
 }

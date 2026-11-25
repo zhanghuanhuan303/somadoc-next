@@ -2,7 +2,7 @@
 
 use soma_core::StyleId;
 use soma_core::Width;
-use soma_core::{AtomKind, BoundaryRole, Breakability, PunctClass};
+use soma_core::{AtomKind, BoundaryKind, BoundaryRole, Breakability, PunctClass};
 use soma_rules::{
     is_cjk, justified_style, paragraph_from_spans, paragraph_from_text, punct_class, InlineSpan,
     SpanKind,
@@ -86,7 +86,7 @@ fn a_footnote_mark_attaches_to_the_text_before_it() {
 }
 
 #[test]
-fn code_and_object_spans_are_single_atoms() {
+fn inline_code_breaks_at_its_own_spaces() {
     let paragraph = paragraph_from_spans(
         &[
             InlineSpan::text("运行", StyleId(0)),
@@ -97,13 +97,29 @@ fn code_and_object_spans_are_single_atoms() {
     )
     .expect("paragraph");
 
-    let code = paragraph
+    let code: Vec<&soma_core::Atom> = paragraph
         .atoms
         .iter()
-        .find(|atom| atom.text == "let x = 1;")
-        .expect("code atom");
-    assert_eq!(code.kind, AtomKind::Other);
-    assert_eq!(code.style, StyleId(1));
+        .filter(|atom| atom.style == StyleId(1))
+        .collect();
+    assert_eq!(code.len(), 4);
+    assert!(code.iter().all(|atom| atom.kind == AtomKind::Other));
+    // The space stays at the tail of the piece before it, so the pieces
+    // concatenate back to the exact source text.
+    let joined: String = code.iter().map(|atom| atom.text.as_str()).collect();
+    assert_eq!(joined, "let x = 1;");
+    assert!(code.iter().all(|atom| !atom.text.starts_with(' ')));
+    // A break between two code pieces is allowed but priced.
+    let first = paragraph
+        .atoms
+        .iter()
+        .position(|atom| atom.style == StyleId(1))
+        .expect("code start");
+    for boundary in &paragraph.boundaries[first..first + 3] {
+        assert_eq!(boundary.breakable, Breakability::Allowed);
+        assert_eq!(boundary.kind, BoundaryKind::Normal);
+        assert!(boundary.penalty > 0);
+    }
 
     let object = paragraph
         .atoms
@@ -112,6 +128,45 @@ fn code_and_object_spans_are_single_atoms() {
         .expect("object atom");
     assert_eq!(object.kind, AtomKind::InlineObject);
     assert_eq!(object.style, StyleId(2));
+}
+
+#[test]
+fn inline_code_without_a_space_breaks_only_at_a_separator() {
+    let paragraph = paragraph_from_spans(&[InlineSpan::code("metronome-rs", StyleId(1))], style())
+        .expect("paragraph");
+    assert_eq!(paragraph.atoms.len(), 2);
+    assert_eq!(paragraph.atoms[0].text, "metronome-");
+    assert_eq!(paragraph.atoms[1].text, "rs");
+    let boundary = paragraph.boundaries[0];
+    assert_eq!(boundary.breakable, Breakability::Allowed);
+    assert_eq!(boundary.kind, BoundaryKind::Normal);
+    assert!(boundary.penalty > 0, "a code identifier break is priced");
+    let joined: String = paragraph
+        .atoms
+        .iter()
+        .map(|atom| atom.text.as_str())
+        .collect();
+    assert_eq!(joined, "metronome-rs");
+}
+
+#[test]
+fn inline_code_never_breaks_before_a_separator() {
+    let paragraph = paragraph_from_spans(
+        &[InlineSpan::code("https://example.com/a/", StyleId(1))],
+        style(),
+    )
+    .expect("paragraph");
+    let texts: Vec<&str> = paragraph
+        .atoms
+        .iter()
+        .map(|atom| atom.text.as_str())
+        .collect();
+    assert_eq!(texts, ["https:/", "/", "example.com/", "a/"]);
+    // A break after `https://` is allowed …
+    assert_eq!(paragraph.boundaries[1].breakable, Breakability::Allowed);
+    assert!(paragraph.boundaries[1].penalty > 0);
+    // … but not between `https/` and `//`, which would start a line with `/`.
+    assert_eq!(paragraph.boundaries[0].breakable, Breakability::Forbidden);
 }
 
 #[test]

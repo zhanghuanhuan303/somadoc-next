@@ -168,6 +168,15 @@ pub const PAIR_TRIM: Width = Width::from_em_frac(1, 4);
 /// space has none, so the breaker only hyphenates when a line would otherwise
 /// be badly loose or overfull.
 const HYPHEN_PENALTY: i32 = 100;
+/// A break inside inline code: at one of its spaces, or after one of its
+/// separators. It is a last resort like a hyphenation point; a code run with
+/// neither cannot be split.
+const CODE_BREAK_PENALTY: i32 = 100;
+/// A break after `-` or `/` inside a Latin run (`metronome-rs`,
+/// `tactus-time/core`). A space is free, so the breaker splits such a run
+/// only when keeping it whole would stretch or overfull the line worse than
+/// this penalty (ADR-0111).
+const WORD_BREAK_PENALTY: i32 = 500;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuleError {
@@ -236,7 +245,8 @@ pub fn paragraph_from_code_line(
 pub enum SpanKind {
     /// Segmented by the normal rules; spaces collapse across spans.
     Text,
-    /// One unbreakable atom (inline code).
+    /// Inline code: unbreakable within an identifier, but a line may wrap at
+    /// the whitespace inside it (ADR-0111).
     Code,
     /// One unbreakable atom (replaced object: image, math fallback).
     Object,
@@ -354,8 +364,32 @@ pub fn paragraph_from_spans(
                 if trimmed.is_empty() {
                     continue;
                 }
-                let text = String::from(trimmed);
-                builder.push_atom(text, AtomKind::Other, PunctClass::None, span.style);
+                // Inline code breaks at its own spaces and, at a price, after
+                // `-` or `/`: a long expression such as
+                // `round(tick * tempo_num / den)` may wrap after `tick`, and a
+                // URL may wrap after a path separator, while `metronome-rs`
+                // stays whole unless the line cannot afford it. White space
+                // stays at the tail of the piece before it, so text copied out
+                // of the page keeps its exact spacing (ADR-0111).
+                let mut first = true;
+                for piece in code_pieces(trimmed) {
+                    for (index, segment) in code_segments(&piece).into_iter().enumerate() {
+                        if !first {
+                            builder.join = if index == 0 {
+                                Join::Code
+                            } else {
+                                Join::WordBreak
+                            };
+                        }
+                        builder.push_atom(
+                            String::from(segment),
+                            AtomKind::Other,
+                            PunctClass::None,
+                            span.style,
+                        );
+                        first = false;
+                    }
+                }
             }
             SpanKind::Object => {
                 if span.text.is_empty() {
@@ -394,6 +428,46 @@ pub fn paragraph_from_spans(
     builder.finish(style)
 }
 
+/// Split inline code into pieces that each end at a run of whitespace. The
+/// pieces concatenate back to `text`, so text copied out of the page is the
+/// exact source; the trailing space is what makes the boundary measurable
+/// without a font in the rules layer.
+fn code_pieces(text: &str) -> Vec<String> {
+    let mut pieces: Vec<String> = Vec::new();
+    for part in text.split_inclusive(char::is_whitespace) {
+        if part.chars().all(char::is_whitespace) {
+            if let Some(previous) = pieces.last_mut() {
+                previous.push_str(part);
+                continue;
+            }
+        }
+        pieces.push(String::from(part));
+    }
+    pieces
+}
+
+/// Split one code piece after `-` and `/` when a non-space follows, keeping the
+/// separator at the end of the segment before it. A separator next to a space
+/// is left alone: the space is the better break, and a segment that begins
+/// with one is never a legal line start.
+fn code_segments(piece: &str) -> Vec<&str> {
+    let mut segments = Vec::new();
+    let mut start = 0usize;
+    for (index, character) in piece.char_indices() {
+        if !matches!(character, '-' | '/') {
+            continue;
+        }
+        let end = index + character.len_utf8();
+        let next = piece[end..].chars().next();
+        if next.is_some_and(|next| !next.is_whitespace()) {
+            segments.push(&piece[start..end]);
+            start = end;
+        }
+    }
+    segments.push(&piece[start..]);
+    segments
+}
+
 /// Shared state for both entry points. `pending_space` lives here so it carries
 /// across spans: a trailing space in one run produces the same glue as a space
 /// inside one run.
@@ -418,6 +492,14 @@ enum Join {
     Hyphen,
     /// A break opportunity inside inline math with its glue and penalty.
     Math(Width, i32),
+    /// A break after a space inside inline code. The space is kept in the
+    /// preceding atom, so copying the code still yields the exact source.
+    Code,
+    /// A break after `-` or `/` in a Latin run or an inline-code piece. The
+    /// break is allowed — a long URL or identifier must be able to wrap — but
+    /// it carries a penalty, so a word stays whole whenever the line can
+    /// afford it.
+    WordBreak,
 }
 
 impl<'a> Builder<'a> {
@@ -524,15 +606,23 @@ impl<'a> Builder<'a> {
                             break;
                         }
                     }
+                    let separated = matches!(value.chars().last(), Some('-' | '/'));
                     self.push_atom(value, AtomKind::LatinRun, PunctClass::None, style_id);
+                    if separated {
+                        self.join = Join::WordBreak;
+                    }
                 }
                 CharKind::Other => {
+                    let separated = matches!(current, '-' | '/');
                     self.push_atom(
                         single_char(current),
                         AtomKind::Other,
                         punct_class(current),
                         style_id,
                     );
+                    if separated {
+                        self.join = Join::WordBreak;
+                    }
                     index += 1;
                 }
             }
@@ -656,6 +746,23 @@ fn push_atom(
                 },
                 penalty,
             },
+            Join::Code => {
+                let mut boundary = normal_boundary(previous, &atom);
+                if boundary.breakable == Breakability::Allowed {
+                    boundary.penalty = CODE_BREAK_PENALTY;
+                }
+                boundary
+            }
+            // Keep the ordinary mixed-script glue and the forbidden checks
+            // (never start a line with a comma or a slash) and only raise the
+            // price of breaking (ADR-0111).
+            Join::WordBreak => {
+                let mut boundary = normal_boundary(previous, &atom);
+                if boundary.breakable == Breakability::Allowed {
+                    boundary.penalty = WORD_BREAK_PENALTY;
+                }
+                boundary
+            }
         };
         boundaries.push(boundary);
     }
@@ -690,13 +797,15 @@ pub fn is_full_width_punct(c: char) -> bool {
 
 fn normal_boundary(previous: &Atom, next: &Atom) -> Boundary {
     let break_opportunity = is_break_opportunity(previous);
-    let forbidden = !break_opportunity
-        && (previous.class == PunctClass::Open
-            || next.class == PunctClass::Close
-            || next.class == PunctClass::Middle
-            || next.class == PunctClass::Dash
-            || next.text == "/"
-            || (is_word_like(previous.kind) && is_word_like(next.kind)));
+    // Kinsoku (禁则) checks are independent of a break opportunity: `well-，`
+    // may not start a line with the comma even though `-` is a natural
+    // place to break. The opportunity only relaxes the word-like rule.
+    let forbidden = previous.class == PunctClass::Open
+        || next.class == PunctClass::Close
+        || next.class == PunctClass::Middle
+        || next.class == PunctClass::Dash
+        || starts_with_separator(next)
+        || (!break_opportunity && is_word_like(previous.kind) && is_word_like(next.kind));
 
     // A forbidden boundary is still internal when the line does not break
     // there. Do not add a CJK/Latin gap before a comma or after an opening
@@ -785,7 +894,10 @@ fn char_kind(c: char) -> CharKind {
 }
 
 fn is_latin_run_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '\''
+    // A slash inside a run stays with the piece before it, so `time/core`
+    // yields `time/` + `core`: a break after it is a priced word break, not
+    // a free break around a stray `/` atom (ADR-0111).
+    c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '/' || c == '\''
 }
 
 /// True when a break after this atom is a natural mixed-script opportunity:
@@ -796,6 +908,13 @@ fn is_break_opportunity(atom: &Atom) -> bool {
         .last()
         .map(|c| matches!(c, '-' | '/' | '\u{00b7}' | '\u{200b}'))
         .unwrap_or(false)
+}
+
+/// A line may not begin with a separator. An inline-code piece keeps its
+/// trailing space, so the test is on the first character, not equality
+/// (`/ ` must be caught as well as a lone `/`).
+fn starts_with_separator(atom: &Atom) -> bool {
+    atom.text.starts_with('/') || atom.text.starts_with('-')
 }
 
 fn is_word_like(kind: AtomKind) -> bool {
@@ -887,6 +1006,49 @@ mod tests {
         assert_eq!(paragraph.boundaries[1].role, BoundaryRole::Plain);
         assert_eq!(paragraph.boundaries[1].breakable, Breakability::Allowed);
         assert_eq!(paragraph.boundaries[2].breakable, Breakability::Forbidden);
+    }
+
+    #[test]
+    fn a_hyphen_or_slash_break_carries_a_penalty() {
+        let paragraph = compile("metronome-rs 与 tactus-time/core");
+        let texts: Vec<&str> = paragraph
+            .atoms
+            .iter()
+            .map(|atom| atom.text.as_str())
+            .collect();
+        assert_eq!(
+            texts,
+            ["metronome-", "rs", "与", "tactus-", "time/", "core"]
+        );
+
+        // Splitting an identifier stays possible, but only when the line
+        // cannot afford to keep it whole (ADR-0111).
+        assert_eq!(paragraph.boundaries[0].breakable, Breakability::Allowed);
+        assert_eq!(paragraph.boundaries[0].penalty, WORD_BREAK_PENALTY);
+        assert_eq!(paragraph.boundaries[3].penalty, WORD_BREAK_PENALTY);
+        assert_eq!(paragraph.boundaries[4].penalty, WORD_BREAK_PENALTY);
+        assert_eq!(paragraph.boundaries[0].glue.width, Width::ZERO);
+        assert_eq!(paragraph.boundaries[0].glue.stretch, Width::ZERO);
+        // A space is still a free break.
+        assert_eq!(paragraph.boundaries[1].penalty, 0);
+    }
+
+    #[test]
+    fn a_break_after_a_hyphen_keeps_the_mixed_script_gap() {
+        let paragraph = compile("foo-中文");
+        let boundary = paragraph.boundaries[0];
+        assert_eq!(boundary.breakable, Breakability::Allowed);
+        assert_eq!(boundary.role, BoundaryRole::CjkLatin);
+        assert_eq!(boundary.glue.width, CJK_LATIN_GAP);
+        assert_eq!(boundary.penalty, WORD_BREAK_PENALTY);
+    }
+
+    #[test]
+    fn a_hyphen_never_opens_a_break_before_punctuation() {
+        let paragraph = compile("well-，好");
+        // `well-` is followed by a comma: the boundary stays forbidden.
+        assert_eq!(paragraph.boundaries[0].breakable, Breakability::Forbidden);
+        assert_eq!(paragraph.boundaries[0].penalty, 0);
     }
 
     #[test]
@@ -1055,14 +1217,29 @@ mod tests {
             Breakability::Allowed,
             "a break after a hyphen must be allowed"
         );
-        let slash = texts.iter().position(|text| *text == "/").expect("slash");
+        let slash = texts
+            .iter()
+            .position(|text| *text == "path/")
+            .expect("slash");
         assert_eq!(
             paragraph.boundaries[slash].breakable,
             Breakability::Allowed,
             "a break after a slash must be allowed"
         );
         assert_eq!(
-            paragraph.boundaries[slash - 1].breakable,
+            paragraph.boundaries[slash].penalty, WORD_BREAK_PENALTY,
+            "but it is priced above a space"
+        );
+        // A standalone slash is still its own atom, and a line may not start
+        // with one.
+        let spaced = compile("中文/abc");
+        let standalone = spaced
+            .atoms
+            .iter()
+            .position(|atom| atom.text == "/")
+            .expect("standalone slash");
+        assert_eq!(
+            spaced.boundaries[standalone - 1].breakable,
             Breakability::Forbidden,
             "a line must not start with a slash"
         );

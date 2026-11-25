@@ -320,7 +320,7 @@ fn AuxPage() -> impl IntoView {
                                 <p>"只读；改这里需要换 preset / 新 ADR。"</p>
                             </div>
                         </div>
-                        <pre class="mono" style="margin:0;border:0;border-radius:0;max-height:64vh;white-space:pre-wrap">{move || studio.engine_text.get().unwrap_or_else(|| String::from("（内置 latex-v1）"))}</pre>
+                        <pre class="mono" style="margin:0;border:0;border-radius:0;max-height:64vh;white-space:pre-wrap">{move || studio.engine_text.get().unwrap_or_else(|| String::from("（内置 book-v1）"))}</pre>
                     </div>
                 }.into_any(),
                 Some(Aux::Capabilities) => view! {
