@@ -37,6 +37,14 @@ sed -e 's/^index:$/index:\n  sort: pinyin/' \
     -e 's/page-break-before: true/page-break-before: false/' \
     examples/book/song.yaml > "$out/full.yaml"
 
+# The HTML supplement is a single leaf; a contents page for one heading is
+# pure noise. Keep every other master/style, drop the top-level toc block.
+awk '
+    $0 ~ /^toc:/ { skip = 1; next }
+    skip && $0 ~ /^[^[:space:]]/ { skip = 0 }
+    !skip { print }
+' "$out/full.yaml" > "$out/full-html.yaml"
+
 set -- --input examples/book/full.tex --template "$out/full.yaml" \
     --metrics "$out/full.smt" --hyphenation examples/book/hyphen-en.pat --stats
 
@@ -55,7 +63,7 @@ cargo run --quiet -p soma-cli -- render "$@" --out "$out/full.pdf"
 
 # A one-page supplement for the two HTML-only constructs: `<colgroup>`
 # relative widths and native `<ruby>`.
-set -- --input examples/book/full-html.html --template "$out/full.yaml" \
+set -- --input examples/book/full-html.html --template "$out/full-html.yaml" \
     --metrics "$out/full.smt" --format pdf --out "$out/full-html.pdf" \
     --font "$serif"
 [ -f "$serif_bold" ] && set -- "$@" --font-bold "$serif_bold"

@@ -3,7 +3,7 @@
 \title{全能力排样}
 \subtitle{从语法到页面的每一项能力，都放在同一份文档里}
 \author{soma-typeset}
-\date{2026-11-21}
+\date{2026-11-26}
 
 \newcommand{\engine}{\textsf{soma-typeset}}
 \newcommand{\term}[2]{\textbf{#1}（#2）}
@@ -15,7 +15,7 @@
 
 这一段用来检查正文的基本形态：首行缩进两字，两端对齐，中文与 Latin 混排时由规则层插入 CJK/Latin 间隙，而不是靠作者敲空格。标点按禁则处理——行首不出现句号与逗号，行尾的左括号会被推到下一行；行边在超宽时裁掉标点的侧空，而不是压扁字面。\engine{} 把这些都放在规则表里，断行器只认宽度。
 
-行边裁剪只发生在行的两端：行尾的句号与逗号在两端对齐的行上总会让出侧空，行首的左引号与左括号只在整行超宽时才让。挤压量来自字体真实的墨迹边界，而不是猜出来的常数；换一张脸，裁剪量随之改变，断点却由字符类别与标点决定，不由作者按没按快捷键决定。
+行边裁剪只发生在行的两端：行尾的句号与逗号在两端对齐的行上总会让出侧空；行首的左引号与左括号在两端对齐行、以及标题/左对齐行的行首都会贴墨对齐，只有其他普通字符的行首侧空留给超宽救援。挤压量来自字体真实的墨迹边界，而不是猜出来的常数；换一张脸，裁剪量随之改变，断点却由字符类别与标点决定，不由作者按没按快捷键决定。
 
 强调是源文档的事实：\textbf{加粗}、\emph{斜体}、\underline{下划线}、\textsc{Small Caps}、\textsuperscript{上标}、\textsubscript{下标}，以及不可断的等宽对象 \texttt{soma.render/7}。链接只画文字，PDF 里是真正的 \href{https://example.com/soma}{注解矩形}；URL 只在斜杠与点后给出断点，字母中间不会被截断，例如 \url{https://example.com/a/very/long/path/that/must/not/be/split}。
 
@@ -92,17 +92,17 @@ cargo run -p soma-cli -- render \
 
 题注在表的上方、图的下方，编号由模板生成。题注本身也是可断行的段落：一行放不下就换行，而不是缩字号；图目录与表目录里的页码来自第二遍排版，与正文页码同时收敛。
 
-图片的盒子尺寸来自位图自身的宽高比，PNG 走无损路径，JPEG 直通阅读器。两张图并排会互相挤压，所以这里一上一下，各占半页：
+图片的盒子尺寸来自位图自身的宽高比，PNG 走无损路径，JPEG 直通阅读器。两张图并排会互相挤压，所以这里一上一下，各占一条版心宽度：
 
 \begin{figure}
 \centering
-\includegraphics[width=0.5\linewidth]{fig/pipeline.png}
+\includegraphics{fig/pipeline.png}
 \caption{一张 PNG 位图：像素由后端解码后重新压缩}
 \end{figure}
 
 \begin{figure}
 \centering
-\includegraphics[width=0.42\linewidth]{fig/photo.jpg}
+\includegraphics{fig/photo.jpg}
 \caption{一张 JPEG 位图：原样嵌入，由阅读器解码}
 \end{figure}
 
@@ -163,7 +163,7 @@ A line of English prose is set here so that a long word such as internationaliza
 
 拼音排序不是逐字查字典：每个汉字映射到一个无声调的音节排名，词条按“是不是汉字、音节排名、码位”逐字比较，拉丁字母与数字排在汉字之前。这样“八”不会排在“阿”前面，同音词也有稳定的先后。
 
-索引词条支持两级以上：`汉字!字形` 是“汉字”下面的子条目，父条目没有单独标记时也会自动补一行；页码合并时连续三页以上写成起止页，两页仍然分开列，因为两页的区间省不下多少空间。
+索引词条支持两级以上：\texttt{汉字!字形} 是“汉字”下面的子条目，父条目没有单独标记时也会自动补一行；页码合并时连续三页以上写成起止页，两页仍然分开列，因为两页的区间省不下多少空间。
 
 \section{索引与页码区间}
 
