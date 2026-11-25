@@ -3926,6 +3926,7 @@ impl Builder<'_> {
         let first = items.len();
         if let Some(title) = spec.title.as_deref().filter(|title| !title.is_empty()) {
             let node = self.generated_id();
+            let title_align = self.computed(title_style).align;
             let item = self.text_item_at(
                 node,
                 BoxKind::Paragraph,
@@ -3934,7 +3935,7 @@ impl Builder<'_> {
                 Slot {
                     x: Width::ZERO,
                     width: self.content_width,
-                    align: Align::Left,
+                    align: title_align,
                 },
             )?;
             let index = items.len();

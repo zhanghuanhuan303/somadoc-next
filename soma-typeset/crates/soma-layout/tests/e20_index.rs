@@ -37,6 +37,7 @@ styles:
       element: indexTitle
     declarations:
       font-size: 12pt
+      align: center
       space-after: 0.6em
 "#;
 
@@ -121,6 +122,12 @@ fn index_entries_use_the_generated_element_style() {
     assert_eq!(entry.style, entry_style);
     let title = layout.pages[2].blocks.first().expect("index title");
     assert_eq!(title.style, styled.index_title_style());
+    let line = &title.lines[0].line;
+    let expected = (title.width.0 - line.natural_width.0) / 2;
+    assert_eq!(
+        line.boxes[0].x.0, expected,
+        "indexTitle align: center must centre the generated title"
+    );
 }
 
 #[test]

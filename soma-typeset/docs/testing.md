@@ -157,7 +157,7 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `e17_front_matter.rs` (layout) | 5 | continuous/roman/hidden labels, `{pages}` = body pages, no folio on hidden pages |
 | `e18_captions.rs` (layout) | 4 | figure/table caption elements, indent reset, emphasis keeps the caption base |
 | `e19_outline.rs` (layout) | 3 | one bookmark per heading, printed labels, empty document |
-| `e20_index.rs` (layout) | 13 | sorted unique terms, page lists and ranges, own page, entry styles, empty index, sub-entry indentation, orphan parents, pinyin order, `see`, table-cell and footnote markers |
+| `e20_index.rs` (layout) | 13 | sorted unique terms, page lists and ranges, own page, entry styles, centered `indexTitle`, empty index, sub-entry indentation, orphan parents, pinyin order, `see`, table-cell and footnote markers |
 | `e25_ruby.rs` (layout) | 4 | one base atom, annotation text and geometry, line ascent reserved, canonical key only when present |
 | `e26_hyphen.rs` (layout) | 5 | pattern breaks, hyphen charged to the line, no patterns keeps the word whole, URLs untouched, canonical marker |
 | `e21_line_end_punctuation.rs` (layout) | 6 | trailing bearing trimmed on justified lines, ink on the text edge, ragged lines untouched |
