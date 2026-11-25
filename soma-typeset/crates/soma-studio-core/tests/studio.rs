@@ -100,6 +100,52 @@ fn probe_samples_come_from_the_layout_faces() {
 }
 
 #[test]
+fn hyphenation_patterns_reach_the_shared_build() {
+    let template = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../examples/templates/plex.yaml"
+    ))
+    .expect("plex template");
+    let patterns = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../examples/book/hyphen-en.pat"
+    ))
+    .expect("english patterns");
+    let source = "A line of deliberately long English is placed here to exercise \
+        hyphenationhyphenationhyphenationhyphenationhyphenationhyphenation, and then it stops.";
+    let parsed = parse_document(SourceFormat::Markdown, source.as_bytes()).expect("parse");
+    let build = build(
+        parsed,
+        BuildOptions {
+            template: &template,
+            engine: None,
+            metrics: None,
+            hyphenation: Some(&patterns),
+        },
+    )
+    .expect("build");
+
+    let mut hyphenated = 0;
+    let mut overfull = 0;
+    for page in &build.pages.pages {
+        for block in &page.blocks {
+            for placed in &block.lines {
+                hyphenated += usize::from(placed.line.hyphenated);
+                overfull += usize::from(placed.line.overfull);
+            }
+        }
+    }
+    assert!(
+        hyphenated > 0,
+        "the long word must break at a pattern point"
+    );
+    assert_eq!(
+        overfull, 0,
+        "hyphenation must keep every line inside the measure"
+    );
+}
+
+#[test]
 fn build_is_deterministic() {
     let first = built();
     let second = built();

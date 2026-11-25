@@ -44,6 +44,7 @@ Options:
 | `--template`, `-t` | Template YAML. Omitted: the built-in Plex reference. |
 | `--engine` | `soma.engine/1` YAML. Omitted: the preset defaults. |
 | `--metrics` | Metrics table. Omitted: the embedded `soma.metrics/7` table. The browser fetches the same bytes from `/api/metrics`. |
+| `--hyphenation` | TeX pattern file (e.g. `hyphen-en.pat`) for Liang hyphenation of Latin words. Omitted: the server uses `<project root>/hyphen-en.pat` when present, otherwise no word is broken. The browser fetches the same text from `/api/hyphenation`. |
 | `--font`, `--font-bold`, `--font-sans`, `--font-sans-bold`, `--font-mono`, `--font-mono-bold`, `--font-math`, `--font-fallback` | Optional font files for PDF and for `@font-face` in the proof. `path#index` selects a TTC face. Math is bundled when omitted. When a body face is omitted, the server probes fontconfig (`fc-match`) for Noto Serif/Sans CJK SC and Noto Sans Mono; a face must cover `中` (or `A` for mono) to be accepted. Auto faces are referenced by family name in the proof and subset into the PDF, so a missing `--font` does not produce a blank export. |
 | `--no-auto-font` | Disable fontconfig discovery; only explicit font flags are used. |
 | `--dist` | UI build directory (default `crates/soma-studio-ui/dist`). |
@@ -165,6 +166,7 @@ metrics file triggers a native rebuild:
 | `/api/source` | GET | binary source (DOCX) |
 | `/api/asset?path=` | GET | image or other project asset |
 | `/api/metrics` | GET | custom `.smt` table, when configured |
+| `/api/hyphenation` | GET | TeX patterns, when configured or found as `hyphen-en.pat` |
 | `/api/font/{role}` | GET | font bytes for `@font-face` |
 | `/api/verify` | POST | native build summary for a `BuildRequest` |
 | `/api/pdf` | POST | PDF for a `BuildRequest` |

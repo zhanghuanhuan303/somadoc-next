@@ -118,6 +118,8 @@ only).
 | [0097](0097-display-math-page-frame.md) | Display math HTML percentages resolve against the page; inline math keeps the block frame | Accepted |
 | [0098](0098-short-display-skip.md) | A display after a short line keeps half the template's space-before and 70% of its space-after | Accepted |
 | [0099](0099-radical-variant-measurement.md) | CFF variant ink drops the optional Type 2 width; HTML/SVG place the fallback glyph at the variant's ink top and advance | Accepted |
+| [0100](0100-studio-host-binding.md) | `--host` opts Studio out of loopback; the `/api` Origin allowlist follows the bound host while `cross-site` stays refused | Accepted |
+| [0101](0101-studio-hyphenation.md) | Studio loads TeX hyphenation patterns from `--hyphenation` or `hyphen-en.pat` and feeds native and wasm builds | Accepted |
 
 ## Rules
 

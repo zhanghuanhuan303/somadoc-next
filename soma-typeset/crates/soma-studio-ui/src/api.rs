@@ -90,6 +90,17 @@ pub async fn metrics() -> Result<Vec<u8>, String> {
     response.binary().await.map_err(|e| e.to_string())
 }
 
+pub async fn hyphenation() -> Result<String, String> {
+    let response = Request::get("/api/hyphenation")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !response.ok() {
+        return Err(format!("读取断词规则失败（HTTP {}）", response.status()));
+    }
+    response.text().await.map_err(|e| e.to_string())
+}
+
 pub async fn source_bytes() -> Result<Vec<u8>, String> {
     let response = Request::get("/api/source")
         .send()

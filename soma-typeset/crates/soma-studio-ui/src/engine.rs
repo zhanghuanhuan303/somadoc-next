@@ -33,6 +33,7 @@ pub async fn build(
     template: &str,
     engine: Option<&str>,
     metrics: Option<&[u8]>,
+    hyphenation: Option<&str>,
 ) -> Result<AppBuild, String> {
     let started = js_sys::Date::now();
     let bytes: &[u8] = match input {
@@ -63,7 +64,7 @@ pub async fn build(
             template,
             engine,
             metrics,
-            hyphenation: None,
+            hyphenation,
         },
     )?;
     let fragments = build.fragments(&images);

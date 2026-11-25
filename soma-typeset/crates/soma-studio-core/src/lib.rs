@@ -682,6 +682,9 @@ pub struct ProjectPayload {
     /// True when the project carries a custom `soma.metrics` table. The UI
     /// fetches it once so the wasm build uses exactly the native table.
     pub custom_metrics: bool,
+    /// True when the server loaded hyphenation patterns. The UI fetches the
+    /// same text from `/api/hyphenation` before the first build.
+    pub custom_hyphenation: bool,
 }
 
 /// A request that asks the server to build text the browser currently holds.

@@ -42,6 +42,7 @@ struct Options {
     template: Option<PathBuf>,
     engine: Option<PathBuf>,
     metrics: Option<PathBuf>,
+    hyphenation: Option<PathBuf>,
     host: String,
     port: u16,
     dist: PathBuf,
@@ -75,6 +76,7 @@ struct Bundle {
     template: String,
     engine: Option<String>,
     metrics: Option<Vec<u8>>,
+    hyphenation: Option<String>,
     version: u64,
 }
 
@@ -141,6 +143,7 @@ async fn main() {
         .route("/api/source", get(source))
         .route("/api/asset", get(asset))
         .route("/api/metrics", get(metrics_file))
+        .route("/api/hyphenation", get(hyphenation_file))
         .route("/api/font/{role}", get(font))
         .route("/api/verify", post(verify))
         .route("/api/pdf", post(export_pdf))
@@ -173,6 +176,9 @@ async fn main() {
         println!("soma-studio: listening on every interface ({address})");
     }
     println!("soma-studio: input {}", state.options.input.display());
+    if let Some(path) = &state.options.hyphenation {
+        println!("soma-studio: hyphenation {}", path.display());
+    }
     if state.options.open {
         open_browser(&url);
     }
@@ -189,6 +195,7 @@ soma-studio — all-Rust wasm workbench with an Axum I/O boundary
 usage:
   soma-studio --input <file> [--template <yaml>] [--engine <yaml>]
               [--metrics <smt>]
+              [--hyphenation <patterns>]
               [--font <file[#index]>] [--font-bold <file[#index]>]
               [--font-sans <file[#index]>] [--font-sans-bold <file[#index]>]
               [--font-mono <file[#index]>] [--font-mono-bold <file[#index]>]
@@ -204,6 +211,7 @@ fn parse_args(args: Vec<String>) -> Result<(Options, FontSpecs), String> {
     let mut template = None;
     let mut engine = None;
     let mut metrics = None;
+    let mut hyphenation = None;
     let mut host = String::from("127.0.0.1");
     let mut port = 7070u16;
     let mut dist = None;
@@ -226,6 +234,7 @@ fn parse_args(args: Vec<String>) -> Result<(Options, FontSpecs), String> {
             "--template" | "-t" => template = Some(PathBuf::from(value()?)),
             "--engine" => engine = Some(PathBuf::from(value()?)),
             "--metrics" => metrics = Some(PathBuf::from(value()?)),
+            "--hyphenation" => hyphenation = Some(PathBuf::from(value()?)),
             "--font" => specs.serif = Some(value()?),
             "--font-bold" => specs.serif_bold = Some(value()?),
             "--font-sans" => specs.sans = Some(value()?),
@@ -271,12 +280,25 @@ fn parse_args(args: Vec<String>) -> Result<(Options, FontSpecs), String> {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../soma-studio-ui/dist")
     });
     let dist = dist.canonicalize().unwrap_or(dist);
+    let hyphenation = match hyphenation {
+        Some(path) => Some(
+            path.canonicalize()
+                .map_err(|error| format!("{}: {error}", path.display()))?,
+        ),
+        None => {
+            let probe = root.join("hyphen-en.pat");
+            probe
+                .is_file()
+                .then(|| probe.canonicalize().unwrap_or(probe))
+        }
+    };
     let options = Options {
         input,
         root,
         template,
         engine,
         metrics,
+        hyphenation,
         host,
         port,
         dist,
@@ -533,6 +555,15 @@ fn read_metrics(options: &Options) -> Result<Option<Vec<u8>>, String> {
     }
 }
 
+fn read_hyphenation(options: &Options) -> Result<Option<String>, String> {
+    match &options.hyphenation {
+        Some(path) => std::fs::read_to_string(path)
+            .map(Some)
+            .map_err(|error| format!("{}: {error}", path.display())),
+        None => Ok(None),
+    }
+}
+
 /* ------------------------------------------------------------------- bundle */
 
 fn load_bundle(
@@ -569,6 +600,7 @@ fn load_bundle(
             options.input.display()
         )
     })?;
+    let hyphenation = read_hyphenation(options)?;
 
     let started = Instant::now();
     let (native, native_error) = match native_build(
@@ -577,6 +609,7 @@ fn load_bundle(
         &template,
         engine.as_deref(),
         metrics.as_deref(),
+        hyphenation.as_deref(),
         &options.root,
     ) {
         Ok(build) => (build.summary(started.elapsed().as_millis() as u64), None),
@@ -634,6 +667,7 @@ fn load_bundle(
         native_error,
         pdf: fonts.contains_key("serif"),
         custom_metrics: metrics.is_some(),
+        custom_hyphenation: hyphenation.is_some(),
     };
 
     Ok(Bundle {
@@ -648,6 +682,7 @@ fn load_bundle(
             None => None,
         },
         metrics,
+        hyphenation,
         version,
     })
 }
@@ -658,6 +693,7 @@ fn native_build(
     template: &str,
     engine: Option<&str>,
     metrics: Option<&[u8]>,
+    hyphenation: Option<&str>,
     root: &Path,
 ) -> Result<Build, String> {
     let mut parsed = parse_document(format, source)?;
@@ -679,7 +715,7 @@ fn native_build(
             template,
             engine,
             metrics,
-            hyphenation: None,
+            hyphenation,
         },
     )
 }
@@ -820,6 +856,14 @@ async fn metrics_file(State(state): State<Arc<AppState>>) -> Response {
     }
 }
 
+async fn hyphenation_file(State(state): State<Arc<AppState>>) -> Response {
+    let hyphenation = state.bundle.read().unwrap().hyphenation.clone();
+    match hyphenation {
+        Some(text) => bytes_response("text/plain; charset=utf-8", text.into_bytes()),
+        None => (StatusCode::NOT_FOUND, "no hyphenation patterns").into_response(),
+    }
+}
+
 async fn font(State(state): State<Arc<AppState>>, AxumPath(role): AxumPath<String>) -> Response {
     let Some(entry) = state.fonts.get(&role) else {
         return (StatusCode::NOT_FOUND, "font role not configured").into_response();
@@ -838,7 +882,7 @@ async fn verify(
     State(state): State<Arc<AppState>>,
     Json(request): Json<BuildRequest>,
 ) -> Result<Json<NativeSummary>, (StatusCode, String)> {
-    let (format, source, template, engine, metrics) =
+    let (format, source, template, engine, metrics, hyphenation) =
         request_input(&state, &request).map_err(|error| (StatusCode::BAD_REQUEST, error))?;
     let started = Instant::now();
     let build = native_build(
@@ -847,6 +891,7 @@ async fn verify(
         &template,
         engine.as_deref(),
         metrics.as_deref(),
+        hyphenation.as_deref(),
         &state.options.root,
     )
     .map_err(|error| (StatusCode::UNPROCESSABLE_ENTITY, error))?;
@@ -857,7 +902,7 @@ async fn export_pdf(
     State(state): State<Arc<AppState>>,
     Json(request): Json<BuildRequest>,
 ) -> Result<Response, (StatusCode, String)> {
-    let (format, source, template, engine, metrics) =
+    let (format, source, template, engine, metrics, hyphenation) =
         request_input(&state, &request).map_err(|error| (StatusCode::BAD_REQUEST, error))?;
     let build = native_build(
         format,
@@ -865,6 +910,7 @@ async fn export_pdf(
         &template,
         engine.as_deref(),
         metrics.as_deref(),
+        hyphenation.as_deref(),
         &state.options.root,
     )
     .map_err(|error| (StatusCode::UNPROCESSABLE_ENTITY, error))?;
@@ -884,6 +930,7 @@ type RequestInput = (
     String,
     Option<String>,
     Option<Vec<u8>>,
+    Option<String>,
 );
 
 fn request_input(state: &AppState, request: &BuildRequest) -> Result<RequestInput, String> {
@@ -905,7 +952,8 @@ fn request_input(state: &AppState, request: &BuildRequest) -> Result<RequestInpu
         .unwrap_or_else(|| bundle.template.clone());
     let engine = request.engine.clone().or_else(|| bundle.engine.clone());
     let metrics = bundle.metrics.clone();
-    Ok((format, source, template, engine, metrics))
+    let hyphenation = bundle.hyphenation.clone();
+    Ok((format, source, template, engine, metrics, hyphenation))
 }
 
 async fn rebuild(
@@ -959,6 +1007,9 @@ fn snapshot(options: &Options) -> Vec<(PathBuf, Option<SystemTime>)> {
         paths.push(path.clone());
     }
     if let Some(path) = &options.metrics {
+        paths.push(path.clone());
+    }
+    if let Some(path) = &options.hyphenation {
         paths.push(path.clone());
     }
     paths

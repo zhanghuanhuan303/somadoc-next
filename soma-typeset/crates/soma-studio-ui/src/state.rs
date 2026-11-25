@@ -128,6 +128,7 @@ pub struct Studio {
     pub engine_text: RwSignal<Option<String>>,
     pub docx_bytes: RwSignal<Option<Vec<u8>>>,
     pub metrics_bytes: RwSignal<Option<Vec<u8>>>,
+    pub hyphenation: RwSignal<Option<String>>,
     pub build: RwSignal<Option<engine::AppBuild>>,
     pub build_error: RwSignal<Option<String>>,
     pub building: RwSignal<bool>,
@@ -178,6 +179,7 @@ impl Studio {
             engine_text: RwSignal::new(None),
             docx_bytes: RwSignal::new(None),
             metrics_bytes: RwSignal::new(None),
+            hyphenation: RwSignal::new(None),
             build: RwSignal::new(None),
             build_error: RwSignal::new(None),
             building: RwSignal::new(false),
@@ -240,6 +242,7 @@ pub fn apply_project(studio: Studio, project: ProjectPayload) {
     studio.engine_text.set(project.engine.clone());
     studio.docx_bytes.set(None);
     studio.metrics_bytes.set(None);
+    studio.hyphenation.set(None);
     studio.aux.set(None);
     studio.page.set(0);
     studio.selection.set(Selection::default());
@@ -249,6 +252,12 @@ pub fn apply_project(studio: Studio, project: ProjectPayload) {
         if project.custom_metrics {
             match api::metrics().await {
                 Ok(bytes) => studio.metrics_bytes.set(Some(bytes)),
+                Err(error) => studio.build_error.set(Some(error)),
+            }
+        }
+        if project.custom_hyphenation {
+            match api::hyphenation().await {
+                Ok(text) => studio.hyphenation.set(Some(text)),
                 Err(error) => studio.build_error.set(Some(error)),
             }
         }
@@ -347,6 +356,13 @@ fn reload_server_build(studio: Studio) {
                 } else {
                     studio.metrics_bytes.set(None);
                 }
+                if project.custom_hyphenation {
+                    if let Ok(text) = api::hyphenation().await {
+                        studio.hyphenation.set(Some(text));
+                    }
+                } else {
+                    studio.hyphenation.set(None);
+                }
                 studio.project.set(Some(project));
                 if docx {
                     if let Ok(bytes) = api::source_bytes().await {
@@ -441,6 +457,7 @@ pub fn rebuild_now(studio: Studio) {
     let template = studio.template.get_untracked();
     let engine = studio.engine_text.get_untracked();
     let metrics = studio.metrics_bytes.get_untracked();
+    let hyphenation = studio.hyphenation.get_untracked();
     studio.building.set(true);
     studio.build_error.set(None);
 
@@ -459,6 +476,7 @@ pub fn rebuild_now(studio: Studio) {
                 &template,
                 engine.as_deref(),
                 metrics.as_deref(),
+                hyphenation.as_deref(),
             )
             .await
         } else {
@@ -468,6 +486,7 @@ pub fn rebuild_now(studio: Studio) {
                 &template,
                 engine.as_deref(),
                 metrics.as_deref(),
+                hyphenation.as_deref(),
             )
             .await
         };

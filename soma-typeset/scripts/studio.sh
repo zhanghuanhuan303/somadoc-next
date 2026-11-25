@@ -63,6 +63,7 @@ fi
 
 echo "== gate S: fixtures =="
 cp examples/templates/plex.yaml "$WORK/template.yaml"
+cp examples/book/hyphen-en.pat "$WORK/hyphen-en.pat"
 cat > "$WORK/main.md" <<'EOF'
 # 主文档
 
@@ -165,7 +166,7 @@ if grep -nE '#[0-9a-fA-F]{3,8}' crates/soma-studio-ui/style/studio.css; then
 fi
 
 echo "== gate S: S10 assistant has no engine write path =="
-if grep -nE 'studio\.(build|source|template|engine_text|metrics_bytes)\.set|rebuild_now|break_paragraph|soma_core::' \
+if grep -nE 'studio\.(build|source|template|engine_text|metrics_bytes|hyphenation)\.set|rebuild_now|break_paragraph|soma_core::' \
     crates/soma-studio-ui/src/ai.rs; then
     fail "ai.rs must not write engine inputs or call the breaker"
 fi
@@ -176,6 +177,11 @@ printf '%s\n' "$headers" | grep -qi 'content-security-policy:' || fail "missing 
 printf '%s\n' "$headers" | grep -qi 'x-content-type-options: nosniff' || fail "missing nosniff"
 
 echo "== gate S: S5/S9 native verify, PDF, SSE =="
+project_json="$(curl -sf "http://127.0.0.1:$PORT/api/project")"
+printf '%s' "$project_json" | grep -q '"customHyphenation":true' \
+    || fail "project did not report the discovered hyphen-en.pat"
+curl -sf "http://127.0.0.1:$PORT/api/hyphenation" | grep -q 'hy3ph' \
+    || fail "/api/hyphenation did not serve the patterns"
 summary="$(curl -sf -X POST -H 'content-type: application/json' -d '{}' "http://127.0.0.1:$PORT/api/verify")"
 native_pages="$(printf '%s' "$summary" | sed -n 's/.*"pages":\([0-9]*\).*/\1/p')"
 native_hash="$(printf '%s' "$summary" | sed -n 's/.*"hash":"\([0-9a-f]*\)".*/\1/p')"
