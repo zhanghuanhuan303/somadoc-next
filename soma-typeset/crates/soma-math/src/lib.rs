@@ -1205,6 +1205,21 @@ impl Parser {
                             let raw = self.read_raw_group()?;
                             nodes.extend(text_mode(&raw)?);
                         }
+                        // Font-selection commands are transparent until the
+                        // math face carries a bold/roman variant: the body
+                        // still lays out, instead of failing the whole formula.
+                        "mathbf" | "mathrm" | "mathit" | "mathsf" | "mathtt" | "mathcal"
+                        | "mathbb" | "mathfrak" | "boldsymbol" => {
+                            nodes.push(self.parse_group()?);
+                        }
+                        "LaTeX" => nodes.push(Node::Symbol {
+                            text: String::from("LaTeX"),
+                            class: Class::Ord,
+                        }),
+                        "TeX" => nodes.push(Node::Symbol {
+                            text: String::from("TeX"),
+                            class: Class::Ord,
+                        }),
                         "tag" => {
                             // `\tag*{...}` drops the parentheses; the star is a
                             // character, not part of the command name.
@@ -1686,6 +1701,7 @@ fn symbol(command: &str) -> Option<&'static str> {
         "gamma" => "γ",
         "delta" => "δ",
         "epsilon" => "ε",
+        "varepsilon" => "ε",
         "zeta" => "ζ",
         "eta" => "η",
         "theta" => "θ",
@@ -3062,7 +3078,10 @@ impl Context<'_> {
         let col_gap = if kind == MatrixKind::Aligned {
             0
         } else {
-            scale(size, self.style.rel_gap)
+            // TeX's `\arraycolsep` is wider than a relation gap; digits have
+            // almost no side bearing, so a three-column matrix otherwise reads
+            // as one run (`123`). Half an em is the smallest readable gutter.
+            scale(size, self.style.rel_gap).max(size.0 / 2)
         };
 
         let mut widths = alloc::vec![0i32; cols];

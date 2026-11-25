@@ -274,6 +274,28 @@ fn html_blocks_parse_embedded_markdown_math_and_latex() {
 }
 
 #[test]
+fn details_is_a_transparent_block_and_keeps_its_content() {
+    let document =
+        parse_markdown("<details>\n<summary>点击展开</summary>\n\n折叠内容 $x$。\n\n</details>\n");
+    document.validate().expect("valid DocIR");
+    let text = document.plain_text();
+
+    assert!(text.contains("点击展开"), "{text}");
+    assert!(text.contains("折叠内容"), "{text}");
+    assert!(!text.contains("<details>"), "no raw tags: {text}");
+    assert!(
+        document.blocks.iter().any(|block| match block {
+            Block::Paragraph(node) => node
+                .inlines
+                .iter()
+                .any(|inline| matches!(inline, Inline::Math(_))),
+            _ => false,
+        }),
+        "math inside the details body survives"
+    );
+}
+
+#[test]
 fn inline_latex_footnote_becomes_a_definition() {
     let document = parse_markdown("前文 \\footnote{一条注\\index{脚注词条}} 后文\n");
     document.validate().expect("valid DocIR");

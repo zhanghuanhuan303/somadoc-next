@@ -204,9 +204,9 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `soma-studio` unit | 5 | origin allowlist: loopback default, concrete LAN host, wildcard `Host` matching, IPv6 literals, `--host` parsing |
 | `mermaid.rs` (diagram) | 6 | Mermaid and DOT layouts, paths/labels, TikZ round trip, detection rules, directions/shapes/classes, clusters and self-loops |
 
-Total: **977 tests passed** (`cargo test --workspace`), plus **1 ignored**
+Total: **982 tests passed** (`cargo test --workspace`), plus **1 ignored**
 (`perturbation.rs`, run with `--ignored`). Counting that ignored test, the
-workspace lists **978 test functions**. The standalone
+workspace lists **983 test functions**. The standalone
 `tools/metrics-gen` crate adds its own 5 (`cargo test --manifest-path tools/metrics-gen/Cargo.toml`).
 
 Still deferred: the human blind-test run (D01), a quality-labeled corpus

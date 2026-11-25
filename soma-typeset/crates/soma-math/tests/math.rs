@@ -1252,6 +1252,27 @@ fn a_hat_uses_the_combining_mark_and_its_attachment() {
 }
 
 #[test]
+fn font_commands_are_transparent_to_the_matrix_body() {
+    let result = formula(r"\mathbf{A} = \begin{pmatrix}1 & 2 \\ 3 & 4\end{pmatrix}");
+    assert!(result.items.iter().any(|item| item.text == "A"));
+    assert!(result.items.iter().any(|item| item.text == "1"));
+    assert!(result.items.iter().any(|item| item.text == "4"));
+}
+
+#[test]
+fn latex_and_tex_are_text_symbols() {
+    let result = formula(r"\LaTeX + \TeX");
+    assert!(result.items.iter().any(|item| item.text == "LaTeX"));
+    assert!(result.items.iter().any(|item| item.text == "TeX"));
+}
+
+#[test]
+fn varepsilon_is_an_epsilon() {
+    let result = formula(r"\varepsilon_0");
+    assert!(result.items.iter().any(|item| item.text == "ε"));
+}
+
+#[test]
 fn an_accent_falls_back_to_a_drawn_arrow_only_when_the_face_lacks_it() {
     let result = layout(r"\vec{v}", &MathStyle::default(), &AccentMetrics).expect("layout");
     assert!(result.items.iter().any(|item| item.text == "\u{20d7}"));

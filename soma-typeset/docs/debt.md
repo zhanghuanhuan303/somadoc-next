@@ -131,6 +131,7 @@
 | D110 | **已完成（ADR-0106）**：`figure: width: natural/half/full` 与 `align`；LaTeX 仍只保留路径与语义尺寸提示 | 模板决定图宽/对齐；`natural` 按 96 dpi 的本征像素折算并封顶版心 | 作者不能直接写 `width=0.5\linewidth`；要由模板改 `figure.width` | 有逐图宽度需求时再加语义尺寸提示 | 否 |
 | D111 | 索引暂不排双栏 | `index_rows` 逐条生成单列 flow item；超过 24 条时仍是一列，页数浪费 | 长索引（>24 条）会多占页面 | 有长索引样书时按栏高切分生成双栏索引项 | 否 |
 | D112 | 页眉下没有细线 | `runningHead` 样式已独立，但模板没有 `header-rule` 参数，渲染器不画页眉分隔线 | 页眉与正文的视觉分层弱一些 | 需要时加 `page.header-rule` 与百分比宽度，PDF/SVG 同步 | 否 |
+| D113 | 数学字体样式只解析不变形 | `\mathbf`/`\mathrm` 等现在透明解析，保证整条公式不失败；数学面还没有粗体/正体变体，`\mathbf{A}` 仍是普通数学字 | 需要粗体的数学标题/向量只是不致于回退源码，视觉上不够重 | 有真实需求时给 `MathItem` 加字形变体并选粗体数学面 | 否 |
 | D106 | Ghostscript 渲染 CJK TrueType 子集时字形错位 | Firefox/pdf.js 与 Poppler（`pdftoppm`/`pdftotext`）渲染正确，`gs` 会把正文 CJK 换成别的字形（标题粗体正常）。用整字体替换子集、加 `cmap`/`name`/`post`、写显式 `CIDToGIDMap` 均未改变结果，倾向是 Ghostscript 对保留 GID 空洞的 CIDFontType2 子集的解释差异 | 用 Ghostscript 打印或某些基于 gs 的查看器会看到错字 | 需要时改为紧凑 CID + 重排 GID 的子集格式，并加 gs 渲染回归 | 否 |
 
 ## 3. 非目标（不是债务）
@@ -179,4 +180,4 @@
 | Web Studio | **已完成（ADR-0093/0094）**：`soma-studio-core/-ui/-` 三个 crate、S1–S10、字体探针、SSE 重载、CSP；关闭 D95，新增 D101–D105 |
 | 流程图 | **已完成（ADR-0102）**：`Block::Diagram`、Mermaid/DOT frontend、确定性分层布局、三种渲染器零改动、TikZ 导出；新增 D107 |
 | 混合语法 | **已完成（ADR-0104）**：Markdown 复用 `soma-html`/`soma-latex`，支持行内/行间数学、LaTeX 命令与环境、语义 HTML 与 HTML 块；新增 D109 |
-| 未排期 | D01、D32、D51、D60、D61、D62、D63、D65、D66、D67、D97、D98、D99、D100、D101、D102、D103、D104、D105、D106、D107、D108、D109、D111、D112、N3–N6 |
+| 未排期 | D01、D32、D51、D60、D61、D62、D63、D65、D66、D67、D97、D98、D99、D100、D101、D102、D103、D104、D105、D106、D107、D108、D109、D111、D112、D113、N3–N6 |

@@ -9,8 +9,9 @@
 //! `s`/`del`/`strike`, `code`/`kbd`/`samp`/`var`, `a`, `img`, `br`, `sup`,
 //! `sub`, `ruby`/`rt`, `ul`/`ol`/`li`, `dl`/`dt`/`dd`, `blockquote`, `pre`,
 //! `hr`, `table`/`thead`/`tbody`/`tr`/`th`/`td` (with `colspan`/`rowspan`),
-//! `figure`/`figcaption`, and the transparent containers `div`, `section`,
-//! `article`, `main`, `header`, `footer`, `nav`, `aside`, `body`, `html`.
+//! `figure`/`figcaption`, `details`/`summary`, and the transparent containers
+//! `div`, `section`, `article`, `main`, `header`, `footer`, `nav`, `aside`,
+//! `body`, `html`.
 //!
 //! A definition list has no DocIR block of its own: `dl` becomes an unordered
 //! `List` and every direct `dt`/`dd` (or one nested in a grouping `div`)
@@ -130,6 +131,8 @@ const BLOCK_TAGS: &[&str] = &[
     "td",
     "figure",
     "figcaption",
+    "details",
+    "summary",
     "div",
     "section",
     "article",
@@ -584,6 +587,18 @@ fn build_block(element: &Element, out: &mut Vec<Block>) {
             let content = build_inlines(&element.children);
             if !content.is_empty() {
                 out.push(Block::Paragraph(Paragraph::new(meta, content)));
+            }
+        }
+        "summary" => {
+            let content = build_inlines(&element.children);
+            if !content.is_empty() {
+                out.push(Block::Paragraph(Paragraph::new(
+                    meta,
+                    vec![Inline::Strong(Container::new(
+                        NodeMeta::synthesized(),
+                        content,
+                    ))],
+                )));
             }
         }
         "ul" | "ol" => {

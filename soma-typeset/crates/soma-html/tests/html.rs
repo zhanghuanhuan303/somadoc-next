@@ -467,6 +467,22 @@ styles:
 }
 
 #[test]
+fn details_and_summary_keep_their_content() {
+    let document =
+        parse_html("<details><summary>点击展开</summary><p>折叠内容 <em>x</em></p></details>");
+    document.validate().expect("valid DocIR");
+    let text = document.plain_text();
+    assert!(text.contains("点击展开"), "{text}");
+    assert!(text.contains("折叠内容"), "{text}");
+    assert!(!text.contains("<details>"), "{text}");
+
+    let Block::Paragraph(summary) = &document.blocks[0] else {
+        panic!("summary paragraph")
+    };
+    assert!(matches!(summary.inlines.first(), Some(Inline::Strong(_))));
+}
+
+#[test]
 fn pre_mermaid_class_becomes_a_diagram() {
     let document = parse_html("<pre class=\"mermaid\">flowchart TD\n  A --> B</pre>");
     assert!(matches!(document.blocks[0], Block::Diagram(_)));
