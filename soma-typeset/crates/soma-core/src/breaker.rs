@@ -894,7 +894,7 @@ impl<'a> Shaped<'a> {
                 emergency = true;
                 cost += costs.emergency.0 as i64;
             } else if end_kind == LineEnd::ParagraphEnd {
-                short_score = short_last_cost(
+                short_score = short_line_cost(
                     effective,
                     costs.short_last_threshold.0 as i64,
                     costs.short_last_scale.0,
@@ -986,6 +986,18 @@ impl<'a> Shaped<'a> {
                 adjustment = -saturating_i32(excess);
             }
         }
+
+        // A justified line that is still shorter than the threshold is a
+        // mid-paragraph widow: its glue cannot fill the measure, so the normal
+        // stage rejects it, but the emergency ladder can still admit one.
+        // Charge it with the same term the last line uses, so the ladder puts
+        // an unavoidable short line where it costs least (D115, ADR-0112).
+        short_score = short_line_cost(
+            effective,
+            costs.short_last_threshold.0 as i64,
+            costs.short_last_scale.0,
+        );
+        cost += short_score;
 
         let (boundary_deviation, ideal_gap) =
             self.cjk_latin_deviation(start, end, adjustment as i64);
@@ -1770,7 +1782,11 @@ fn badness(ratio_milli: i64, scale: u32, exponent: u8) -> i64 {
     value.min(i64::MAX as u128) as i64
 }
 
-fn short_last_cost(natural: i64, threshold: i64, scale: u32) -> i64 {
+/// Charge for a line whose content is below the short-line threshold. The
+/// term covers the ragged last line (a short tail) and, since D115, a
+/// justified non-final line that the fallback ladder had to accept short.
+/// The score is linear in the missing width: a zero-width line costs `scale`.
+fn short_line_cost(natural: i64, threshold: i64, scale: u32) -> i64 {
     if threshold <= 0 || scale == 0 {
         return 0;
     }
@@ -1983,13 +1999,36 @@ mod tests {
     }
 
     #[test]
-    fn short_last_cost_only_applies_below_two_ems() {
+    fn a_short_non_final_line_is_charged_like_a_short_tail() {
+        let paragraph = two_atom_paragraph(10);
+        let metrics = SyntheticMetrics::default();
+        let config = BreakConfig::default();
+        let shaped = Shaped::new(&paragraph, &metrics);
+
+        // One CJK atom (1em) against a 10em measure: it has no glue, so the
+        // normal stage rejects it and the ladder has to flag it emergency.
+        let short = shaped
+            .eval_line(0, 1, LineEnd::Justified, &config, true, false)
+            .expect("the emergency stage accepts a short line");
+        assert!(short.emergency);
+        // A 2em threshold with 1em of content charges half the scale.
+        assert_eq!(short.short_score, 500_000);
+
+        // A two-em line is exactly at the threshold: no short-line charge.
+        let full = shaped
+            .eval_line(0, 2, LineEnd::Justified, &config, true, false)
+            .expect("a two-atom line");
+        assert_eq!(full.short_score, 0);
+    }
+
+    #[test]
+    fn short_line_cost_only_applies_below_two_ems() {
         assert_eq!(
-            short_last_cost(Width::EM.0 as i64, Width::from_em(2).0 as i64, 1_000_000),
+            short_line_cost(Width::EM.0 as i64, Width::from_em(2).0 as i64, 1_000_000),
             500_000
         );
         assert_eq!(
-            short_last_cost(
+            short_line_cost(
                 (Width::EM.0 as i64) * 2,
                 Width::from_em(2).0 as i64,
                 1_000_000
@@ -1997,7 +2036,7 @@ mod tests {
             0
         );
         assert_eq!(
-            short_last_cost(
+            short_line_cost(
                 (Width::EM.0 as i64) * 3,
                 Width::from_em(2).0 as i64,
                 1_000_000

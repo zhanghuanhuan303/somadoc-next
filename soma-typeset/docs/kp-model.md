@@ -240,7 +240,7 @@ C(i, j) = line
         + compress_amount × c / EM
         + compress_count × [c > 0]
         + boundary_deviation × D(i, j) / ideal_gap
-        + (last ? short_score(i, j) : 0)
+        + short_score(i, j)
         + height_cost(i, j)
         + (emergency ? emergency : 0)
         + (forbidden ? forbidden : 0)
@@ -254,7 +254,7 @@ C(i, j) = line
 | `compress_amount × c / EM` | `c` 占 1 em 的比例 | 每 1em trim 的 cost |
 | `compress_count` | 一次 trim 事件 | cost / event |
 | `boundary_deviation × D / ideal_gap` | `D` 占 ideal gap 的比例 | 每 1 个 ideal gap 偏差的 cost |
-| `short_score` | `short / short_last_threshold` | 末行为 0 宽时的 cost |
+| `short_score` | `short / short_last_threshold` | 短行为 0 宽时的 cost（末行与非末行共用） |
 | `height_cost` | `excess / body_height` | 每 1 个 body height 超出的 cost |
 | `emergency` / `forbidden` | 一次事件 | cost / event |
 
@@ -326,9 +326,9 @@ D = A × sum_cjk / (G_total × N_cl)
 
 **可选的平方版本：** 如果后续评估发现平均绝对偏差不够，可以换成平方和，用 i128 或归一化比例计算；MVP 不用。
 
-#### 2.6.3 末行与段尾
+#### 2.6.3 末行、短行与段尾
 
-- 段落最后一行：不齐行，`adjustment = 0`；不做 badness；只计 `short_score`。
+- 段落最后一行：不齐行，`adjustment = 0`；不做 badness；只计短行项。
 - `short_score`：
 
 ```text
@@ -339,11 +339,12 @@ short_score = short × short_last_scale / short_last_threshold
 
 - `short_last_threshold` 默认 2em，`short_last_scale` 默认 1_000_000；两者都是 Tier A 参数。
 - `effective_width` 使用**裁剪后**的自然宽度；末行 `adjustment` 不参与。
-- 如果阈值设为 0，则不计算短末行项。
-- **`w_line` 对末行和 forced 段尾也计数。** 理由是「行」是物理成本；`short_score` 是对末行过短的额外惩罚。这一点由 golden 锁死，避免实现者自行改语义。
+- 如果阈值设为 0，则不计算短行项。
+- **ADR-0112（D115）：同一 `short_score` 也用于非末行的齐行行。** 正常阶段的短行（没有足够 glue）本来不可行；emergency 阶梯会接受它，此时按同一公式计费，避免“段中孤字”免费。`short_score` 仍是同一个字段，`Line` 不新增字段。
+- **`w_line` 对末行和 forced 段尾也计数。** 理由是「行」是物理成本；`short_score` 是对行过短的额外惩罚。这一点由 golden 锁死，避免实现者自行改语义。
 
 - 最后一行裁剪后仍超宽：正常阶段不可行；fallback 允许，标记 `overfull + emergency`。末行不拉伸，也不按 shrink 比例分配。
-- 强制换行的段尾：不拉伸、不触发 `short_score`；它是「有意短行」。
+- 强制换行的段尾：不拉伸、不触发 `short_score`；它是「有意短行」（ADR-0112：作者要求的断点不收费）。
 - 段落最后一行如果是 forced segment 的段尾，按段尾处理，不按段落末行处理。
 - **跨段落节奏不在本模型内。** `short_last`/孤字是段落级指标；评估不期待跨段效果，跨段节奏不进入 Gate Q。
 
@@ -493,7 +494,7 @@ baseline = top + ascent
 #### 2.9.4 样式与断点的关系
 
 - 加粗/斜体/链接/普通强调：宽度由 `Metrics` 决定；没有额外代价；样式切换不产生断点。
-- 行内代码：建议作为一个 `InlineObject` 或不可断 atom；宽度包含 padding/border；MVP 不在代码内部断行。
+- 行内代码：按 ADR-0111/0112 切成可断 atom（空白、`-`/`/`/`_`/`.`、驼峰接缝；超长无接缝串逐字符给高价断点）；宽度按 code 样式；不再是一个不可断对象。
 - 上标/下标：用 `StyleId + baseline_shift` 表示；与基字的边界设为 `Forbidden`，避免 `x` 和 `²` 被拆到两行。
 - 行内数学：`InlineObject`；宽度和行高由宿主提供；不可断。
 - 图片/注脚引用：`InlineObject`；不可断；参与行高。
@@ -535,7 +536,8 @@ baseline = top + ascent
 | 中文标点 | 单个 CJK atom + `PunctClass` | `StyleId` | 参与禁断/裁剪 |
 | 拉丁词 | 一个 `LatinRun` | `StyleId` | 内部不拆；MVP 不做断词 |
 | 数字/单位 | 一个 `DigitRun` | `StyleId` | `3.14`、`50%` 保持一个原子 |
-| 行内代码/对象 | 一个 `InlineObject` | `StyleId` | 不拆；宽度含 padding/border |
+| 行内代码 | 多个 `Other` atom | `StyleId` | 空白/分隔符/驼峰/超长逐字 |
+| 行内对象 | 一个 `InlineObject` | `StyleId` | 不拆；宽度含 padding/border |
 | 上下标 | 独立 atom | `StyleId` + `baseline_shift` | 与基字之间禁断 |
 | 空白 | 不产生 atom | — | 产生 `BoundaryKind::Space` |
 
@@ -599,9 +601,9 @@ baseline = top + ascent
 ### 3.6 末行与孤字
 
 - 末行不齐行。
-- 末行有效宽度 < 2em 时计 `short_score`。
-- 「孤字成行」由评估层从 `LayoutResult` 计数；代价模型只负责降低它的概率。
-- 段尾/强制换行段尾不触发短末行惩罚。
+- 末行有效宽度 < `short_last_threshold` 时计 `short_score`。
+- **非末行的孤字行也计 `short_score`（ADR-0112）**：正常阶段通常不可行，emergency 阶梯接受时不再免费。评估层仍从 `LayoutResult` 统计孤字率。
+- 段尾/强制换行段尾不触发短行惩罚。
 
 ### 3.7 强制换行 / verse
 
@@ -664,7 +666,7 @@ struct Segment {
 | 特性 | atom/边界 | 宽度 | 断行 | 行高 | MVP |
 |---|---|---|---|---|---|
 | 加粗 / 斜体 | atom + `StyleId` | `Metrics` | 普通规则 | 样式行高 | 是 |
-| 行内代码 | `InlineObject` | 含 padding/border | 不可断 | 样式行高 | 是 |
+| 行内代码 | 多个 `Other` atom | code 样式 | 空白/分隔符/驼峰/超长逐字 | 样式行高 | 是 |
 | 链接 | atom + `StyleId` | `Metrics` | 普通规则 | 样式行高 | 是 |
 | 上标 / 下标 | atom + `baseline_shift` | `Metrics` | 与基字禁断 | 行盒计算 | 是 |
 | 行内数学 | `InlineObject` | 宿主提供 | 不可断 | 宿主提供 | 是（作为对象） |
@@ -683,7 +685,7 @@ struct Segment {
 - **短语级 no-break**：如果作者希望「整个加粗短语/链接内部不换行」，由规则层在短语边界加 `Forbidden` 或 penalty；不要给样式加隐式规则。
 - **上下标**：`x²` 必须是一个基字 + 一个上标 atom，边界 `Forbidden`；行盒用 `baseline_shift` 计算。
 - **注脚引用 / 行内数学 / 行内图片**：对象本身不可断；与基字/相邻词的边界由规则层决定，默认 `Forbidden`，避免对象被孤立到下一行。
-- **行内代码**：MVP 不拆；如果未来要允许代码内换行，用特殊的 `CodeSpace` 边界，而不是普通空格。
+- **行内代码**：由规则层切分（ADR-0111/0112）；断点是普通 `BoundaryKind::Normal`，空格/分隔符/驼峰带 penalty，超长无接缝串逐字符带高价 penalty；不再使用单独的 `CodeSpace` 边界。
 - **大字号**：不改变断点规则，只改变宽度和行高；`height_scale` 默认 0。
 
 两个具体例子：
@@ -978,7 +980,7 @@ struct KpTrace {
 | `styled-mixed` | 加粗/斜体 CJK+Latin；词内样式切换不拆词 |
 | `large-inline` | 2em 行首大字；行盒变高 |
 | `super-sub` | 上下标 baseline shift；与基字禁断 |
-| `inline-code` | 行内代码不可断 |
+| `inline-code` | 行内代码在空白/分隔符/驼峰处可断；超长无接缝串逐字符可断 |
 | `edge-trim` | 行尾标点裁剪 |
 | `underfull-no-stretch` | `S == 0 && D > 0`：正常不可行，fallback 不把不足当完美 |
 | `overfull-no-shrink` | `H == 0 && E' > 0`：fallback 标 `overfull + emergency` |

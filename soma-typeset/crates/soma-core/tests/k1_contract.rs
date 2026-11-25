@@ -33,7 +33,7 @@ fn default_v1_matches_the_frozen_table() {
     let params = ParamSet::default_v1();
 
     assert_eq!(params.preset.0, "default-v1");
-    assert_eq!(params.model_version, 3);
+    assert_eq!(params.model_version, 4);
     assert_eq!(params.break_params.tolerance, Permille(3000));
     assert_eq!(params.break_params.emergency_tolerance, Permille(10_000));
     assert_eq!(params.break_params.max_lines, None);

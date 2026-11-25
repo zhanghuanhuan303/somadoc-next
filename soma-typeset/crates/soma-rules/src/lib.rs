@@ -177,6 +177,15 @@ const CODE_BREAK_PENALTY: i32 = 100;
 /// only when keeping it whole would stretch or overfull the line worse than
 /// this penalty (ADR-0111).
 const WORD_BREAK_PENALTY: i32 = 500;
+/// A break inside a long code run that has no space and no separator
+/// (`a1b2c3d4e5f6a7b8`, a base64 token). The run is split per character and
+/// the break is priced far above a separator break, so it only happens when
+/// the line cannot fit the run any other way (D114).
+const INTRUSIVE_BREAK_PENALTY: i32 = 2_000;
+/// A code segment longer than this many characters is split per character.
+/// Shorter segments stay one atom: a normal code word must not litter the
+/// paragraph with price-only break points.
+const CODE_INTRUSIVE_MIN_CHARS: usize = 12;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuleError {
@@ -365,29 +374,54 @@ pub fn paragraph_from_spans(
                     continue;
                 }
                 // Inline code breaks at its own spaces and, at a price, after
-                // `-` or `/`: a long expression such as
-                // `round(tick * tempo_num / den)` may wrap after `tick`, and a
-                // URL may wrap after a path separator, while `metronome-rs`
-                // stays whole unless the line cannot afford it. White space
-                // stays at the tail of the piece before it, so text copied out
-                // of the page keeps its exact spacing (ADR-0111).
+                // `-`, `/`, `_` or `.`, and at camelCase seams: a long
+                // expression such as `round(tick * tempo_num / den)` may wrap
+                // after `tick`, and a URL may wrap after a path separator,
+                // while `metronome-rs` stays whole unless the line cannot
+                // afford it. A run with none of those (a hash, a base64 token)
+                // is split per character behind a much higher penalty so it
+                // can wrap at all (D114). White space stays at the tail of the
+                // piece before it, so text copied out of the page keeps its
+                // exact spacing (ADR-0111, ADR-0112).
                 let mut first = true;
                 for piece in code_pieces(trimmed) {
                     for (index, segment) in code_segments(&piece).into_iter().enumerate() {
-                        if !first {
-                            builder.join = if index == 0 {
-                                Join::Code
-                            } else {
-                                Join::WordBreak
-                            };
+                        let join = if index == 0 {
+                            Join::Code
+                        } else {
+                            Join::WordBreak
+                        };
+                        if segment.chars().count() > CODE_INTRUSIVE_MIN_CHARS {
+                            for (char_index, piece) in
+                                intrusive_pieces(segment).into_iter().enumerate()
+                            {
+                                if !first {
+                                    builder.join = if char_index == 0 {
+                                        join
+                                    } else {
+                                        Join::Intrusive
+                                    };
+                                }
+                                builder.push_atom(
+                                    piece,
+                                    AtomKind::Other,
+                                    PunctClass::None,
+                                    span.style,
+                                );
+                                first = false;
+                            }
+                        } else {
+                            if !first {
+                                builder.join = join;
+                            }
+                            builder.push_atom(
+                                String::from(segment),
+                                AtomKind::Other,
+                                PunctClass::None,
+                                span.style,
+                            );
+                            first = false;
                         }
-                        builder.push_atom(
-                            String::from(segment),
-                            AtomKind::Other,
-                            PunctClass::None,
-                            span.style,
-                        );
-                        first = false;
                     }
                 }
             }
@@ -446,26 +480,71 @@ fn code_pieces(text: &str) -> Vec<String> {
     pieces
 }
 
-/// Split one code piece after `-` and `/` when a non-space follows, keeping the
+/// Split one code piece after a separator or at a camelCase seam, keeping the
 /// separator at the end of the segment before it. A separator next to a space
 /// is left alone: the space is the better break, and a segment that begins
 /// with one is never a legal line start.
+///
+/// `-`, `/` and `_` always open a seam; `.` does so only between word
+/// characters and not between two digits (`1.5` is one token). A lower→upper
+/// or acronym→word transition (`someName`, `HTTPServer`) opens a seam as well,
+/// because long identifiers are otherwise unbreakable (D114).
 fn code_segments(piece: &str) -> Vec<&str> {
+    let chars: Vec<(usize, char)> = piece.char_indices().collect();
     let mut segments = Vec::new();
     let mut start = 0usize;
-    for (index, character) in piece.char_indices() {
-        if !matches!(character, '-' | '/') {
+    for index in 0..chars.len() {
+        let (offset, character) = chars[index];
+        let end = offset + character.len_utf8();
+        let Some((_, next)) = chars.get(index + 1) else {
+            break;
+        };
+        if next.is_whitespace() {
             continue;
         }
-        let end = index + character.len_utf8();
-        let next = piece[end..].chars().next();
-        if next.is_some_and(|next| !next.is_whitespace()) {
+        let previous = index.checked_sub(1).map(|previous| chars[previous].1);
+        let split = match character {
+            '-' | '/' | '_' => true,
+            '.' => {
+                previous.is_some_and(|previous| previous.is_ascii_alphanumeric())
+                    && next.is_ascii_alphanumeric()
+                    && !(previous.is_some_and(|previous| previous.is_ascii_digit())
+                        && next.is_ascii_digit())
+            }
+            _ => {
+                (next.is_ascii_uppercase()
+                    && (character.is_ascii_lowercase() || character.is_ascii_digit()))
+                    || (character.is_ascii_uppercase()
+                        && next.is_ascii_uppercase()
+                        && chars
+                            .get(index + 2)
+                            .is_some_and(|(_, lower)| lower.is_ascii_lowercase()))
+            }
+        };
+        if split {
             segments.push(&piece[start..end]);
             start = end;
         }
     }
     segments.push(&piece[start..]);
     segments
+}
+
+/// One atom per character for a long code segment. Whitespace (which can only
+/// sit at the tail of a segment) is glued to the atom before it, so a line
+/// never starts with an invisible space atom.
+fn intrusive_pieces(segment: &str) -> Vec<String> {
+    let mut pieces: Vec<String> = Vec::new();
+    for character in segment.chars() {
+        if character.is_whitespace() {
+            if let Some(previous) = pieces.last_mut() {
+                previous.push(character);
+                continue;
+            }
+        }
+        pieces.push(single_char(character));
+    }
+    pieces
 }
 
 /// Shared state for both entry points. `pending_space` lives here so it carries
@@ -495,11 +574,15 @@ enum Join {
     /// A break after a space inside inline code. The space is kept in the
     /// preceding atom, so copying the code still yields the exact source.
     Code,
-    /// A break after `-` or `/` in a Latin run or an inline-code piece. The
-    /// break is allowed — a long URL or identifier must be able to wrap — but
-    /// it carries a penalty, so a word stays whole whenever the line can
+    /// A break after a hyphen or a slash inside a Latin run or a code piece.
+    /// The break is allowed — a long URL or identifier must be able to wrap —
+    /// but it carries a penalty, so a word stays whole whenever the line can
     /// afford it.
     WordBreak,
+    /// A break inside a long code run with no space and no separator. The run
+    /// is split per character; the penalty is high enough that the breaker
+    /// only reaches for it when the run cannot fit on the line at all.
+    Intrusive,
 }
 
 impl<'a> Builder<'a> {
@@ -760,6 +843,16 @@ fn push_atom(
                 let mut boundary = normal_boundary(previous, &atom);
                 if boundary.breakable == Breakability::Allowed {
                     boundary.penalty = WORD_BREAK_PENALTY;
+                }
+                boundary
+            }
+            // A character split inside a long code run: allowed only through
+            // the fallback ladder's last resort, priced above every ordinary
+            // break so a token that fits is never cut (D114).
+            Join::Intrusive => {
+                let mut boundary = normal_boundary(previous, &atom);
+                if boundary.breakable == Breakability::Allowed {
+                    boundary.penalty = INTRUSIVE_BREAK_PENALTY;
                 }
                 boundary
             }

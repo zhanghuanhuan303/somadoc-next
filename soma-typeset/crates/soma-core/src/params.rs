@@ -122,8 +122,11 @@ impl ParamSet {
     pub fn default_v1() -> Self {
         Self {
             preset: PresetId("default-v1"),
-            model_version: 3,
-            rules_version: 1,
+            // 4: the short-line term also charges a short non-final line
+            // (D115). 2: ADR-0111/0112 changed code segmentation and the
+            // separator penalties.
+            model_version: 4,
+            rules_version: 2,
             metrics_version: 0,
             break_params: BreakParams {
                 tolerance: Permille(3000),
@@ -456,7 +459,7 @@ mod tests {
             base.break_params.costs.badness_scale
         );
         assert_eq!(publish.break_params.fallback, base.break_params.fallback);
-        assert_eq!(publish.rules_version, 1, "the trim table changed");
+        assert_eq!(publish.rules_version, 2, "ADR-0111/0112 changed the rules");
         publish.validate().expect("publish-v1 must be valid");
         assert_ne!(publish.param_hash(), base.param_hash());
     }

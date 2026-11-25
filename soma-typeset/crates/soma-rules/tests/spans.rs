@@ -161,12 +161,102 @@ fn inline_code_never_breaks_before_a_separator() {
         .iter()
         .map(|atom| atom.text.as_str())
         .collect();
-    assert_eq!(texts, ["https:/", "/", "example.com/", "a/"]);
+    assert_eq!(texts, ["https:/", "/", "example.", "com/", "a/"]);
     // A break after `https://` is allowed …
     assert_eq!(paragraph.boundaries[1].breakable, Breakability::Allowed);
     assert!(paragraph.boundaries[1].penalty > 0);
     // … but not between `https/` and `//`, which would start a line with `/`.
     assert_eq!(paragraph.boundaries[0].breakable, Breakability::Forbidden);
+}
+
+#[test]
+fn camel_case_seams_are_priced_word_breaks() {
+    let paragraph = paragraph_from_spans(
+        &[InlineSpan::code("someVeryLongIdentifier", StyleId(1))],
+        style(),
+    )
+    .expect("paragraph");
+    let texts: Vec<&str> = paragraph
+        .atoms
+        .iter()
+        .map(|atom| atom.text.as_str())
+        .collect();
+    assert_eq!(texts, ["some", "Very", "Long", "Identifier"]);
+    for boundary in &paragraph.boundaries {
+        assert_eq!(boundary.breakable, Breakability::Allowed);
+        assert_eq!(boundary.penalty, 500, "a case seam is a word break");
+    }
+}
+
+#[test]
+fn snake_case_and_dotted_paths_split_at_their_separators() {
+    let paragraph =
+        paragraph_from_spans(&[InlineSpan::code("some_long.path", StyleId(1))], style())
+            .expect("paragraph");
+    let texts: Vec<&str> = paragraph
+        .atoms
+        .iter()
+        .map(|atom| atom.text.as_str())
+        .collect();
+    assert_eq!(texts, ["some_", "long.", "path"]);
+    // A decimal separator is not a word seam.
+    let number = paragraph_from_spans(&[InlineSpan::code("v1.2.3", StyleId(1))], style())
+        .expect("paragraph");
+    assert_eq!(number.atoms.len(), 1);
+    assert_eq!(number.atoms[0].text, "v1.2.3");
+}
+
+#[test]
+fn a_long_unseparated_code_run_breaks_per_character() {
+    let text = "a1b2c3d4e5f6a7b8c9d0e1f2";
+    let paragraph =
+        paragraph_from_spans(&[InlineSpan::code(text, StyleId(1))], style()).expect("paragraph");
+    assert_eq!(paragraph.atoms.len(), text.len());
+    assert!(paragraph
+        .boundaries
+        .iter()
+        .all(|boundary| boundary.breakable == Breakability::Allowed),);
+    assert!(
+        paragraph
+            .boundaries
+            .iter()
+            .all(|boundary| boundary.penalty == 2_000),
+        "an intrusive break is the most expensive ordinary break"
+    );
+    let joined: String = paragraph
+        .atoms
+        .iter()
+        .map(|atom| atom.text.as_str())
+        .collect();
+    assert_eq!(joined, text);
+}
+
+#[test]
+fn an_intrusive_split_keeps_a_trailing_space_at_the_tail() {
+    let text = "abcdefghijklmnop qr";
+    let paragraph =
+        paragraph_from_spans(&[InlineSpan::code(text, StyleId(1))], style()).expect("paragraph");
+    assert!(
+        paragraph
+            .atoms
+            .iter()
+            .all(|atom| !atom.text.starts_with(' ')),
+        "no atom may start with the space: a line could begin with it"
+    );
+    assert!(paragraph.atoms.iter().any(|atom| atom.text == "p "));
+    let joined: String = paragraph
+        .atoms
+        .iter()
+        .map(|atom| atom.text.as_str())
+        .collect();
+    assert_eq!(joined, text);
+    // The boundary before `qr` is the code space, not an intrusive break.
+    let qr = paragraph
+        .atoms
+        .iter()
+        .position(|atom| atom.text == "qr")
+        .expect("the short piece");
+    assert_eq!(paragraph.boundaries[qr - 1].penalty, 100);
 }
 
 #[test]

@@ -108,6 +108,39 @@ fn a_long_inline_code_expression_wraps_at_its_spaces() {
 }
 
 #[test]
+fn a_long_unseparated_code_token_can_wrap() {
+    // 32 characters with no space, separator or case seam: only the
+    // per-character intrusive break can keep the line inside the measure
+    // (D114).
+    const TOKEN: &str = "z7Kp2Qm9Xr4Tv8Bn1Lc6Wd3Fh5Jg0Sa";
+    let doc = document(vec![paragraph_with(vec![
+        text("令牌 "),
+        Inline::Code(Code::new(NodeMeta::synthesized(), TOKEN)),
+        text(" 结束。"),
+    ])]);
+    let styled = styled(&doc, TEMPLATE);
+    let result = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let lines = lines(&result);
+
+    for line in &lines {
+        assert!(!line.overfull, "the token must not overfull the line");
+        assert!(
+            !line.emergency,
+            "the token must not need the emergency stage"
+        );
+    }
+    let texts = line_texts(&doc, &result);
+    assert!(
+        texts.iter().all(|line| !line.contains(TOKEN)),
+        "a 16 em token cannot sit whole in a 15 em measure: {texts:?}"
+    );
+    assert_eq!(
+        texts.concat().replace([' ', '。'], ""),
+        format!("令牌{TOKEN}结束").replace([' ', '。'], "")
+    );
+}
+
+#[test]
 fn an_identifier_without_a_space_stays_whole() {
     // The hyphen is a priced break opportunity, not a free space: with a
     // measure wide enough for the word, no line may cut it.

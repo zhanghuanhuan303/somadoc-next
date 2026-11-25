@@ -300,7 +300,7 @@ pub struct ParamError {
 
 - `emergency_tolerance >= tolerance`；否则 fallback 比正常还紧。
 - `max_kp_atoms = Some(k)` 时 `k > 0`；`n > k` 走 Greedy-C，结果必须标 `breaker_used = GreedyC` / `length_limited = true`（K6 已实现）。
-- `short_last_threshold == 0` 表示关闭短末行项；否则必须 `> 0`。
+- `short_last_threshold == 0` 表示关闭短行项（末行与孤字行）；否则必须 `> 0`。
 - `height_scale == 0` 时忽略 `height_threshold`；`height_scale > 0` 时阈值必须 `> 0` 或 `None`（取正文行高）。
 - `features.edge_trim == false` 时忽略 `trim_priority` 和所有 trim 成本。
 - `features.boundary_deviation == false` 时 `costs.boundary_deviation` 必须为 0 或不生效。
@@ -328,9 +328,9 @@ pub struct ParamError {
 
 ```json
 {
-  "modelVersion": 2,
+  "modelVersion": 4,
   "preset": "default-v1",
-  "rulesVersion": 3,
+  "rulesVersion": 2,
   "metricsVersion": 2,
   "paramHash": "9f2c..."
 }
@@ -349,8 +349,8 @@ Preset 是数据，不是算法分支：
 
 - `default-v1`：冻结的 K-P 参考（`tolerance = 3000`）。
 - `publish-v1`：**`soma.engine/1` 的默认 preset**（ADR-0023）：`default-v1` + `tolerance = 1500`，其余权重与回退完全相同；母语出版优先。
-- `book-v1`：`publish-v1` + `short_last_threshold = 3em`（ADR-0106）。中文书籍里两字末行按孤尾计费；样书 `examples/book/book.engine` 使用它。
-- `latex-v1`：LaTeX article 的断行口径（ADR-0069，**CLI 内置默认**）：`default-v1` + `tolerance = 1260`（`\tolerance=200` 换算）+ `short_last_scale = 0`（末行不罚）；其余权重与回退不变。
+- `book-v1`：`publish-v1` + `short_last_threshold = 3em`（ADR-0106）。中文书籍里两字末行按孤尾计费；自 ADR-0112 起段中孤字行也按同一项计费。样书 `examples/book/book.engine` 使用它。
+- `latex-v1`：LaTeX article 的断行口径（ADR-0069，**CLI 内置默认**）：`default-v1` + `tolerance = 1260`（`\tolerance=200` 换算）+ `short_last_scale = 0`（短行项关闭：末行与孤字行都不罚）；其余权重与回退不变。
 - ~~更保守的 emergency~~：实测没有必要，回退阶梯保持 `default-v1`。
 - `mobile-v1`：更低 `max_lines`、更少 feature（延迟优先）。
 - `debug`：启用 trace、保留所有候选统计（不用于发布）。
@@ -497,13 +497,14 @@ pub struct EvalParams {
 | `compress_amount` | 20 | 0..=1e9 | 是 | 每 1 em trim；0.25em = 5 |
 
 > `publish-v1` 只改 `tolerance`（1500）；`badness_scale=100`、权重、fallback 与
-> 短末行阈值都与 `default-v1` 相同，便于对照。`book-v1`（ADR-0106）在
-> `publish-v1` 上只把 `short_last_threshold` 提到 3em，用于中文书籍样张。
-> `rules_version = 1` 对应
-> 开标点行首 trim 从 1/4 em 改为 1/2 em（ADR-0023）。
+> 短行阈值都与 `default-v1` 相同，便于对照。`book-v1`（ADR-0106）在
+> `publish-v1` 上只把 `short_last_threshold` 提到 3em，用于中文书籍样张；
+> 自 ADR-0112 起同一个短行项也计非末行的孤字行。
+> `rules_version = 2` 对应 ADR-0111/0112（代码
+> 分段、分隔符 penalty 与短行口径）；初值是 ADR-0023 的开标点 trim。
 | `compress_count` | 5 | 0..=1e9 | 是 | 每次裁剪；0.25em 事件合计约 10 |
 | `boundary_deviation` | 50 | 0..=1e9 | 是 | 每 1 个 ideal gap 的平均偏差；满 gap = 5 行 |
-| `short_last_scale` | 1_000_000 | 0..=1e9 | 是 | 短末行；0 宽末行的 cost |
+| `short_last_scale` | 1_000_000 | 0..=1e9 | 是 | 短行（末行与孤字行）；0 宽行的 cost |
 | `short_last_threshold` | 2em | 0..=5em | 是 | 低于此值计费 |
 | `height_scale` | 0 | 0..=1e9 | 实验 | 行高代价；默认关闭 |
 | `height_threshold` | none → body height | `None` 或 0..=5em | 实验 | 超出部分计费 |
@@ -525,7 +526,7 @@ pub struct EvalParams {
 | `compress_amount` | cost / em-trimmed | `c / EM` | 每 1 em trim |
 | `compress_count` | cost / trim-event | `[c > 0]` | 每次发生 trim |
 | `boundary_deviation` | cost / ideal-gap-deviation | `D / ideal_gap` | 每 1 个 ideal gap 的平均偏差 |
-| `short_last_scale` | cost / short-score-unit | `short / threshold` | 0 宽末行的 cost |
+| `short_last_scale` | cost / short-score-unit | `short / threshold` | 0 宽短行的 cost（末行或孤字行） |
 | `height_scale` | cost / body-height-excess | `excess / body_height` | 每超出 1 个正文行高 |
 | `emergency` / `forbidden` | cost / event | 1 | 每行/每次 rescue |
 

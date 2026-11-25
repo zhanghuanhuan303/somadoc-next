@@ -130,6 +130,7 @@ only).
 | [0109](0109-svg-proof.md) | The Studio proof is SVG rendered from `PagedLayout`; PDF stays download-only | Accepted; implements `docs/proposal-svg-proof.md` |
 | [0110](0110-colophon-block.md) | The colophon is a ruled multi-line block; `\colophon{a\\b}` splits lines | Accepted |
 | [0111](0111-inline-code-and-separator-breaks.md) | Inline code breaks at its spaces and separators (`CODE_BREAK_PENALTY`); Latin `-`/`/` breaks are priced (`WORD_BREAK_PENALTY`); the Studio defaults to `book-v1` | Accepted; addresses the TACTUS line-breaking review |
+| [0112](0112-code-intrusive-breaks-and-short-lines.md) | Long unseamed code runs split per character (`INTRUSIVE_BREAK_PENALTY`); camelCase/`_`/`.` are seams; the short-line charge covers non-final lines; `modelVersion` 4 / `rulesVersion` 2 | Accepted; closes D114 and D115 |
 
 ## Rules
 
