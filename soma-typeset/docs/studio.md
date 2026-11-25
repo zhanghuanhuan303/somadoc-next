@@ -73,7 +73,10 @@ Mermaid `flowchart`/`graph` and Graphviz DOT fences are compiled by
 `soma-diagram` into the same vector box as TikZ; the proof, the browser build
 and the native verify/PDF path all draw them. Unsupported diagram syntax shows
 its source, never a partial picture. `soma diagram --input chart.mmd` exports a
-standalone diagram as TikZ; see [`docs/diagrams.md`](diagrams.md).
+standalone diagram as TikZ; see [`docs/diagrams.md`](diagrams.md). The Studio
+`⤴ TikZ` action exports the first diagram in the active tab at its natural
+(unscaled) geometry, using the same template, metrics and `element: diagram`
+style as the proof (ADR-0103).
 
 ## Views
 
@@ -94,12 +97,14 @@ Pane close buttons sit in each pane head; closing the last pane shows an empty-p
 state with “并排显示 / 只要源文 / 只要校样”. The source pane head intentionally
 omits the file name and format badge: the tab already carries the file. The
 page/zoom/overlay controls live in the proof pane head, and the `wasm = native`
-verification chip plus the “分栏” and “PDF” actions live in the title bar; there
-is no global breadcrumb row.
+verification chip plus the “分栏”, “TikZ” and “PDF” actions live in the title
+bar; there is no global breadcrumb row.
 
-The title bar also carries `⤓ PDF` and `◫ 分栏`; PDF export works with the
-proof closed, and the toast reports the page count and file size. A downloaded
-PDF is never zero-length by construction (the UI rejects an empty response).
+The title bar also carries `⤓ PDF`, `⤴ TikZ` and `◫ 分栏`; PDF export works with
+the proof closed, and the toast reports the page count and file size. A
+downloaded PDF is never zero-length by construction (the UI rejects an empty
+response). TikZ export needs a diagram in the active tab; a document without
+one gets a readable error instead of an empty file.
 
 Line numbers are intentionally not shown: with soft wrap, one logical line can
 occupy several visual rows, and a one-number-per-logical-line gutter would drift.
@@ -176,6 +181,7 @@ metrics file triggers a native rebuild:
 | `/api/font/{role}` | GET | font bytes for `@font-face` |
 | `/api/verify` | POST | native build summary for a `BuildRequest` |
 | `/api/pdf` | POST | PDF for a `BuildRequest` |
+| `/api/tikz` | POST | TikZ for the first diagram in a `BuildRequest` (natural size) |
 | `/api/rebuild` | POST | reload the bundle from disk |
 | `/api/events` | GET | SSE: `built` / `error` |
 
@@ -200,7 +206,7 @@ directory; `examples/` is not modified.
 | S2 | Three files open as three tabs; reopening does not duplicate; closing the active tab selects the right neighbour; closing all shows the empty workspace; `+` opens the palette. |
 | S3 | Sidebar 180–380, AI 320–900, persistence, double-click reset, collapse; closed AI dock has no content width; closing/reopening the source and proof panes. |
 | S4 | Theme persists, both toggles work, and `studio.css` contains no hex values (tokens only). |
-| S5 | `page slots == fragments == page_count`; consecutive `data-page`; one Shadow `.page` per slot; PDF page count equals native. |
+| S5 | `page slots == fragments == page_count`; consecutive `data-page`; one Shadow `.page` per slot; PDF page count equals native; `/api/tikz` returns a `tikzpicture` with the fixture labels. |
 | S6 | Typing rebuilds after the debounce and changes the hash; IME composition does not rebuild until it ends. |
 | S7 | Inspect rows equal the overlay lines on page 1; clicking a row selects the same box; unavailable fields display `—`. |
 | S8 | No external resources; no `<script>`/`<a href>` inside page shadows; remote AI disabled; CSP and nosniff present. |

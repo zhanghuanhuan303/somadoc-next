@@ -132,6 +132,19 @@ pub async fn rebuild() -> Result<ProjectPayload, String> {
         .map_err(|e| e.to_string())
 }
 
+pub async fn tikz(request: &BuildRequest) -> Result<String, String> {
+    let post = Request::post("/api/tikz")
+        .json(request)
+        .map_err(|e| e.to_string())?;
+    let response = post.send().await.map_err(|e| e.to_string())?;
+    if !response.ok() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("TikZ 导出失败（HTTP {status}）{text}"));
+    }
+    response.text().await.map_err(|e| e.to_string())
+}
+
 pub async fn pdf(request: &BuildRequest) -> Result<Vec<u8>, String> {
     let post = Request::post("/api/pdf")
         .json(request)

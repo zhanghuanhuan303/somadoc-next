@@ -198,14 +198,14 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `abi.rs` (web) | 8 | the C ABI slice: compile/measure/break handles, parity with the native kernel, fallback policy |
 | `soma-md` unit | 1 | frontend-internal projection helper |
 | `render-pdf` unit | 28 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing, TikZ path fill state |
-| `studio.rs` (studio-core) | 6 | fragments follow pages and join the full document, probe samples come from layout faces, build determinism, hyphenation patterns reach the shared build, a Mermaid fence becomes vector paths |
+| `studio.rs` (studio-core) | 7 | fragments follow pages and join the full document, probe samples come from layout faces, build determinism, hyphenation patterns reach the shared build, a Mermaid fence becomes vector paths, the same diagram exports to TikZ |
 | `soma-studio-ui` unit | 2 | assistant markdown escapes raw HTML and rejects `javascript:`/`data:` destinations |
 | `soma-studio` unit | 5 | origin allowlist: loopback default, concrete LAN host, wildcard `Host` matching, IPv6 literals, `--host` parsing |
 | `mermaid.rs` (diagram) | 6 | Mermaid and DOT layouts, paths/labels, TikZ round trip, detection rules, directions/shapes/classes, clusters and self-loops |
 
-Total: **947 tests passed** (`cargo test --workspace`), plus **1 ignored**
+Total: **948 tests passed** (`cargo test --workspace`), plus **1 ignored**
 (`perturbation.rs`, run with `--ignored`). Counting that ignored test, the
-workspace lists **948 test functions**. The standalone
+workspace lists **949 test functions**. The standalone
 `tools/metrics-gen` crate adds its own 5 (`cargo test --manifest-path tools/metrics-gen/Cargo.toml`).
 
 Still deferred: the human blind-test run (D01), a quality-labeled corpus

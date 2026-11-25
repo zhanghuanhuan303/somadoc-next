@@ -75,6 +75,10 @@ soma diagram --input chart.dot --template book.yaml --metrics theme.smt --out ch
 The export uses the computed coordinates in explicit `em` units and only
 `\path`/`\node`; it needs no TikZ libraries. `soma-tikz` parses it back to the
 same geometry (the round-trip test in `crates/soma-diagram/tests/mermaid.rs`).
+In Soma Studio, `⤴ TikZ` calls `POST /api/tikz` and downloads the first diagram
+in the active tab. The Studio export uses that diagram's computed style and
+keeps its natural size: page-width scaling and page-height fallback apply only
+to the proof, not to the exported source (ADR-0103).
 
 ## Template
 

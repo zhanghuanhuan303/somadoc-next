@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use soma_core::{BreakConfig, ParamSet, StyleId, VerticalParams};
+use soma_core::{BreakConfig, ParamSet, StyleId, VerticalParams, Width};
 use soma_doc::{Block, Document, ImageIntrinsic, ImageRef, Inline};
 use soma_engine::EngineConfig;
 use soma_layout::{ImageSource, PagedLayout, PaginationStrategy, StyledMetrics};
@@ -159,8 +159,74 @@ pub struct ProbeSample {
     pub advance: i32,
 }
 
-/// A finished build. It owns the document, the resolved styles and the page
-/// tree; the HTML fragments are derived on demand.
+/// Compile the first diagram in a parsed document to TikZ. The Studio uses
+/// the same metrics, template and computed diagram style as the proof, so the
+/// exported node coordinates match the natural (unscaled) diagram box.
+pub fn diagram_tikz(parsed: &ParsedDocument, options: BuildOptions<'_>) -> Result<String, String> {
+    let diagram = find_diagram(&parsed.document.blocks)
+        .ok_or_else(|| String::from("文档里没有 Mermaid 或 DOT 图"))?;
+    let template =
+        parse_template(options.template).map_err(|error| format!("template: {error}"))?;
+    let styled =
+        resolve(&parsed.document, &template).map_err(|error| format!("template: {error}"))?;
+    let table = match options.metrics {
+        Some(bytes) => MetricsTable::parse(bytes).map_err(|error| error.to_string())?,
+        None => MetricsTable::embedded(),
+    };
+    let metrics = StyledMetrics::new(&table, &styled);
+    let style = styled.style_of(diagram.meta.id).unwrap_or(StyleId(0));
+    let computed = styled
+        .style(style)
+        .cloned()
+        .unwrap_or_else(ComputedStyle::base);
+    let options = soma_diagram::Options {
+        label_size: computed.font_size,
+        line_gap: computed.line_height,
+        line_width: Width::from_em_frac(1, 25),
+        max_label_width: computed.font_size.scale(16, 1),
+    };
+    let mut text = soma_layout::DiagramText::new(&computed, &metrics, style);
+    let layout = soma_diagram::layout(diagram.dialect, &diagram.source, &options, &mut text)
+        .map_err(|error| error.to_string())?;
+    Ok(soma_diagram::to_tikz(&layout))
+}
+
+fn find_diagram(blocks: &[Block]) -> Option<&soma_doc::DiagramBlock> {
+    for block in blocks {
+        match block {
+            Block::Diagram(node) => return Some(node),
+            Block::List(node) => {
+                for item in &node.items {
+                    if let Some(found) = find_diagram(&item.blocks) {
+                        return Some(found);
+                    }
+                }
+            }
+            Block::BlockQuote(node) => {
+                if let Some(found) = find_diagram(&node.blocks) {
+                    return Some(found);
+                }
+            }
+            Block::Table(node) => {
+                for row in &node.rows {
+                    for cell in &row.cells {
+                        if let Some(found) = find_diagram(&cell.blocks) {
+                            return Some(found);
+                        }
+                    }
+                }
+            }
+            Block::Generated(node) => {
+                if let Some(found) = find_diagram(&node.blocks) {
+                    return Some(found);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 pub struct Build {
     pub document: Document,
     pub styled: StyledDoc,

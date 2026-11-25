@@ -189,6 +189,10 @@ diagram_summary="$(curl -sf -X POST -H 'content-type: application/json' --data-b
     || fail "native diagram verify failed"
 printf '%s' "$diagram_summary" | grep -q '"pages":' || fail "diagram verify has no pages"
 printf '%s' "$diagram_summary" | grep -q '"hash":' || fail "diagram verify has no hash"
+tikz="$(curl -sf -X POST -H 'content-type: application/json' --data-binary @"$WORK/diagram.json" "http://127.0.0.1:$PORT/api/tikz")" \
+    || fail "TikZ export failed"
+printf '%s' "$tikz" | grep -q 'begin{tikzpicture}' || fail "TikZ export is not a tikzpicture"
+printf '%s' "$tikz" | grep -q '开始' || fail "TikZ export lost the diagram labels"
 summary="$(curl -sf -X POST -H 'content-type: application/json' -d '{}' "http://127.0.0.1:$PORT/api/verify")"
 native_pages="$(printf '%s' "$summary" | sed -n 's/.*"pages":\([0-9]*\).*/\1/p')"
 native_hash="$(printf '%s' "$summary" | sed -n 's/.*"hash":"\([0-9a-f]*\)".*/\1/p')"
@@ -237,8 +241,13 @@ if command -v chromium >/dev/null 2>&1; then
         fi
         sleep 0.5
     done
-    rm -rf "$CHROME_DIR-fontless"
-    timeout 120s chromium --headless --no-sandbox --disable-gpu \
+    rm -rf "$CHROME_DIR-fontless" "$WORK/fontless-home"
+    mkdir -p "$WORK/fontless-home"
+    # The gate asserts that the expected face is missing. A user-installed
+    # ~/.fonts copy would otherwise leak into Chromium and make the probe
+    # report a false match, so this browser run gets an empty HOME.
+    HOME="$WORK/fontless-home" XDG_DATA_HOME="$WORK/fontless-home/.local/share" \
+        timeout 120s chromium --headless --no-sandbox --disable-gpu \
         --hide-scrollbars --user-data-dir="$CHROME_DIR-fontless" \
         --virtual-time-budget=30000 --window-size=1920,1080 --dump-dom \
         "http://127.0.0.1:$FONTLESS_PORT/?selftest=1&only=s9font&theme=dark" \

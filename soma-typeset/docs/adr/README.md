@@ -121,6 +121,7 @@ only).
 | [0100](0100-studio-host-binding.md) | `--host` opts Studio out of loopback; the `/api` Origin allowlist follows the bound host while `cross-site` stays refused | Accepted |
 | [0101](0101-studio-hyphenation.md) | Studio loads TeX hyphenation patterns from `--hyphenation` or `hyphen-en.pat` and feeds native and wasm builds | Accepted |
 | [0102](0102-diagram-compiler.md) | Mermaid/DOT are `Block::Diagram`; `soma-diagram` compiles them to the TikZ vector box, with a strict source fallback and a TikZ export | Accepted |
+| [0103](0103-studio-tikz-export.md) | Studio exports the first compiled diagram as natural-size TikZ through `/api/tikz`; page scaling and figure selection stay out of the source export | Accepted |
 
 ## Rules
 

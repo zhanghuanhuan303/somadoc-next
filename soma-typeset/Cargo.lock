@@ -1826,6 +1826,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "soma-core",
+ "soma-diagram",
  "soma-doc",
  "soma-docx",
  "soma-engine",

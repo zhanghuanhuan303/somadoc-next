@@ -755,6 +755,41 @@ pub fn export_pdf(studio: Studio) {
     });
 }
 
+pub fn export_tikz(studio: Studio) {
+    let Some(format) = active_format(studio) else {
+        return;
+    };
+    if studio.build.with_untracked(|build| build.is_none()) {
+        toast(studio, "还没有可导出的构建", "bad");
+        return;
+    }
+    let request = BuildRequest {
+        source: if format == SourceFormat::Docx {
+            None
+        } else {
+            Some(studio.source.get_untracked())
+        },
+        template: Some(studio.template.get_untracked()),
+        engine: studio.engine_text.get_untracked(),
+        format: Some(format),
+    };
+    spawn_local(async move {
+        match api::tikz(&request).await {
+            Ok(text) if text.trim().is_empty() => {
+                toast(studio, "服务端返回了空 TikZ", "bad");
+            }
+            Ok(text) => {
+                let kb = text.len().div_ceil(1024);
+                match api::download("soma-diagram.tikz", text.as_bytes()) {
+                    Ok(()) => toast(studio, format!("TikZ 已导出 · {kb} KB"), "ok"),
+                    Err(error) => toast(studio, error, "bad"),
+                }
+            }
+            Err(error) => toast(studio, error, "bad"),
+        }
+    });
+}
+
 /* --------------------------------------------------------------------- theme */
 
 pub fn init_preferences(studio: Studio) {

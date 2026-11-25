@@ -167,7 +167,8 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   (or `mermaid`/`dot` environments) become semantic `Block::Diagram` blocks.
   `soma-diagram` lays them out deterministically and emits the same integer
   vector box as TikZ, so PDF/SVG/HTML draw them without a JavaScript runtime;
-  `soma diagram --input chart.mmd` exports the computed geometry as TikZ.
+  `soma diagram --input chart.mmd` and Studio's `⤴ TikZ` export the computed
+  geometry as TikZ.
   Unsupported constructs fall back to their source, never to a wrong picture.
 - Word input (ADR-0063/ADR-0066): `soma render --input draft.docx` reads the
   archive with a dependency-free zip/inflate and maps paragraphs, headings
@@ -447,7 +448,7 @@ scripts/gates.sh
 scripts/studio.sh   # S1-S11 for the web workbench (needs chromium)
 ```
 
-The gate runs format, clippy, 947 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 948 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-highlight`, `soma-template`,
 `soma-layout`, `soma-tikz`, `soma-md`, `soma-render-html`, `soma-render-svg`, and
 `soma-render-pdf`, a

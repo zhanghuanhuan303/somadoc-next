@@ -6,8 +6,8 @@ use leptos::prelude::*;
 use web_sys::PointerEvent;
 
 use crate::state::{
-    self, activate_tab, close_tab, export_pdf, go_to_page, open_file, persist, rebuild_now,
-    save_active, toggle_theme, use_studio, Aux, Mode,
+    self, activate_tab, close_tab, export_pdf, export_tikz, go_to_page, open_file, persist,
+    rebuild_now, save_active, toggle_theme, use_studio, Aux, Mode,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +79,8 @@ pub fn Titlebar() -> impl IntoView {
                     aria-label="校验状态">{move || verify().0}</span>
                 <button class="mini title-action" title="并排显示源文与校样" aria-label="并排显示源文与校样"
                     on:click=move |_| state::set_mode(studio, Mode::Split)>"◫ 分栏"</button>
+                <button class="mini title-action" title="导出当前文档第一张流程图为 TikZ（服务端）" aria-label="导出 TikZ"
+                    on:click=move |_| export_tikz(studio)>"⤴ TikZ"</button>
                 <button class="mini title-action" title="导出 PDF（服务端）" aria-label="导出 PDF（服务端）"
                     on:click=move |_| export_pdf(studio)>"⤓ PDF"</button>
                 <button class="icon-btn" title="切换主题" aria-label="切换主题"
@@ -523,6 +525,12 @@ fn palette_items(studio: &crate::state::Studio) -> Vec<PaletteItem> {
             group: "文件",
         },
         PaletteItem {
+            id: String::from("tikz"),
+            label: String::from("导出 TikZ（第一张流程图）"),
+            hint: String::new(),
+            group: "文件",
+        },
+        PaletteItem {
             id: String::from("pdf"),
             label: String::from("导出 PDF（服务端）"),
             hint: String::new(),
@@ -667,6 +675,7 @@ fn run_item(studio: crate::state::Studio, id: &str) {
     match id {
         "rebuild" => rebuild_now(studio),
         "save" => save_active(studio),
+        "tikz" => export_tikz(studio),
         "pdf" => export_pdf(studio),
         "fit" => studio.fit.set(true),
         "zoom:1" => {

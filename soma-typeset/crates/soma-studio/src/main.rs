@@ -27,9 +27,9 @@ use tokio_stream::wrappers::BroadcastStream;
 use tower_http::services::{ServeDir, ServeFile};
 
 use soma_studio_core::{
-    build, enrich_images, image_sources, parse_document, Build, BuildOptions, BuildRequest,
-    CapabilityInfo, FontInfo, ImageBytes, NativeSummary, ProjectPayload, SaveRequest, SourceFormat,
-    TreeResponse,
+    build, diagram_tikz, enrich_images, image_sources, parse_document, Build, BuildOptions,
+    BuildRequest, CapabilityInfo, FontInfo, ImageBytes, NativeSummary, ProjectPayload, SaveRequest,
+    SourceFormat, TreeResponse,
 };
 
 const DEFAULT_TEMPLATE: &str = include_str!("../../../examples/templates/plex.yaml");
@@ -147,6 +147,7 @@ async fn main() {
         .route("/api/font/{role}", get(font))
         .route("/api/verify", post(verify))
         .route("/api/pdf", post(export_pdf))
+        .route("/api/tikz", post(export_tikz))
         .route("/api/rebuild", post(rebuild))
         .route("/api/events", get(events))
         .fallback_service(static_files)
@@ -920,6 +921,32 @@ async fn export_pdf(
     response.headers_mut().insert(
         header::CONTENT_DISPOSITION,
         HeaderValue::from_static("attachment; filename=\"soma-studio.pdf\""),
+    );
+    Ok(response)
+}
+
+async fn export_tikz(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<BuildRequest>,
+) -> Result<Response, (StatusCode, String)> {
+    let (format, source, template, engine, metrics, hyphenation) =
+        request_input(&state, &request).map_err(|error| (StatusCode::BAD_REQUEST, error))?;
+    let parsed = parse_document(format, &source)
+        .map_err(|error| (StatusCode::UNPROCESSABLE_ENTITY, error))?;
+    let tikz = diagram_tikz(
+        &parsed,
+        BuildOptions {
+            template: &template,
+            engine: engine.as_deref(),
+            metrics: metrics.as_deref(),
+            hyphenation: hyphenation.as_deref(),
+        },
+    )
+    .map_err(|error| (StatusCode::UNPROCESSABLE_ENTITY, error))?;
+    let mut response = bytes_response("text/plain; charset=utf-8", tikz.into_bytes());
+    response.headers_mut().insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_static("attachment; filename=\"soma-diagram.tikz\""),
     );
     Ok(response)
 }
