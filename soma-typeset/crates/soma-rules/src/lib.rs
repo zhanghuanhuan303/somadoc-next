@@ -173,15 +173,16 @@ const HYPHEN_PENALTY: i32 = 100;
 /// neither cannot be split.
 const CODE_BREAK_PENALTY: i32 = 100;
 /// A break after `-` or `/` inside a Latin run (`metronome-rs`,
-/// `tactus-time/core`). A space is free, so the breaker splits such a run
-/// only when keeping it whole would stretch or overfull the line worse than
-/// this penalty (ADR-0111).
-const WORD_BREAK_PENALTY: i32 = 500;
+/// `tactus-time/core`). A space is free, so this is priced high enough that
+/// an identifier or URL stays whole unless the token itself is wider than the
+/// line: badness at the tolerance ceiling is only a few hundred, so 3000 is
+/// outside the normal search (D114 follow-up, ADR-0115).
+const WORD_BREAK_PENALTY: i32 = 3_000;
 /// A break inside a long code run that has no space and no separator
 /// (`a1b2c3d4e5f6a7b8`, a base64 token). The run is split per character and
 /// the break is priced far above a separator break, so it only happens when
 /// the line cannot fit the run any other way (D114).
-const INTRUSIVE_BREAK_PENALTY: i32 = 2_000;
+const INTRUSIVE_BREAK_PENALTY: i32 = 8_000;
 /// A code segment longer than this many characters is split per character.
 /// Shorter segments stay one atom: a normal code word must not litter the
 /// paragraph with price-only break points.
@@ -1003,11 +1004,14 @@ fn is_break_opportunity(atom: &Atom) -> bool {
         .unwrap_or(false)
 }
 
-/// A line may not begin with a separator. An inline-code piece keeps its
-/// trailing space, so the test is on the first character, not equality
-/// (`/ ` must be caught as well as a lone `/`).
+/// A line may not begin with a separator or a binary operator. An inline-code
+/// piece keeps its trailing space, so the test is on the first character, not
+/// equality (`/ ` must be caught as well as a lone `/`). Keeping `*`/`+`/`=`
+/// off the line start makes a wrapped code expression read as a continuation
+/// (`tick *` at the end, `60 * …` below) instead of a stray operator
+/// (ADR-0115).
 fn starts_with_separator(atom: &Atom) -> bool {
-    atom.text.starts_with('/') || atom.text.starts_with('-')
+    matches!(atom.text.chars().next(), Some('/' | '-' | '*' | '+' | '='))
 }
 
 fn is_word_like(kind: AtomKind) -> bool {

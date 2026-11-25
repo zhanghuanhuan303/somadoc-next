@@ -202,6 +202,24 @@ fn the_rhythm_preset_is_selectable() {
 }
 
 #[test]
+fn the_proposal_preset_is_selectable() {
+    let config =
+        EngineConfig::parse("schema: soma.engine/1\npreset: proposal-v1\n").expect("parse");
+    assert_eq!(config.preset(), "proposal-v1");
+    assert_eq!(
+        config.break_config().param_hash(),
+        BreakConfig::from_params(ParamSet::proposal_v1()).param_hash()
+    );
+    let breaks = config.break_config();
+    let params = breaks.params();
+    assert_eq!(
+        params.break_params.costs.short_last_threshold,
+        soma_core::Width::from_em(8)
+    );
+    assert_eq!(params.break_params.costs.short_last_scale.0, 2_000_000);
+}
+
+#[test]
 fn unknown_presets_are_rejected() {
     let source = "schema: soma.engine/1\npreset: house-style\n";
     assert!(EngineConfig::parse(source).is_err());

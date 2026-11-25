@@ -648,12 +648,15 @@ fn build(
     let mut items = Vec::new();
     let mut texts = Vec::new();
     for (point, run) in frame_items {
-        items.push(MathItem::text(
-            run.text.clone(),
-            Width(point.x.0 + shift_x.0),
-            Width(point.y.0 + shift_y.0 - height.0),
-            run.size,
-        ));
+        items.push(
+            MathItem::text(
+                run.text.clone(),
+                Width(point.x.0 + shift_x.0),
+                Width(point.y.0 + shift_y.0 - height.0),
+                run.size,
+            )
+            .text_face(),
+        );
         items.last_mut().unwrap().color = Some(run.color);
         texts.push(TextRun {
             text: run.text,
@@ -665,12 +668,15 @@ fn build(
         });
     }
     for run in edge_texts.into_iter().chain(node_texts) {
-        items.push(MathItem::text(
-            run.text.clone(),
-            Width(run.x.0 + shift_x.0),
-            Width(run.baseline.0 + shift_y.0 - height.0),
-            run.size,
-        ));
+        items.push(
+            MathItem::text(
+                run.text.clone(),
+                Width(run.x.0 + shift_x.0),
+                Width(run.baseline.0 + shift_y.0 - height.0),
+                run.size,
+            )
+            .text_face(),
+        );
         items.last_mut().unwrap().color = Some(run.color);
         texts.push(TextRun {
             text: run.text,

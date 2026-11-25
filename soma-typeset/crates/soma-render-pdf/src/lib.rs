@@ -653,7 +653,7 @@ fn collect_blocks(
                 }
                 if let Some(note) = block.ruby.iter().find(|note| note.atom == atom.atom) {
                     for character in note.text.chars() {
-                        let note_role = ruby_role(fonts, character, role);
+                        let note_role = text_rescue_role(fonts, character, role);
                         used.add(note_role, fonts.font(note_role), character);
                     }
                 }
@@ -690,12 +690,12 @@ fn covers(font: &PdfFont, text: &str) -> bool {
         .all(|character| font.glyph(character as u32) != 0)
 }
 
-/// The face that draws `character` inside a formula: the math face when it has
-/// the glyph, else the text face (a `\text{...}` run in Han, say), else the
-/// rescue face.
-/// The face that draws one ruby character: the base's face when it has the
-/// glyph, else the fallback text face, else the math face.
-fn ruby_role(fonts: &PdfFonts<'_>, character: char, text_role: Role) -> Role {
+/// The face that draws one character of a run that prefers the text face:
+/// the text role when it has the glyph, else the rescue face, else the math
+/// face. Used by ruby annotations and diagram labels; the math face is the
+/// last resort so a glyph the text face lacks still draws (ADR-0060,
+/// ADR-0116).
+fn text_rescue_role(fonts: &PdfFonts<'_>, character: char, text_role: Role) -> Role {
     if fonts.font(text_role).glyph(character as u32) != 0 {
         return text_role;
     }
@@ -742,7 +742,11 @@ fn collect_math(math: &MathBox, fonts: &PdfFonts<'_>, used: &mut Used, text_role
             }
         }
         for character in item.text.chars() {
-            let role = math_face(fonts, character, text_role);
+            let role = if item.uses_text_face() {
+                text_rescue_role(fonts, character, text_role)
+            } else {
+                math_face(fonts, character, text_role)
+            };
             used.add(role, fonts.font(role), character);
         }
     }
@@ -1561,7 +1565,7 @@ fn paint_block(
                 // needs a face the base does not use (ADR-0060).
                 let mut runs: Vec<(Role, Vec<u16>)> = Vec::new();
                 for character in note.text.chars() {
-                    let note_role = ruby_role(fonts, character, role);
+                    let note_role = text_rescue_role(fonts, character, role);
                     let glyph = fonts.font(note_role).glyph(character as u32);
                     match runs.last_mut() {
                         Some((last_role, glyphs)) if *last_role == note_role => glyphs.push(glyph),
@@ -1850,7 +1854,11 @@ fn paint_math(
         let mut runs: Vec<(Role, i64, Vec<u16>)> = Vec::new();
         let mut offset: i64 = 0;
         for character in item.text.chars() {
-            let role = math_face(fonts, character, text_role);
+            let role = if item.uses_text_face() {
+                text_rescue_role(fonts, character, text_role)
+            } else {
+                math_face(fonts, character, text_role)
+            };
             let glyph = fonts.font(role).glyph(character as u32);
             match runs.last_mut() {
                 Some((last, _, glyphs)) if *last == role => glyphs.push(glyph),

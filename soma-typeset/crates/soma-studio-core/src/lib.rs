@@ -366,12 +366,12 @@ pub fn build(parsed: ParsedDocument, options: BuildOptions<'_>) -> Result<Build,
             let config = EngineConfig::parse(source).map_err(|error| error.to_string())?;
             (config.break_config(), config.vertical())
         }
-        // The Studio is the Chinese-first workbench: its fallback preset is
-        // the Chinese book preset (publish-v1's tighter tolerance plus a 3em
-        // short-last-line charge), not the LaTeX-compatible `latex-v1` that
-        // the command line keeps as its default (ADR-0111).
+        // The Studio is the Chinese-first proposal workbench: its fallback
+        // preset charges a short last line up to five characters at twice the
+        // book rate, so a 4–5 character tail does not survive (ADR-0115). The
+        // command line keeps `latex-v1` (ADR-0069).
         None => (
-            BreakConfig::from_params(ParamSet::book_v1()),
+            BreakConfig::from_params(ParamSet::proposal_v1()),
             VerticalParams::default_v1(),
         ),
     };
@@ -832,9 +832,10 @@ styles:
 "#;
 
     #[test]
-    fn the_studio_defaults_to_the_chinese_book_preset() {
-        // ADR-0111: the Studio is the Chinese-first workbench, so its fallback
-        // is `book-v1`; only the command line keeps `latex-v1` (ADR-0069).
+    fn the_studio_defaults_to_the_proposal_preset() {
+        // ADR-0115: the Studio is the Chinese-first proposal workbench, so its
+        // fallback is `proposal-v1`; only the command line keeps `latex-v1`
+        // (ADR-0069).
         let parsed =
             parse_document(SourceFormat::Markdown, "中文段落。".as_bytes()).expect("parse");
         let build = build(
@@ -847,10 +848,14 @@ styles:
             },
         )
         .expect("build");
-        assert_eq!(build.params.preset.0, "book-v1");
+        assert_eq!(build.params.preset.0, "proposal-v1");
         assert_eq!(
             build.params.break_params.costs.short_last_threshold,
-            Width::from_em(3)
+            Width::from_em(8)
+        );
+        assert_eq!(
+            build.params.break_params.costs.short_last_scale,
+            soma_core::Weight(2_000_000)
         );
         assert_eq!(
             build.params.break_params.tolerance,

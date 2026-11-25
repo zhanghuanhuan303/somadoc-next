@@ -273,7 +273,8 @@ pub struct ParamError {
 | `badness_exponent` | 1..=5 |
 | 所有权重 | 0..=1_000_000_000 |
 | `emergency_stretch` | 0..=10em |
-| `short_last_threshold` / `height_threshold` | 0..=5em |
+| `short_last_threshold` | 0..=8em |
+| `height_threshold` | 0..=5em |
 | `first_indent` | 0..=10em |
 | `line_height_min` | 0.5em..=5em |
 | `cjk_gap.*` / `cjk_latin_gap.*` | 0..=1000 permille |
@@ -350,6 +351,7 @@ Preset 是数据，不是算法分支：
 - `default-v1`：冻结的 K-P 参考（`tolerance = 3000`）。
 - `publish-v1`：**`soma.engine/1` 的默认 preset**（ADR-0023）：`default-v1` + `tolerance = 1500`，其余权重与回退完全相同；母语出版优先。
 - `book-v1`：`publish-v1` + `short_last_threshold = 3em`（ADR-0106）。中文书籍里两字末行按孤尾计费；自 ADR-0112 起段中孤字行也按同一项计费。样书 `examples/book/book.engine` 使用它。
+- `proposal-v1`：`book-v1` + `short_last_threshold = 8em`、`short_last_scale = 2_000_000`（ADR-0115）。提案的末行 5–8 个字也按孤尾计费，代价是 `book-v1` 的两倍；Studio 的内置默认（`examples/templates/proposal.engine`）使用它。
 - `latex-v1`：LaTeX article 的断行口径（ADR-0069，**CLI 内置默认**）：`default-v1` + `tolerance = 1260`（`\tolerance=200` 换算）+ `short_last_scale = 0`（短行项关闭：末行与孤字行都不罚）；其余权重与回退不变。
 - ~~更保守的 emergency~~：实测没有必要，回退阶梯保持 `default-v1`。
 - `mobile-v1`：更低 `max_lines`、更少 feature（延迟优先）。
@@ -505,7 +507,7 @@ pub struct EvalParams {
 | `compress_count` | 5 | 0..=1e9 | 是 | 每次裁剪；0.25em 事件合计约 10 |
 | `boundary_deviation` | 50 | 0..=1e9 | 是 | 每 1 个 ideal gap 的平均偏差；满 gap = 5 行 |
 | `short_last_scale` | 1_000_000 | 0..=1e9 | 是 | 短行（末行与孤字行）；0 宽行的 cost |
-| `short_last_threshold` | 2em | 0..=5em | 是 | 低于此值计费 |
+| `short_last_threshold` | 2em | 0..=8em | 是 | 低于此值计费 |
 | `height_scale` | 0 | 0..=1e9 | 实验 | 行高代价；默认关闭 |
 | `height_threshold` | none → body height | `None` 或 0..=5em | 实验 | 超出部分计费 |
 | `emergency` | 10_000_000 | 0..=1e9 | 固定 | 每行 emergency |

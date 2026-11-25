@@ -133,6 +133,8 @@ only).
 | [0112](0112-code-intrusive-breaks-and-short-lines.md) | Long unseamed code runs split per character (`INTRUSIVE_BREAK_PENALTY`); camelCase/`_`/`.` are seams; the short-line charge covers non-final lines; `modelVersion` 4 / `rulesVersion` 2 | Accepted; closes D114 and D115 |
 | [0113](0113-space-coverage-and-diagram-fit.md) | The metrics face covers its own space; layout and PDF fall back to the math face for glyphs the text face lacks; wide diagrams fit their label caps instead of shrinking | Accepted; fixes the TACTUS review's glyph and diagram findings |
 | [0114](0114-default-plex-template-v2.md) | Plex template v2: airier table cells, a deliberate contents page, a muted cover and a centred colophon; the built-in default follows | Accepted |
+| [0115](0115-keep-identifiers-and-proposal-tails.md) | Separator breaks cost 3000 (intrusive 8000); a line may not start with `*`/`+`/`=`; `proposal-v1` charges a 4–5 character tail at twice the book rate and becomes the Studio default | Accepted; answers the keep-together and short-tail review findings |
+| [0116](0116-diagram-labels-use-the-text-face.md) | Diagram labels carry `MathFace::Text`, so the PDF draws them with the template's text face like the SVG proof | Accepted |
 
 ## Rules
 

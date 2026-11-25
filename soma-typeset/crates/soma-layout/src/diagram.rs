@@ -31,7 +31,8 @@ impl<'a> DiagramText<'a> {
         let width = self.metrics.advance(text, self.style);
         let mut items = Vec::new();
         if !text.is_empty() {
-            let mut item = MathItem::text(text, Width::ZERO, Width::ZERO, self.computed.font_size);
+            let mut item =
+                MathItem::text(text, Width::ZERO, Width::ZERO, self.computed.font_size).text_face();
             item.color = self.computed.color;
             items.push(item);
         }

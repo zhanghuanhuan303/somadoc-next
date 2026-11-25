@@ -43,6 +43,10 @@ fn a_wide_flowchart_keeps_its_labels_readable() {
         .filter(|item| !item.text.trim().is_empty())
         .collect();
     assert!(!labels.is_empty(), "the diagram has node labels");
+    assert!(
+        labels.iter().all(|item| item.uses_text_face()),
+        "diagram labels are drawn with the text face, not the math face"
+    );
 
     // Without the fit search this chain is over 1.6x the measure and would
     // either fall back to source or land at the 60% floor. The chosen layout

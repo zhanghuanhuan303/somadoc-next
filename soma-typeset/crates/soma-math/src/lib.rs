@@ -441,6 +441,10 @@ pub struct MathItem {
     pub stretch: u16,
     /// Explicit colour, from `\color{...}`. `None` means "the style's colour".
     pub color: Option<u32>,
+    /// Which font family draws this item. A formula uses the math face; a
+    /// diagram label was measured with the document's text face and must be
+    /// drawn with it too (ADR-0116).
+    pub face: MathFace,
 }
 
 impl MathItem {
@@ -457,6 +461,7 @@ impl MathItem {
             design: size,
             glyph: MathGlyph::Text,
             stretch: 1000,
+            face: MathFace::Math,
             color: None,
         }
     }
@@ -468,6 +473,29 @@ impl MathItem {
             MathGlyph::Vertical(index) => Some(index),
         }
     }
+
+    /// Draw this item with the surrounding text face, not the math face. Used
+    /// by diagram labels, whose widths were measured with the text face.
+    pub fn text_face(mut self) -> Self {
+        self.face = MathFace::Text;
+        self
+    }
+
+    /// True when a renderer should prefer the surrounding text face.
+    pub fn uses_text_face(&self) -> bool {
+        self.face == MathFace::Text
+    }
+}
+
+/// Which face draws a [`MathItem`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MathFace {
+    /// The math face, which is what a formula is measured with.
+    #[default]
+    Math,
+    /// The surrounding text face. Diagram labels set this so the PDF and the
+    /// SVG proof draw the same family (ADR-0116).
+    Text,
 }
 
 /// Which glyph draws a [`MathItem`].
@@ -2384,6 +2412,7 @@ impl Context<'_> {
             design,
             glyph,
             stretch: 1000,
+            face: MathFace::Math,
             color: None,
         });
         let body_x = surd_x + advance;
@@ -2483,6 +2512,7 @@ impl Context<'_> {
                 design,
                 glyph,
                 stretch: 1000,
+                face: MathFace::Math,
                 color: None,
             });
             let gap = scale(size, self.style.limit_above_gap);
@@ -2514,6 +2544,7 @@ impl Context<'_> {
                 design,
                 glyph,
                 stretch: 1000,
+                face: MathFace::Math,
                 color: None,
             });
             self.cursor = left + advance;
@@ -3051,6 +3082,7 @@ impl Context<'_> {
             design: design_size,
             glyph,
             stretch: 1000,
+            face: MathFace::Math,
             color: None,
         });
         self.cursor += advance;

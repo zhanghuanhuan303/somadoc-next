@@ -110,16 +110,21 @@ fn inline_code_breaks_at_its_own_spaces() {
     assert_eq!(texts, ["let ", "x ", "= ", "1;"]);
     let joined: String = code.iter().map(|atom| atom.text.as_str()).collect();
     assert_eq!(joined, "let x = 1;");
-    // A break between two code pieces is allowed but priced.
+    // A break between two code pieces is allowed but priced, except before an
+    // operator: `x | = 1` must not start a line with `=` (ADR-0115).
     let first = paragraph
         .atoms
         .iter()
         .position(|atom| atom.style == StyleId(1))
         .expect("code start");
-    for boundary in &paragraph.boundaries[first..first + 3] {
-        assert_eq!(boundary.breakable, Breakability::Allowed);
+    for (index, boundary) in paragraph.boundaries[first..first + 3].iter().enumerate() {
         assert_eq!(boundary.kind, BoundaryKind::Normal);
-        assert!(boundary.penalty > 0);
+        if index == 1 {
+            assert_eq!(boundary.breakable, Breakability::Forbidden);
+        } else {
+            assert_eq!(boundary.breakable, Breakability::Allowed);
+            assert!(boundary.penalty > 0);
+        }
     }
 
     let object = paragraph
@@ -185,7 +190,7 @@ fn camel_case_seams_are_priced_word_breaks() {
     assert_eq!(texts, ["some", "Very", "Long", "Identifier"]);
     for boundary in &paragraph.boundaries {
         assert_eq!(boundary.breakable, Breakability::Allowed);
-        assert_eq!(boundary.penalty, 500, "a case seam is a word break");
+        assert_eq!(boundary.penalty, 3_000, "a case seam is a word break");
     }
 }
 
@@ -221,7 +226,7 @@ fn a_long_unseparated_code_run_breaks_per_character() {
         paragraph
             .boundaries
             .iter()
-            .all(|boundary| boundary.penalty == 2_000),
+            .all(|boundary| boundary.penalty == 8_000),
         "an intrusive break is the most expensive ordinary break"
     );
     let joined: String = paragraph
@@ -258,6 +263,32 @@ fn an_intrusive_split_keeps_a_trailing_space_at_the_tail() {
         .position(|atom| atom.text == "qr")
         .expect("the short piece");
     assert_eq!(paragraph.boundaries[qr - 1].penalty, 100);
+}
+
+#[test]
+fn code_operators_never_start_a_line() {
+    // A wrapped expression reads as a continuation: `tick *` ends the line,
+    // not `* 60` begins the next one.
+    let paragraph = paragraph_from_spans(&[InlineSpan::code("tick * 60 = x", StyleId(1))], style())
+        .expect("paragraph");
+    let texts: Vec<&str> = paragraph
+        .atoms
+        .iter()
+        .map(|atom| atom.text.as_str())
+        .collect();
+    assert_eq!(texts, ["tick ", "* ", "60 ", "= ", "x"]);
+    assert_eq!(
+        paragraph.boundaries[0].breakable,
+        Breakability::Forbidden,
+        "a line may not begin with `*`"
+    );
+    assert_eq!(paragraph.boundaries[1].breakable, Breakability::Allowed);
+    assert_eq!(
+        paragraph.boundaries[2].breakable,
+        Breakability::Forbidden,
+        "a line may not begin with `=`"
+    );
+    assert_eq!(paragraph.boundaries[3].breakable, Breakability::Allowed);
 }
 
 #[test]

@@ -1,0 +1,7 @@
+# The Studio's default engine: the proposal preset.
+#
+# `proposal-v1` is `book-v1` with a five-character short-tail threshold and a
+# doubled charge, so a 5–8 character last line is treated as an orphan. The
+# command line keeps `latex-v1` for LaTeX compatibility (ADR-0069).
+schema: soma.engine/1
+preset: proposal-v1
