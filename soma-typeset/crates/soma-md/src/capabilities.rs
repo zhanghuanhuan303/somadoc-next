@@ -82,6 +82,26 @@ pub const CAPABILITIES: &[Capability] = &[
         note: "`` `x` `` becomes `Code`, one unbreakable atom",
     },
     Capability {
+        syntax: "inline_math",
+        status: CapabilityStatus::Supported,
+        note: "`$...$` and `\\(...\\)` become `MathInline`",
+    },
+    Capability {
+        syntax: "display_math",
+        status: CapabilityStatus::Supported,
+        note: "`$$...$$`, `\\[...\\]` and display environments become `MathBlock`",
+    },
+    Capability {
+        syntax: "latex_inline",
+        status: CapabilityStatus::Supported,
+        note: "common LaTeX text commands map to DocIR; `\\footnote` keeps its source",
+    },
+    Capability {
+        syntax: "latex_block",
+        status: CapabilityStatus::Supported,
+        note: "common LaTeX environments parse through the LaTeX frontend",
+    },
+    Capability {
         syntax: "link",
         status: CapabilityStatus::Supported,
         note: "`[text](url)` becomes `Link`",
@@ -164,12 +184,12 @@ pub const CAPABILITIES: &[Capability] = &[
     Capability {
         syntax: "html_block",
         status: CapabilityStatus::Supported,
-        note: "a block becomes RawBlock with text fallback; never executed",
+        note: "a supported block parses through the HTML frontend; unsupported tags stay RawBlock; never executed",
     },
     Capability {
         syntax: "html_inline",
         status: CapabilityStatus::Supported,
-        note: "a tag becomes RawInline with browser-text fallback; never executed",
+        note: "formatting tags become DocIR containers; unknown tags stay RawInline; never executed",
     },
     Capability {
         syntax: "link_reference",

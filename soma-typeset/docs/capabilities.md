@@ -1,6 +1,6 @@
 # 内容能力矩阵（Gate C）
 
-状态：**Gate C 维护中**。代码是权威：`soma_md::CAPABILITIES`（当前 30 项）。
+状态：**Gate C 维护中**。代码是权威：`soma_md::CAPABILITIES`（当前 34 项）。
 本文件必须与代码逐条对应；`scripts/gate-c.sh` 会检查这一点。
 
 图例：
@@ -19,6 +19,10 @@
 | `strong` | supported | `**x**` / `__x__` → `Strong` |
 | `strikethrough` | supported | `~~x~~` → `Strikethrough`，PDF 里画成横线（ADR-0044） |
 | `inline_code` | supported | `` `x` `` → `Code`，一个不可断 atom |
+| `inline_math` | supported | `$...$` / `\(...\)` → `MathInline`；货币写法不会被误吞 |
+| `display_math` | supported | `$$...$$`、`\[...\]` 与 equation 类环境 → `MathBlock` |
+| `latex_inline` | supported | 常用 LaTeX 文本命令（`\textbf`、`\emph`、`\underline`、`\href`、`\url`、`\ruby` 等）映射到 DocIR；`\footnote` 保留源码 |
+| `latex_block` | supported | 常用 LaTeX 环境（列表、引文、tabular、figure、equation、mermaid、tikz）交给 LaTeX 前端 |
 | `link` | supported | `[text](url)` → `Link` |
 | `image` | supported | `![alt](src)` → `Image` |
 | `fenced_code` | supported | ``` ``` ``` / `~~~` → `CodeBlock`；info string 的第一个 token 选择语法着色（rust/c/cpp/shell/markdown/latex 等，ADR-0091） |
@@ -35,8 +39,8 @@
 | `nested_list` | supported | 缩进记号成为父项内的 `List` |
 | `setext_heading` | supported | 段落下方的 `===` / `---` 成为一/二级 `Heading` |
 | `table` | supported | 带分隔行的 GFM 竖线表格成为 `Table`；`\|` 是字面竖线；分隔行的破折号数量成为相对列宽 |
-| `html_block` | supported | 块成为 `RawBlock`，fallback 为文本；永不执行 |
-| `html_inline` | supported | 标签成为 `RawInline`，fallback 为文本；永不执行 |
+| `html_block` | supported | 可语义化的块交给 `soma-html` 解析；不支持的标签仍是 `RawBlock`；永不执行 |
+| `html_inline` | supported | 格式化标签成为 DocIR 容器；未知标签仍是 `RawInline`；永不执行 |
 | `link_reference` | supported | `[label]: url` 定义解析 `[text][label]` / `[text][]` 链接与图片；定义行不进入正文 |
 | `multi_line_code_span` | supported | 代码跨度可以跨软换行，换行规范化为空格 |
 | `unterminated_code_span` | degraded | 未闭合的反引号保持为文本 |
@@ -47,7 +51,7 @@ TikZ 不是 Markdown 构造：`tikzpicture` 由 LaTeX 前端作为 `MathBlock` �
 
 ## 安全口径
 
-- 前端不执行任何内容：HTML 块/行内成为 `RawBlock`/`RawInline`，布局用 fallback 文本绘制。
+- 前端不执行任何内容：可语义化的 HTML/LaTeX 只映射到 DocIR；不支持的标签或命令保持 `RawBlock`/`RawInline`，布局用 fallback 文本绘制。HTML 样式表、脚本和 LaTeX 宏语义都不会被执行。
 - 渲染器只输出绝对定位的 `span`/`div`；不输出 `<script>`、`<a href>`。图片可以以 `data:` URI 内联（`<img src="data:…">` / `<image href="data:…">`），因为那仍然是一个自包含文档；除此之外任何 `src`/`href` 都不会出现（ADR-0048）。
 - 图是占位框；链接只画文本。
 - 输出里的文本全部转义（`& < > "`）。

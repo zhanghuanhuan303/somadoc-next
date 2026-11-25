@@ -11,8 +11,17 @@
 //! GFM tables, thematic breaks, footnote definitions and references, ruby
 //! (`[[ruby:base|reading]]`), index markers, and backslash escapes.
 //!
-//! Not supported: HTML blocks and inline HTML are kept as literal text (never
-//! executed); an unterminated inline-code run stays literal text.
+//! Mixed syntax is part of the front end:
+//! - `$...$` / `\(...\)` become `MathInline`; `$$...$$`, `\[...\]` and
+//!   display environments become `MathBlock`;
+//! - a whitelist of LaTeX text commands is parsed by `soma-latex`, and a
+//!   whitelist of LaTeX environments is parsed as LaTeX blocks;
+//! - semantic inline HTML maps to DocIR containers, supported block HTML goes
+//!   through `soma-html`, and text inside an HTML block is parsed as Markdown
+//!   inline syntax again. Unknown HTML/LaTeX stays visible as Raw fallback.
+//!
+//! Not supported: inline LaTeX footnote definitions (the source stays visible),
+//! and an unterminated inline-code run stays literal text.
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
@@ -21,18 +30,20 @@ extern crate alloc;
 
 pub mod capabilities;
 
-use alloc::string::String;
+mod embedded;
+
+use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
 use soma_doc::block::{
-    BlockQuote, Cell, CodeBlock, Column, Heading, List, ListItem, Paragraph, RawBlock, Row, Table,
-    ThematicBreak,
+    BlockQuote, Cell, CodeBlock, Column, Heading, List, ListItem, MathBlock, Paragraph, RawBlock,
+    Row, Table, ThematicBreak,
 };
 use soma_doc::block::{DiagramBlock, DiagramDialect};
 use soma_doc::inline::{
-    Container, FootnoteRef, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link, RawInline,
-    Ruby,
+    Container, FootnoteRef, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link, MathInline,
+    RawInline, Ruby,
 };
 use soma_doc::meta::{Author, CoverData, Date, DocumentMeta, ImageRef};
 use soma_doc::node::NodeMeta;
@@ -43,10 +54,15 @@ use soma_doc::{
     Text,
 };
 
+use embedded::{
+    collapse, decode_entities, latex_inline_at, matching_close, ruby_annotation, ruby_base,
+    semantic_html_block, strip_tags, tag_at,
+};
+
 pub use capabilities::{capability, with_status, Capability, CapabilityStatus, CAPABILITIES};
 
 pub const SYNTAX_ID: &str = "markdown";
-pub const SYNTAX_VERSION: u16 = 1;
+pub const SYNTAX_VERSION: u16 = 2;
 
 /// Parse Markdown into DocIR. A leading `---` block supplies document
 /// metadata (title, subtitle, author, date, language, keywords); without one
@@ -179,6 +195,32 @@ pub fn parse_markdown_with_meta(source: &str, meta: DocumentMeta) -> Document {
             continue;
         }
 
+        if let Some((source, start, end, next)) = collect_display_math(&lines, index) {
+            blocks.push(Block::MathBlock(MathBlock::new(
+                NodeMeta::at(SourceSpan::at(SourceId(1), start, end)),
+                source.trim().to_string(),
+            )));
+            index = next;
+            continue;
+        }
+
+        if let Some((source, start, end, next)) = collect_latex_environment(&lines, index) {
+            let parsed = soma_latex::parse_latex(&source);
+            let collides = parsed.footnotes.iter().any(|definition| {
+                footnotes
+                    .iter()
+                    .any(|existing| existing.label == definition.label)
+            });
+            if collides {
+                blocks.push(raw_block("latex", &source, start, end));
+            } else {
+                blocks.extend(parsed.blocks);
+                footnotes.extend(parsed.footnotes);
+            }
+            index = next;
+            continue;
+        }
+
         if let Some((level, rest)) = heading(text) {
             let offset = line.offset + (line.text.len() - text.len()) as u32 + level as u32 + 1;
             blocks.push(Block::Heading(Heading::new(
@@ -197,24 +239,18 @@ pub fn parse_markdown_with_meta(source: &str, meta: DocumentMeta) -> Document {
         }
 
         if html_block_start(text) {
-            let start = line.offset;
-            let mut value = String::new();
-            let mut end = start;
-            while index < lines.len() && !lines[index].text.trim().is_empty() {
-                if !value.is_empty() {
-                    value.push('\n');
+            let root = html_block_root(text);
+            let (value, start, end, next) = collect_html_block(&lines, index, root.as_deref());
+            index = next;
+            if root.is_some() {
+                let mut parsed = soma_html::parse_html_fragment(&value);
+                markdownize_blocks(&mut parsed);
+                if !parsed.is_empty() {
+                    blocks.extend(parsed);
+                    continue;
                 }
-                value.push_str(lines[index].text);
-                end = lines[index].offset + lines[index].text.len() as u32;
-                index += 1;
             }
-            let fallback = value.replace('\n', " ");
-            blocks.push(Block::Raw(RawBlock::new(
-                NodeMeta::at(SourceSpan::at(SourceId(1), start, end)),
-                RawContent::new("html", value)
-                    .with_fallback(fallback)
-                    .with_capability(RawCapability::Degraded),
-            )));
+            blocks.push(raw_block("html", &value, start, end));
             continue;
         }
 
@@ -288,6 +324,9 @@ pub fn parse_markdown_with_meta(source: &str, meta: DocumentMeta) -> Document {
                 || list_marker(next_text).is_some()
                 || next_text.starts_with('>')
                 || table_delimiter(next_text).is_some()
+                || display_math_start(next_text)
+                || latex_environment_start(next_text)
+                || html_block_start(next_text)
             {
                 break;
             }
@@ -1027,7 +1066,10 @@ fn resolve_text(text: Text, refs: &[LinkRef], out: &mut Vec<Inline>) {
 // ---------------------------------------------------------------------------
 
 /// Parse inline Markdown. Unmatched delimiters are literal text.
-/// What an inline delimiter run produces.
+pub fn parse_inlines(text: &str, offset: u32) -> Vec<Inline> {
+    parse_inlines_with(text, offset, true)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mark {
     Strong,
@@ -1035,7 +1077,10 @@ enum Mark {
     Strikethrough,
 }
 
-pub fn parse_inlines(text: &str, offset: u32) -> Vec<Inline> {
+/// Parse inline Markdown with HTML recognition optionally disabled. Used when
+/// the text already came from the HTML frontend: a decoded `&lt;b&gt;` must
+/// stay literal text instead of becoming a second HTML parse.
+fn parse_inlines_with(text: &str, offset: u32, allow_html: bool) -> Vec<Inline> {
     let mut out = Vec::new();
     let mut cursor = 0usize;
     let mut plain = String::new();
@@ -1063,6 +1108,37 @@ pub fn parse_inlines(text: &str, offset: u32) -> Vec<Inline> {
     while cursor < text.len() {
         let rest = &text[cursor..];
 
+        if let Some((source, consumed)) = inline_math(rest) {
+            flush!();
+            let start = offset + cursor as u32;
+            out.push(
+                MathInline::new(
+                    NodeMeta::at(SourceSpan::at(SourceId(1), start, start + consumed as u32)),
+                    source,
+                )
+                .into(),
+            );
+            cursor += consumed;
+            continue;
+        }
+
+        if let Some(command) = latex_inline_at(rest) {
+            flush!();
+            let source = &rest[..command.end];
+            let (inlines, notes) = if command.name == "footnote" {
+                (Vec::new(), Vec::new())
+            } else {
+                soma_latex::parse_latex_inline_fragment(source)
+            };
+            if command.name == "footnote" || !notes.is_empty() {
+                out.push(raw_inline("latex", source, offset + cursor as u32));
+            } else {
+                out.extend(inlines);
+            }
+            cursor += command.end;
+            continue;
+        }
+
         if rest.starts_with('\\') && rest.len() >= 2 {
             let mut chars = rest.chars();
             chars.next();
@@ -1076,7 +1152,13 @@ pub fn parse_inlines(text: &str, offset: u32) -> Vec<Inline> {
             }
         }
 
-        if rest.starts_with('<') {
+        if allow_html && rest.starts_with('<') {
+            if let Some((inlines, length)) = parse_inline_html(rest, offset, cursor) {
+                flush!();
+                out.extend(inlines);
+                cursor += length;
+                continue;
+            }
             if let Some(length) = html_tag_end(rest) {
                 flush!();
                 let tag = &rest[..length];
@@ -1150,7 +1232,8 @@ pub fn parse_inlines(text: &str, offset: u32) -> Vec<Inline> {
         }
 
         if rest.starts_with("![") || rest.starts_with('[') {
-            if let Some((inline, length)) = link_or_image(rest, offset + cursor as u32) {
+            if let Some((inline, length)) = link_or_image(rest, offset + cursor as u32, allow_html)
+            {
                 flush!();
                 out.push(inline);
                 cursor += length;
@@ -1199,7 +1282,8 @@ pub fn parse_inlines(text: &str, offset: u32) -> Vec<Inline> {
                 let start = offset + cursor as u32;
                 let end = start + (delimiter.len() * 2 + inner.len()) as u32;
                 let meta = NodeMeta::at(SourceSpan::at(SourceId(1), start, end));
-                let children = parse_inlines(inner, start + delimiter.len() as u32);
+                let children =
+                    parse_inlines_with(inner, start + delimiter.len() as u32, allow_html);
                 flush!();
                 let container = Container::new(meta, children);
                 out.push(match role {
@@ -1242,6 +1326,421 @@ pub fn parse_inlines(text: &str, offset: u32) -> Vec<Inline> {
 
     flush!();
     out
+}
+
+/// Parse Markdown inline syntax inside text nodes produced by the HTML
+/// frontend. HTML block content is allowed to contain `$...$`, `\textbf{...}`
+/// and ordinary Markdown emphasis; code and math nodes are left alone.
+fn markdownize_blocks(blocks: &mut [Block]) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(node) => markdownize_inlines(&mut node.inlines),
+            Block::Heading(node) => markdownize_inlines(&mut node.inlines),
+            Block::List(node) => {
+                for item in &mut node.items {
+                    markdownize_blocks(&mut item.blocks);
+                }
+            }
+            Block::BlockQuote(node) => markdownize_blocks(&mut node.blocks),
+            Block::Table(node) => {
+                markdownize_inlines(&mut node.caption);
+                for row in &mut node.rows {
+                    for cell in &mut row.cells {
+                        markdownize_blocks(&mut cell.blocks);
+                    }
+                }
+            }
+            Block::Figure(node) => markdownize_inlines(&mut node.caption),
+            Block::Section(node) => {
+                if let Some(title) = &mut node.title {
+                    markdownize_inlines(title);
+                }
+            }
+            Block::Generated(node) => markdownize_blocks(&mut node.blocks),
+            Block::CodeBlock(_)
+            | Block::MathBlock(_)
+            | Block::Diagram(_)
+            | Block::ThematicBreak(_)
+            | Block::PageBreak(_)
+            | Block::Raw(_) => {}
+        }
+    }
+}
+
+fn markdownize_inlines(inlines: &mut Vec<Inline>) {
+    let mut out = Vec::with_capacity(inlines.len());
+    for inline in core::mem::take(inlines) {
+        match inline {
+            Inline::Text(text) => out.extend(parse_inlines_with(&text.value, 0, false)),
+            mut other => {
+                if let Some(children) = other.children_mut() {
+                    markdownize_inlines(children);
+                }
+                out.push(other);
+            }
+        }
+    }
+    *inlines = out;
+}
+
+fn raw_inline(kind: &str, value: &str, start: u32) -> Inline {
+    RawInline::new(
+        NodeMeta::at(SourceSpan::at(
+            SourceId(1),
+            start,
+            start + value.len() as u32,
+        )),
+        RawContent::new(kind, value)
+            .with_fallback(value)
+            .with_capability(RawCapability::Degraded),
+    )
+    .into()
+}
+
+fn inline_math(text: &str) -> Option<(String, usize)> {
+    if let Some(after) = text.strip_prefix("$$") {
+        let position = after.find("$$")?;
+        if position == 0 {
+            return None;
+        }
+        return Some((String::from(&after[..position]), 4 + position));
+    }
+    if let Some(after) = text.strip_prefix("\\(") {
+        let position = after.find("\\)")?;
+        if position == 0 {
+            return None;
+        }
+        return Some((String::from(&after[..position]), 4 + position));
+    }
+    if let Some(after) = text.strip_prefix("\\[") {
+        let position = after.find("\\]")?;
+        if position == 0 {
+            return None;
+        }
+        return Some((String::from(&after[..position]), 4 + position));
+    }
+    let after = text.strip_prefix('$')?;
+    let first = after.chars().next()?;
+    if first.is_whitespace() {
+        return None;
+    }
+    let mut escaped = false;
+    for (position, character) in after.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match character {
+            '\\' => escaped = true,
+            '$' => {
+                if position == 0 {
+                    return None;
+                }
+                let before = after[..position].chars().next_back();
+                let after_close = after[position + 1..].chars().next();
+                if before.is_some_and(char::is_whitespace)
+                    || after_close.is_some_and(|next| next.is_ascii_digit())
+                {
+                    return None;
+                }
+                return Some((String::from(&after[..position]), 2 + position));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn parse_inline_html(text: &str, offset: u32, cursor: usize) -> Option<(Vec<Inline>, usize)> {
+    let tag = tag_at(text)?;
+    if tag.closing {
+        return None;
+    }
+    let start = offset + cursor as u32;
+    let open_end = tag.end;
+    let name = tag.name.to_ascii_lowercase();
+    let meta = |end: usize| NodeMeta::at(SourceSpan::at(SourceId(1), start, start + end as u32));
+
+    if name == "br" {
+        return Some((
+            vec![LineBreak::new(meta(open_end), LineBreakKind::Hard).into()],
+            open_end,
+        ));
+    }
+    if name == "img" {
+        let src = tag.attr("src").filter(|value| !value.is_empty())?;
+        let mut source = ImageRef::new(decode_entities(src));
+        if let Some(alt) = tag.attr("alt") {
+            source = source.with_alt(decode_entities(alt));
+        }
+        if let Some(title) = tag.attr("title") {
+            source = source.with_title(decode_entities(title));
+        }
+        return Some((vec![Image::new(meta(open_end), source).into()], open_end));
+    }
+    if tag.self_closing {
+        return None;
+    }
+    let (inner_end, consumed_close) = matching_close(&text[open_end..], tag.name)?;
+    let inner = &text[open_end..open_end + inner_end];
+    let consumed = open_end + consumed_close;
+    let child_offset = offset + (cursor + open_end) as u32;
+    let children = parse_inlines_with(inner, child_offset, true);
+    let whole = meta(consumed);
+    let result = match name.as_str() {
+        "strong" | "b" => html_container(whole.clone(), children, Inline::Strong),
+        "em" | "i" => html_container(whole.clone(), children, Inline::Emphasis),
+        "u" | "ins" => html_container(whole.clone(), children, Inline::Underline),
+        "s" | "del" | "strike" => html_container(whole.clone(), children, Inline::Strikethrough),
+        "sup" => html_container(whole.clone(), children, Inline::Superscript),
+        "sub" => html_container(whole.clone(), children, Inline::Subscript),
+        "a" => {
+            let href = tag.attr("href").map(decode_entities).unwrap_or_default();
+            if href.is_empty() || children.is_empty() {
+                return Some((children, consumed));
+            }
+            let mut link = Link::new(whole, href, children);
+            if let Some(title) = tag.attr("title") {
+                link.title = Some(decode_entities(title));
+            }
+            Some(Inline::Link(link))
+        }
+        "code" | "kbd" | "samp" | "var" => {
+            let value = collapse(&strip_tags(inner));
+            (!value.is_empty()).then_some(Inline::Code(Code::new(whole, value)))
+        }
+        "ruby" => {
+            let base = ruby_base(inner);
+            let annotation = ruby_annotation(inner).unwrap_or_default();
+            (!base.is_empty()).then_some(Inline::Ruby(Ruby::new(whole, base, annotation)))
+        }
+        "span" | "small" | "mark" | "cite" | "q" | "abbr" | "time" => {
+            return Some((children, consumed));
+        }
+        _ => return None,
+    };
+    Some((result.into_iter().collect(), consumed))
+}
+
+fn html_container(
+    meta: NodeMeta,
+    children: Vec<Inline>,
+    inline: fn(Container) -> Inline,
+) -> Option<Inline> {
+    (!children.is_empty()).then(|| inline(Container::new(meta, children)))
+}
+
+fn raw_block(kind: &str, value: &str, start: u32, end: u32) -> Block {
+    let fallback = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    Block::Raw(RawBlock::new(
+        NodeMeta::at(SourceSpan::at(SourceId(1), start, end)),
+        RawContent::new(kind, value)
+            .with_fallback(fallback)
+            .with_capability(RawCapability::Degraded),
+    ))
+}
+
+fn display_math_start(text: &str) -> bool {
+    let text = text.trim_start();
+    text.starts_with("$$") || text.starts_with("\\[")
+}
+
+fn latex_environment_start(text: &str) -> bool {
+    let text = text.trim_start();
+    let Some(rest) = text.strip_prefix("\\begin{") else {
+        return false;
+    };
+    let Some(end) = rest.find('}') else {
+        return false;
+    };
+    latex_block_environment(&rest[..end])
+}
+
+fn collect_display_math(lines: &[Line<'_>], index: usize) -> Option<(String, u32, u32, usize)> {
+    let line = lines.get(index)?;
+    let text = line.text.trim_start();
+    let indent = line.text.len() - text.len();
+    let (open, close) = if text.starts_with("$$") {
+        ("$$", "$$")
+    } else if text.starts_with("\\[") {
+        ("\\[", "\\]")
+    } else {
+        return None;
+    };
+    let after_open = &line.text[indent + open.len()..];
+    let start = line.offset;
+    if let Some(position) = after_open.find(close) {
+        if !after_open[position + close.len()..].trim().is_empty() {
+            return None;
+        }
+        let end = line.offset + line.text.len() as u32;
+        return Some((String::from(&after_open[..position]), start, end, index + 1));
+    }
+
+    let mut source = String::from(after_open);
+    let mut next = index + 1;
+    while let Some(candidate) = lines.get(next) {
+        if let Some(position) = candidate.text.find(close) {
+            if !candidate.text[position + close.len()..].trim().is_empty() {
+                return None;
+            }
+            if !source.is_empty() {
+                source.push('\n');
+            }
+            source.push_str(&candidate.text[..position]);
+            let end = candidate.offset + (position + close.len()) as u32;
+            return Some((source, start, end, next + 1));
+        }
+        if !source.is_empty() {
+            source.push('\n');
+        }
+        source.push_str(candidate.text);
+        next += 1;
+    }
+    None
+}
+
+fn collect_latex_environment(
+    lines: &[Line<'_>],
+    index: usize,
+) -> Option<(String, u32, u32, usize)> {
+    let line = lines.get(index)?;
+    let text = line.text.trim_start();
+    let rest = text.strip_prefix("\\begin{")?;
+    let name_end = rest.find('}')?;
+    let environment = &rest[..name_end];
+    if !latex_block_environment(environment) {
+        return None;
+    }
+    let marker = alloc::format!("\\end{{{environment}}}");
+    let start = line.offset;
+    let mut source = String::new();
+    let mut next = index;
+    while let Some(candidate) = lines.get(next) {
+        if let Some(position) = candidate.text.find(&marker) {
+            if !candidate.text[position + marker.len()..].trim().is_empty() {
+                return None;
+            }
+            if !source.is_empty() {
+                source.push('\n');
+            }
+            source.push_str(&candidate.text[..position + marker.len()]);
+            let end = candidate.offset + (position + marker.len()) as u32;
+            return Some((source, start, end, next + 1));
+        }
+        if !source.is_empty() {
+            source.push('\n');
+        }
+        source.push_str(candidate.text);
+        next += 1;
+    }
+    None
+}
+
+fn latex_block_environment(environment: &str) -> bool {
+    matches!(
+        environment,
+        "center"
+            | "description"
+            | "displaymath"
+            | "dot"
+            | "enumerate"
+            | "equation"
+            | "equation*"
+            | "figure"
+            | "figure*"
+            | "flushleft"
+            | "flushright"
+            | "gather"
+            | "gather*"
+            | "graphviz"
+            | "itemize"
+            | "math"
+            | "mermaid"
+            | "multline"
+            | "multline*"
+            | "quote"
+            | "quotation"
+            | "table"
+            | "table*"
+            | "tabular"
+            | "tabular*"
+            | "tikzpicture"
+            | "verbatim"
+    )
+}
+
+fn html_block_root(text: &str) -> Option<String> {
+    let text = text.trim_start();
+    let tag = tag_at(text)?;
+    if tag.closing || tag.self_closing {
+        return None;
+    }
+    let name = tag.name.to_ascii_lowercase();
+    semantic_html_block(&name).then_some(name)
+}
+
+fn collect_html_block(
+    lines: &[Line<'_>],
+    index: usize,
+    root: Option<&str>,
+) -> (String, u32, u32, usize) {
+    let start = lines[index].offset;
+    let close_line = root.and_then(|name| find_html_close_line(lines, index, name));
+    let mut next = match close_line {
+        Some(close) => close + 1,
+        None => {
+            let mut next = index;
+            while next < lines.len() && !lines[next].text.trim().is_empty() {
+                next += 1;
+            }
+            next
+        }
+    };
+    if next <= index {
+        next = index + 1;
+    }
+    let last = &lines[next - 1];
+    let end = last.offset + last.text.len() as u32;
+    let mut value = String::new();
+    for line in &lines[index..next] {
+        if !value.is_empty() {
+            value.push('\n');
+        }
+        value.push_str(line.text);
+    }
+    (value, start, end, next)
+}
+
+fn find_html_close_line(lines: &[Line<'_>], start: usize, root: &str) -> Option<usize> {
+    if root == "hr" {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut seen = false;
+    for (offset, line) in lines.iter().enumerate().skip(start) {
+        let mut pos = 0usize;
+        while let Some(found) = line.text[pos..].find('<') {
+            let at = pos + found;
+            let Some(tag) = tag_at(&line.text[at..]) else {
+                pos = at + 1;
+                continue;
+            };
+            if tag.is(root) {
+                if tag.closing {
+                    depth = depth.saturating_sub(1);
+                } else if !tag.self_closing {
+                    depth += 1;
+                    seen = true;
+                }
+            }
+            pos = at + tag.end.max(1);
+        }
+        if seen && depth == 0 {
+            return Some(offset);
+        }
+    }
+    None
 }
 
 fn html_block_start(text: &str) -> bool {
@@ -1351,7 +1850,7 @@ fn html_tag_end(text: &str) -> Option<usize> {
     rest.find('>').map(|index| index + 2)
 }
 
-fn link_or_image(text: &str, offset: u32) -> Option<(Inline, usize)> {
+fn link_or_image(text: &str, offset: u32, allow_html: bool) -> Option<(Inline, usize)> {
     let is_image = text.starts_with("![");
     let open = if is_image { 2 } else { 1 };
     let body = &text[open..];
@@ -1408,7 +1907,7 @@ fn link_or_image(text: &str, offset: u32) -> Option<(Inline, usize)> {
         }
         Some((Image::new(meta, image).into(), length))
     } else {
-        let children = parse_inlines(label, offset + open as u32);
+        let children = parse_inlines_with(label, offset + open as u32, allow_html);
         let mut link = Link::new(meta, destination, children);
         link.title = title;
         Some((Inline::Link(link), length))

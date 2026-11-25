@@ -9,6 +9,8 @@ description = "Markdown subset front end: Markdown -> DocIR"
 
 [dependencies]
 soma-doc = { path = "../soma-doc" }
+soma-html = { path = "../soma-html" }
+soma-latex = { path = "../soma-latex" }
 
 [dev-dependencies]
 soma-core = { path = "../soma-core" }

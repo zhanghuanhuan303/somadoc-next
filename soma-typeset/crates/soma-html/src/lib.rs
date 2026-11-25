@@ -209,6 +209,20 @@ pub fn parse_html_with_meta(source: &str, meta: DocumentMeta) -> Document {
     document
 }
 
+/// Parse an HTML fragment into blocks. The caller owns document metadata and
+/// node numbering; this is the seam a compound front end (for example a
+/// Markdown document with embedded HTML) uses so there is only one HTML
+/// semantic mapping.
+///
+/// Unsupported elements are transparent when they have children; their text is
+/// kept. The fragment parser never executes anything.
+pub fn parse_html_fragment(source: &str) -> Vec<Block> {
+    let nodes = parse_tree(source);
+    let mut blocks = Vec::new();
+    build_blocks(&nodes, &mut blocks);
+    blocks
+}
+
 fn root_lang(nodes: &[Node]) -> Option<String> {
     for node in nodes {
         if let Node::Element(element) = node {

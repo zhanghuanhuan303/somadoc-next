@@ -137,11 +137,11 @@ fn supported_constructs_produce_structure() {
 #[test]
 fn the_matrix_is_stable() {
     // Pinning the count makes an accidental silent removal visible.
-    assert_eq!(CAPABILITIES.len(), 30);
+    assert_eq!(CAPABILITIES.len(), 34);
 }
 
 #[test]
-fn inline_html_is_a_raw_inline_with_a_text_fallback() {
+fn inline_html_becomes_semantic_structure() {
     let document = soma_md::parse_markdown("text <b>bold</b> end\n");
     let Block::Paragraph(paragraph) = &document.blocks[0] else {
         panic!("expected a paragraph");
@@ -149,14 +149,36 @@ fn inline_html_is_a_raw_inline_with_a_text_fallback() {
     assert!(paragraph
         .inlines
         .iter()
-        .any(|inline| matches!(inline, soma_doc::Inline::Raw(_))));
-    assert_eq!(document.plain_text().trim(), "text <b>bold</b> end");
+        .any(|inline| matches!(inline, soma_doc::Inline::Strong(_))));
+    assert_eq!(document.plain_text().trim(), "text bold end");
 }
 
 #[test]
-fn an_html_block_is_a_raw_block_with_a_text_fallback() {
+fn an_html_block_uses_the_html_frontend() {
     let document = soma_md::parse_markdown("<div class=\"x\">\nkept\n</div>\n\n正文\n");
-    assert!(matches!(document.blocks[0], Block::Raw(_)));
-    assert!(document.plain_text().contains("<div class=\"x\">"));
+    assert!(matches!(document.blocks[0], Block::Paragraph(_)));
+    assert!(!document.plain_text().contains("<div"));
+    assert!(document.plain_text().contains("kept"));
     assert!(document.plain_text().contains("正文"));
+}
+
+#[test]
+fn embedded_latex_and_math_are_declared_and_semantic() {
+    let document = soma_md::parse_markdown("$x$ and \\textbf{粗}\n\n$$y$$\n");
+    document.validate().expect("valid DocIR");
+    let Block::Paragraph(paragraph) = &document.blocks[0] else {
+        panic!("expected a paragraph");
+    };
+    assert!(paragraph
+        .inlines
+        .iter()
+        .any(|inline| matches!(inline, soma_doc::Inline::Math(_))));
+    assert!(paragraph
+        .inlines
+        .iter()
+        .any(|inline| matches!(inline, soma_doc::Inline::Strong(_))));
+    assert!(document
+        .blocks
+        .iter()
+        .any(|block| matches!(block, Block::MathBlock(_))));
 }

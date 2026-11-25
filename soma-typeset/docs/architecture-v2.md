@@ -217,7 +217,7 @@ pub trait SyntaxFrontend {
 
 | 前端 | 解析器 | 首版范围 | 明确不做 |
 |---|---|---|---|
-| `soma-md` | `comrak` AST（后续可换） | CommonMark 基础、GFM 表格/删除线、数学扩展、原始 HTML/LaTeX inline | 完整 CommonMark 边界、扩展语法全集 |
+| `soma-md` | 自研子集；嵌入片段复用 `soma-html` / `soma-latex` | CommonMark 基础、GFM 表格/删除线、行内/行间数学、语义 HTML、LaTeX 命令与环境 | 完整 CommonMark 边界、扩展语法全集、行内 LaTeX 脚注定义 |
 | `soma-html` | `html5ever`/`scraper` | 语义白名单：标题、段落、列表、强调、链接、图、表、脚注、上下标、`u`/`s`、`ruby` | 不执行 CSS 布局；不执行脚本 |
 | `soma-latex` | 自研子集或成熟解析器 | 标题、段落、强调、下划线、上下标、公式、脚注、图、表、引用 | 不实现完整 TeX 宏展开 |
 | `soma-docx` | docx XML/zip | 段落样式、字符样式、标题、列表、脚注、图、表 | 不做 Word 版式保真 |
@@ -570,7 +570,7 @@ crates/
   soma-layout/      # box tree, paragraph adapter, pagination, footnotes
   soma-math/        # TeX subset -> integer math boxes
   soma-metrics/     # soma.metrics/7 table reader + adapters
-  soma-md/          # Markdown -> DocIR
+  soma-md/          # Markdown -> DocIR, with embedded LaTeX/HTML fragments
   soma-html/        # HTML -> DocIR
   soma-latex/       # LaTeX subset -> DocIR
   soma-docx/        # Word .docx -> DocIR

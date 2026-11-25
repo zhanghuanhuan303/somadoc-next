@@ -137,6 +137,7 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `corpus.rs` (eval) | 10 | `corpus/zh`: presence, determinism, widows/orphans, compression budget, calibration, table/math/book fixtures |
 | `a5_md.rs` | 24 |
 | `link_reference.rs` | 5 | full/collapsed/image references, label normalization, undefined refs stay text | Markdown subset (nested lists, GFM tables with dash-derived column shares, setext headings), inlines (including GFM `~~`), spans, index/ruby extensions, front matter, validity |
+| `mixed.rs` | 12 | Markdown + embedded LaTeX/HTML: inline and display math, currency heuristic, LaTeX commands/environments, semantic inline HTML, HTML blocks spanning blank lines, nested Markdown in HTML, entity escaping, visible inline LaTeX footnote fallback, TikZ/Mermaid environments |
 | `html.rs` (html) | 24 | HTML subset shapes incl. definition lists, `ins`, `sup`/`sub`, `hr`, figure/caption, table grid, degradation, recovery, pipeline |
 | `latex.rs` (latex) | 18 | LaTeX subset shapes, math source, table/figure captions, `\includegraphics`, metadata, subtitle to cover, inline command opening a block, ruby, recovery, pipeline |
 | `macros.rs` (latex) | 14 | source-level expansion: 0–2 argument macros, nesting, renew, depth limit, `\def`, counters (arabic/roman/alph), definitions vanish, comments, verbatim untouched |
@@ -162,7 +163,7 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `e21_line_end_punctuation.rs` (layout) | 6 | trailing bearing trimmed on justified lines, ink on the text edge, ragged lines untouched |
 | `e22_fallback.rs` (layout) | 2 | a rescue face measures the glyph and its edge is what a line end trims |
 | `e23_space_shrink.rs` (layout) | 2 | a space gives up at most a third of itself; an unbreakable word still lays out |
-| `cli.rs` (soma-cli) | 28 | render md/tex to html/svg/json/pdf, template geometry, LaTeX article defaults, TOC template, example book, fonts, automatic math face, `--metrics`, `--out`, stdin `--from`, directory batch, check, error paths |
+| `cli.rs` (soma-cli) | 29 | render md/tex to html/svg/json/pdf, template geometry, LaTeX article defaults, TOC template, example book, fonts, automatic math face, mixed Markdown/LaTeX/HTML, `--metrics`, `--out`, stdin `--from`, directory batch, check, error paths |
 | `docx.rs` (docx) | 12 | zip store/deflate, headings from style names, `basedOn` styles, tables, lists, metadata, embedded media, damaged archives |
 | `blind_pipeline.rs` (eval) | 3 | dry-run fixture through key + statistics + decision |
 | `k7_object_metrics.rs` | 4 | object hooks vs text paths, default-hook equivalence |
@@ -174,7 +175,7 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `math.rs` (html) | 4 | formula preview spans, placeholder fallback |
 | `inline_math.rs` (html) | 2 | inline preview positions, marker never drawn |
 | `a5_render.rs` | 8 | absolute positions, escaping, no re-breaking, page fragments join, block line-height ratio |
-| `capabilities.rs` (md) | 9 | Gate C matrix, degradation promise, docs parity |
+| `capabilities.rs` (md) | 10 | Gate C matrix, degradation promise, docs parity, semantic HTML/math entries |
 | `safety.rs` (render) | 3 | Gate C: no scripts, links, images, or URLs |
 | `pipeline.rs` (md) | 3 | Markdown -> DocIR -> pages -> HTML |
 | `spans.rs` (rules) | 6 | span compiler agrees with the text compiler |
@@ -196,16 +197,16 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `soma-docx` unit | 20 | zip store/deflate, inflate, XML entities, heading/style parsing, tables, lists, metadata, embedded media |
 | `languages.rs` (highlight) | 12 | Rust/C/C++/shell/Markdown/LaTeX/Python/JS/TS/JSON/YAML/TOML/HTML/CSS/SQL and friends: class spans per line |
 | `abi.rs` (web) | 8 | the C ABI slice: compile/measure/break handles, parity with the native kernel, fallback policy |
-| `soma-md` unit | 1 | frontend-internal projection helper |
+| `soma-md` unit | 5 | frontend-internal projection helper; embedded HTML tag/attribute scanner; unquoted self-closing value; nested close matching; LaTeX command argument scanner |
 | `render-pdf` unit | 28 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing, TikZ path fill state |
 | `studio.rs` (studio-core) | 7 | fragments follow pages and join the full document, probe samples come from layout faces, build determinism, hyphenation patterns reach the shared build, a Mermaid fence becomes vector paths, the same diagram exports to TikZ |
 | `soma-studio-ui` unit | 2 | assistant markdown escapes raw HTML and rejects `javascript:`/`data:` destinations |
 | `soma-studio` unit | 5 | origin allowlist: loopback default, concrete LAN host, wildcard `Host` matching, IPv6 literals, `--host` parsing |
 | `mermaid.rs` (diagram) | 6 | Mermaid and DOT layouts, paths/labels, TikZ round trip, detection rules, directions/shapes/classes, clusters and self-loops |
 
-Total: **948 tests passed** (`cargo test --workspace`), plus **1 ignored**
+Total: **966 tests passed** (`cargo test --workspace`), plus **1 ignored**
 (`perturbation.rs`, run with `--ignored`). Counting that ignored test, the
-workspace lists **949 test functions**. The standalone
+workspace lists **967 test functions**. The standalone
 `tools/metrics-gen` crate adds its own 5 (`cargo test --manifest-path tools/metrics-gen/Cargo.toml`).
 
 Still deferred: the human blind-test run (D01), a quality-labeled corpus

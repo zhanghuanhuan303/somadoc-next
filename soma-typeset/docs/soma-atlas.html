@@ -288,7 +288,7 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
   <caption>表 1 · 功能域与证据</caption>
   <thead><tr><th>域</th><th>能力</th><th>证据 / 边界</th></tr></thead>
   <tbody>
-    <tr><td>语法前端</td><td>Markdown（含 GFM 表格、嵌套列表、setext）、HTML（语义白名单 + colgroup）、LaTeX（宏/计数器/环境子集）、Word（OOXML 读入）</td><td><code>soma-md</code>/<code>soma-html</code>/<code>soma-latex</code>/<code>soma-docx</code>；LaTeX 不做参考文献与交叉引用</td></tr>
+    <tr><td>语法前端</td><td>Markdown（GFM 表格/嵌套列表/setext，并内嵌数学、LaTeX 命令与环境、语义 HTML）、HTML（语义白名单 + colgroup）、LaTeX（宏/计数器/环境子集）、Word（OOXML 读入）</td><td><code>soma-md</code> 复用 <code>s</code>oma-html</code>/<code>soma-latex</code>（ADR-0104）；LaTeX 不做参考文献与交叉引用</td></tr>
     <tr><td>DocIR</td><td>14 块 / 17 行内；语义，无物理样式；<code>soma.doc/3</code></td><td>Gate A 禁止物理样式字段；表格/公式/脚注/索引/注音都有节点</td></tr>
     <tr><td>模板 / 样式</td><td>纯 YAML；<code>within</code> 选择器；页母版；封面；目录；编号；<code>soma.template/9</code></td><td><code>soma-template</code>；属性白名单在 <code>Property</code>/<code>PROPERTY_ORDER</code></td></tr>
     <tr><td>盒树 / 行内 K-P</td><td>原子 + 边界；行边裁剪；强制断行；缩放/升部/降部；<code>soma.pages/11</code></td><td>内核冻结（ADR-0007）；只允许默认 0 的扩展</td></tr>

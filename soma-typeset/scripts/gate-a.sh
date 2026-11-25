@@ -59,7 +59,7 @@ check_deps() {
 }
 
 check_deps soma-layout "soma-collate soma-hyphen soma-highlight soma-layout soma-core soma-doc soma-math soma-metrics soma-rules soma-template soma-tikz soma-diagram"
-check_deps soma-md "soma-md soma-doc"
+check_deps soma-md "soma-md soma-doc soma-html soma-latex"
 check_deps soma-html "soma-html soma-doc"
 check_deps soma-latex "soma-latex soma-doc"
 check_deps soma-math "soma-math soma-core"

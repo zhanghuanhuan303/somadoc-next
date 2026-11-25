@@ -14,3 +14,5 @@ examples/templates/out/
 
 examples/diagram/*.pdf
 examples/diagram/showcase-*.png
+examples/mixed/*.pdf
+examples/mixed/_*.png

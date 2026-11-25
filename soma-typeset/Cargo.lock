@@ -1745,6 +1745,8 @@ version = "0.1.0"
 dependencies = [
  "soma-core",
  "soma-doc",
+ "soma-html",
+ "soma-latex",
  "soma-layout",
  "soma-render-html",
  "soma-template",

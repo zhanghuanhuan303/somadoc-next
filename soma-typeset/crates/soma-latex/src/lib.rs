@@ -54,6 +54,21 @@ pub fn parse_latex(source: &str) -> Document {
     parse_latex_with_meta(source, DocumentMeta::new())
 }
 
+/// Parse one inline LaTeX fragment, such as `\textbf{粗体}` or
+/// `\href{url}{文字}`. The caller is a compound front end that has already
+/// found the command and its arguments.
+///
+/// The returned inlines use synthesized spans; footnote definitions are
+/// returned separately so the caller can merge or reject them before
+/// constructing a document. There is no implicit document and no metadata.
+pub fn parse_latex_inline_fragment(source: &str) -> (Vec<Inline>, Vec<FootnoteDef>) {
+    let cleaned = strip_comments(source);
+    let expanded = macros::expand(&cleaned);
+    let mut parser = Parser::new(&expanded);
+    let inlines = parser.parse_inlines(false);
+    (inlines, parser.footnotes)
+}
+
 /// Parse LaTeX into DocIR. Preamble `\title`/`\author`/`\date` fill the
 /// metadata when the caller did not set it.
 pub fn parse_latex_with_meta(source: &str, mut meta: DocumentMeta) -> Document {

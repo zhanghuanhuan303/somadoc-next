@@ -170,6 +170,14 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   `soma diagram --input chart.mmd` and Studio's `⤴ TikZ` export the computed
   geometry as TikZ.
   Unsupported constructs fall back to their source, never to a wrong picture.
+- Mixed syntax (ADR-0104): a Markdown document can contain `$...$` and
+  `$$...$$` math, LaTeX text commands (`\textbf`, `\underline`, `\href`,
+  `\ruby`, `\index`) and environments (`itemize`, `quote`, `tabular`,
+  `equation`, `tikzpicture`, `mermaid`), plus semantic inline HTML
+  (`<u>`, `<a>`, `<img>`, `<sup>`, `<sub>`, `<ruby>`) and HTML block
+  containers. Inline Markdown still works inside HTML tags, and math/LaTeX
+  inside an HTML block is parsed rather than shown as source. Unknown syntax
+  stays visible; nothing is executed. See `examples/mixed/showcase.md`.
 - Word input (ADR-0063/ADR-0066): `soma render --input draft.docx` reads the
   archive with a dependency-free zip/inflate and maps paragraphs, headings
   (by style name, through `basedOn` chains), inline emphasis, tables, lists,
@@ -317,7 +325,7 @@ crates/
   soma-metrics/ # soma.metrics/7 parser + embedded Noto CJK / NewCM Math table
   soma-template/ # pure-YAML template: parse, exact units, cascade, StyledDoc
   soma-layout/ # paragraph boxes, line-level pagination, page masters
-  soma-md/     # Markdown subset -> DocIR
+  soma-md/     # Markdown subset + embedded LaTeX/HTML -> DocIR
   soma-html/   # HTML subset (semantic whitelist) -> DocIR
   soma-latex/  # LaTeX subset (sections, inline, environments) -> DocIR
   soma-docx/   # Word .docx (zip + OOXML) -> DocIR
@@ -448,7 +456,7 @@ scripts/gates.sh
 scripts/studio.sh   # S1-S11 for the web workbench (needs chromium)
 ```
 
-The gate runs format, clippy, 948 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, 966 tests, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-highlight`, `soma-template`,
 `soma-layout`, `soma-tikz`, `soma-md`, `soma-render-html`, `soma-render-svg`, and
 `soma-render-pdf`, a

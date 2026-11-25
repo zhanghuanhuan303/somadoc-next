@@ -81,6 +81,34 @@ fn latex_math_reaches_the_renderer_end_to_end() {
 }
 
 #[test]
+fn mixed_markdown_latex_html_reaches_the_renderer() {
+    let input = temp(
+        "mixed",
+        "md",
+        "行内 $x^2$ 与 \\textbf{粗体}，以及 <u>下划线</u>。\n\n$$y^2$$\n\n<div>HTML 段落里的 $z$</div>\n",
+    );
+    let (ok, stdout, stderr) = run(&[
+        "render",
+        "--input",
+        input.to_str().unwrap(),
+        "--format",
+        "html",
+    ]);
+
+    assert!(ok, "stderr: {stderr}");
+    assert!(
+        stdout.matches("class=\"math\"").count() >= 3,
+        "inline, display and HTML-block maths should all be painted: {stdout}"
+    );
+    assert!(!stdout.contains("textbf"), "LaTeX must not stay as source");
+    assert!(
+        !stdout.contains("&lt;u&gt;"),
+        "HTML must not stay as source"
+    );
+    assert!(!stdout.contains("<script"), "no active content");
+}
+
+#[test]
 fn json_is_the_canonical_page_result() {
     let input = temp("md-json", "md", "一段正文。\n");
     let (ok, stdout, stderr) = run(&[
