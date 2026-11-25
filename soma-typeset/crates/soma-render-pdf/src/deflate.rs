@@ -749,9 +749,9 @@ mod tests {
 
         fn read(&self, reader: &mut Reader<'_>) -> u32 {
             let mut code = 0u32;
-            for length in 1..self.by_length.len() {
+            for bucket in self.by_length.iter().skip(1) {
                 code = (code << 1) | reader.bit();
-                for (candidate, symbol) in &self.by_length[length] {
+                for (candidate, symbol) in bucket {
                     if *candidate == code {
                         return *symbol;
                     }

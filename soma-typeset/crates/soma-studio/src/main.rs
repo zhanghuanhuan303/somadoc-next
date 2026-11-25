@@ -42,6 +42,7 @@ struct Options {
     template: Option<PathBuf>,
     engine: Option<PathBuf>,
     metrics: Option<PathBuf>,
+    host: String,
     port: u16,
     dist: PathBuf,
     open: bool,
@@ -153,7 +154,7 @@ async fn main() {
         tokio::spawn(watch(state.clone()));
     }
 
-    let address = format!("127.0.0.1:{}", state.options.port);
+    let address = authority(&state.options.host, state.options.port);
     let listener = match TcpListener::bind(&address).await {
         Ok(listener) => listener,
         Err(error) => {
@@ -161,10 +162,19 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    println!("soma-studio: http://{address}");
+    let display = if is_wildcard(&state.options.host) {
+        "127.0.0.1"
+    } else {
+        state.options.host.as_str()
+    };
+    let url = format!("http://{}", authority(display, state.options.port));
+    println!("soma-studio: {url}");
+    if is_wildcard(&state.options.host) {
+        println!("soma-studio: listening on every interface ({address})");
+    }
     println!("soma-studio: input {}", state.options.input.display());
     if state.options.open {
-        open_browser(&format!("http://{address}"));
+        open_browser(&url);
     }
     if let Err(error) = axum::serve(listener, app).await {
         eprintln!("soma-studio: {error}");
@@ -183,8 +193,8 @@ usage:
               [--font-sans <file[#index]>] [--font-sans-bold <file[#index]>]
               [--font-mono <file[#index]>] [--font-mono-bold <file[#index]>]
               [--font-math <file[#index]>] [--font-fallback <file[#index]>]
-              [--port 7070] [--dist <dir>] [--open] [--no-watch]
-              [--no-auto-font]
+              [--host 127.0.0.1] [--port 7070] [--dist <dir>]
+              [--open] [--no-watch] [--no-auto-font]
 
 The UI is built with `trunk build` in crates/soma-studio-ui; Axum serves dist/.
 ";
@@ -194,6 +204,7 @@ fn parse_args(args: Vec<String>) -> Result<(Options, FontSpecs), String> {
     let mut template = None;
     let mut engine = None;
     let mut metrics = None;
+    let mut host = String::from("127.0.0.1");
     let mut port = 7070u16;
     let mut dist = None;
     let mut open = false;
@@ -223,6 +234,13 @@ fn parse_args(args: Vec<String>) -> Result<(Options, FontSpecs), String> {
             "--font-mono-bold" => specs.mono_bold = Some(value()?),
             "--font-math" => specs.math = Some(value()?),
             "--font-fallback" => specs.fallback = Some(value()?),
+            "--host" => {
+                let parsed = value()?;
+                if parsed.trim().is_empty() {
+                    return Err(String::from("--host must not be empty"));
+                }
+                host = parsed;
+            }
             "--port" => {
                 port = value()?
                     .parse()
@@ -259,6 +277,7 @@ fn parse_args(args: Vec<String>) -> Result<(Options, FontSpecs), String> {
         template,
         engine,
         metrics,
+        host,
         port,
         dist,
         open,
@@ -972,6 +991,51 @@ async fn watch(state: Arc<AppState>) {
 
 /* ------------------------------------------------------------------ security */
 
+/// `host:port` with IPv6 literals bracketed.
+fn authority(host: &str, port: u16) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    }
+}
+
+fn is_loopback(host: &str) -> bool {
+    matches!(host, "127.0.0.1" | "localhost" | "::1" | "[::1]")
+}
+
+fn is_wildcard(host: &str) -> bool {
+    matches!(host, "0.0.0.0" | "::" | "[::]")
+}
+
+/// Whether `Origin: <origin>` may drive `/api`.
+///
+/// Loopback names are always accepted for the configured port. A concrete
+/// non-loopback host adds exactly itself. A wildcard bind accepts the authority
+/// the browser used (`Host`), which keeps same-origin requests working without
+/// accepting an unrelated site's origin. `--host` defaults to loopback, so the
+/// `Host` header only widens the allowlist after an explicit wildcard bind.
+fn origin_allowed(
+    origin: &str,
+    configured_host: &str,
+    port: u16,
+    request_host: Option<&str>,
+) -> bool {
+    if origin == format!("http://{}", authority("127.0.0.1", port))
+        || origin == format!("http://{}", authority("localhost", port))
+        || origin == format!("http://{}", authority("::1", port))
+    {
+        return true;
+    }
+    if is_wildcard(configured_host) {
+        return request_host.is_some_and(|host| origin == format!("http://{host}"));
+    }
+    if is_loopback(configured_host) {
+        return false;
+    }
+    origin == format!("http://{}", authority(configured_host, port))
+}
+
 async fn check_origin(
     State(state): State<Arc<AppState>>,
     request: Request,
@@ -983,12 +1047,11 @@ async fn check_origin(
             .get(header::ORIGIN)
             .and_then(|value| value.to_str().ok())
         {
-            let port = state.options.port;
-            let allowed = [
-                format!("http://127.0.0.1:{port}"),
-                format!("http://localhost:{port}"),
-            ];
-            if !allowed.iter().any(|allowed| allowed == origin) {
+            let host_header = request
+                .headers()
+                .get(header::HOST)
+                .and_then(|value| value.to_str().ok());
+            if !origin_allowed(origin, &state.options.host, state.options.port, host_header) {
                 return (StatusCode::FORBIDDEN, "cross-origin request refused").into_response();
             }
         }
@@ -1043,4 +1106,124 @@ pub fn safe_join(root: &Path, src: &str) -> Option<PathBuf> {
     let joined = root.join(path);
     let canonical = joined.canonicalize().ok()?;
     canonical.starts_with(root).then_some(canonical)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn origin_allowed_keeps_the_default_loopback_only() {
+        assert!(origin_allowed(
+            "http://127.0.0.1:7070",
+            "127.0.0.1",
+            7070,
+            None
+        ));
+        assert!(origin_allowed(
+            "http://localhost:7070",
+            "127.0.0.1",
+            7070,
+            None
+        ));
+        assert!(origin_allowed("http://[::1]:7070", "127.0.0.1", 7070, None));
+        assert!(!origin_allowed(
+            "http://10.0.0.6:7070",
+            "127.0.0.1",
+            7070,
+            Some("10.0.0.6:7070")
+        ));
+        assert!(!origin_allowed(
+            "http://127.0.0.1:7070",
+            "127.0.0.1",
+            7091,
+            None
+        ));
+    }
+
+    #[test]
+    fn origin_allowed_adds_a_concrete_lan_host() {
+        assert!(origin_allowed(
+            "http://10.0.0.6:7070",
+            "10.0.0.6",
+            7070,
+            None
+        ));
+        assert!(origin_allowed(
+            "http://127.0.0.1:7070",
+            "10.0.0.6",
+            7070,
+            None
+        ));
+        assert!(!origin_allowed(
+            "http://10.0.0.7:7070",
+            "10.0.0.6",
+            7070,
+            Some("10.0.0.7:7070")
+        ));
+        assert!(!origin_allowed(
+            "http://evil.example:7070",
+            "10.0.0.6",
+            7070,
+            None
+        ));
+    }
+
+    #[test]
+    fn origin_allowed_wildcard_follows_the_request_host() {
+        assert!(origin_allowed(
+            "http://10.0.0.6:7070",
+            "0.0.0.0",
+            7070,
+            Some("10.0.0.6:7070")
+        ));
+        assert!(!origin_allowed(
+            "http://evil.example:7070",
+            "0.0.0.0",
+            7070,
+            Some("10.0.0.6:7070")
+        ));
+        assert!(!origin_allowed(
+            "http://10.0.0.6:7070",
+            "0.0.0.0",
+            7070,
+            None
+        ));
+    }
+
+    #[test]
+    fn origin_allowed_brackets_ipv6_hosts() {
+        assert_eq!(authority("::1", 7070), "[::1]:7070");
+        assert_eq!(authority("[::1]", 7070), "[::1]:7070");
+        assert_eq!(authority("10.0.0.6", 7070), "10.0.0.6:7070");
+        assert!(origin_allowed("http://[::1]:7070", "::1", 7070, None));
+        assert!(origin_allowed(
+            "http://[fd00::6]:7070",
+            "fd00::6",
+            7070,
+            None
+        ));
+    }
+
+    #[test]
+    fn parse_args_reads_the_host_flag() {
+        let input = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+        let args = vec![
+            String::from("--input"),
+            String::from(input),
+            String::from("--host"),
+            String::from("10.0.0.6"),
+        ];
+        let (options, _) = parse_args(args).expect("args should parse");
+        assert_eq!(options.host, "10.0.0.6");
+        assert_eq!(options.port, 7070);
+
+        let args = vec![
+            String::from("--input"),
+            String::from(input),
+            String::from("--host"),
+            String::new(),
+        ];
+        assert!(parse_args(args).is_err());
+    }
 }

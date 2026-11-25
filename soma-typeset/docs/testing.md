@@ -200,10 +200,11 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `render-pdf` unit | 28 | CFF INDEX round trip, compact glyph-preserving subset with a CID charset, name-keyed promotion, `seac` expansion placed point by point, decoration geometry and the PDF y-flip, link merging, eight deflate round trips against an independent decoder (fixed and dynamic blocks) plus a depth-limit/Kraft check, inflate against our own encoder and a stored block, PNG decode, JPEG header parse, alpha compositing, TikZ path fill state |
 | `studio.rs` (studio-core) | 3 | fragments follow pages and join the full document, probe samples come from layout faces, build determinism |
 | `soma-studio-ui` unit | 2 | assistant markdown escapes raw HTML and rejects `javascript:`/`data:` destinations |
+| `soma-studio` unit | 5 | origin allowlist: loopback default, concrete LAN host, wildcard `Host` matching, IPv6 literals, `--host` parsing |
 
-Total: **930 tests passed** (`cargo test --workspace`), plus **1 ignored**
+Total: **935 tests passed** (`cargo test --workspace`), plus **1 ignored**
 (`perturbation.rs`, run with `--ignored`). Counting that ignored test, the
-workspace lists **931 test functions**. The standalone
+workspace lists **936 test functions**. The standalone
 `tools/metrics-gen` crate adds its own 5 (`cargo test --manifest-path tools/metrics-gen/Cargo.toml`).
 
 Still deferred: the human blind-test run (D01), a quality-labeled corpus
