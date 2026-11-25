@@ -472,25 +472,31 @@ fn paint_math(
             Some(value) => color(Some(value)),
             None => paint.clone(),
         };
-        if item.stretch == 1000 {
-            out.push_str(&format!(
-                "<text data-page=\"{page}\" data-node=\"{node}\" data-math=\"{}\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{fill}\">{}</text>\n",
-                escape(&item.text),
-                units(Width(left + item.x.0)),
-                units(Width(baseline + item.y.0)),
-                units(item.size),
-                escape(&item.text)
-            ));
+        let scale = if item.stretch != 1000 {
+            Some(ratio(item.stretch))
+        } else if item.text_scale_x != 1000 {
+            Some(ratio(item.text_scale_x))
         } else {
-            // A stretched glyph keeps its baseline: translate first, then
-            // scale on x only.
-            let ratio = ratio(item.stretch);
+            None
+        };
+        if let Some(ratio) = scale {
+            // A stretched glyph, or a fallback for a tall radical variant,
+            // keeps its baseline: translate first, then scale on x only.
             out.push_str(&format!(
                 "<text data-page=\"{page}\" data-node=\"{node}\" data-math=\"{}\" x=\"0\" y=\"0\" font-size=\"{}\" fill=\"{fill}\" transform=\"translate({} {}) scale({ratio} 1)\">{}</text>\n",
                 escape(&item.text),
                 units(item.size),
                 units(Width(left + item.x.0)),
-                units(Width(baseline + item.y.0)),
+                units(Width(baseline + item.text_y.0)),
+                escape(&item.text)
+            ));
+        } else {
+            out.push_str(&format!(
+                "<text data-page=\"{page}\" data-node=\"{node}\" data-math=\"{}\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{fill}\">{}</text>\n",
+                escape(&item.text),
+                units(Width(left + item.x.0)),
+                units(Width(baseline + item.text_y.0)),
+                units(item.size),
                 escape(&item.text)
             ));
         }

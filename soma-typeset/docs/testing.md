@@ -204,7 +204,7 @@ Cumulative public test files (counts verified on 2026-11-25 against
 Total: **930 tests passed** (`cargo test --workspace`), plus **1 ignored**
 (`perturbation.rs`, run with `--ignored`). Counting that ignored test, the
 workspace lists **931 test functions**. The standalone
-`tools/metrics-gen` crate adds its own 4 (`cargo test --manifest-path tools/metrics-gen/Cargo.toml`).
+`tools/metrics-gen` crate adds its own 5 (`cargo test --manifest-path tools/metrics-gen/Cargo.toml`).
 
 Still deferred: the human blind-test run (D01), a quality-labeled corpus
 (D67), italic faces/tracking/kerning (D61/D60/D100), nested box trees and

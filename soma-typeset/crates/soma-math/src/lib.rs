@@ -420,9 +420,17 @@ pub struct MathItem {
     pub text: String,
     pub x: Width,
     pub y: Width,
+    /// Baseline for a renderer that draws `text` instead of the design glyph
+    /// (HTML/SVG). For a text item this equals `y`; for a vertical variant the
+    /// fallback glyph is placed so its ink top meets the variant's ink top.
+    pub text_y: Width,
     /// Font size for drawing `text`. A renderer that cannot address an
     /// unencoded design glyph (SVG/HTML) uses this.
     pub size: Width,
+    /// Horizontal scale in permille for the fallback text glyph. A design
+    /// variant can be much narrower than the uniformly scaled base glyph;
+    /// text renderers compress it to the variant's advance.
+    pub text_scale_x: u16,
     /// Font size for drawing the selected design glyph. Equal to `size` when
     /// `glyph` is [`MathGlyph::Text`].
     pub design: Width,
@@ -443,7 +451,9 @@ impl MathItem {
             text: text.into(),
             x,
             y,
+            text_y: y,
             size,
+            text_scale_x: 1000,
             design: size,
             glyph: MathGlyph::Text,
             stretch: 1000,
@@ -1847,6 +1857,9 @@ struct Design {
     above: i32,
     below: i32,
     right_gap: i32,
+    /// Ink above the baseline of the fallback text glyph, at `fallback` size.
+    /// Text renderers align this ink with the design glyph's ink top.
+    text_above: i32,
 }
 
 struct Context<'a> {
@@ -1907,6 +1920,7 @@ impl Context<'_> {
         let ratio = ((variant.height() as i64 * 1000 + base_height as i64 / 2) / base_height as i64)
             .clamp(1000, 4000) as i32;
         let fallback = Width(scale(size, ratio));
+        let fallback_above = (base_above as i64 * ratio as i64 / 1000) as i32;
         Some(Design {
             glyph: MathGlyph::Vertical(index),
             design: size,
@@ -1915,6 +1929,7 @@ impl Context<'_> {
             above: variant.above.0,
             below: variant.below.0,
             right_gap: variant.right_gap.0,
+            text_above: fallback_above,
         })
     }
 
@@ -2242,7 +2257,7 @@ impl Context<'_> {
         });
 
         let choice = self.design_variant("√", needed, size);
-        let (glyph, design, fallback, advance, above, below, right_gap) = match choice {
+        let (glyph, design, fallback, advance, above, below, right_gap, text_above) = match choice {
             Some(design) => (
                 design.glyph,
                 design.design,
@@ -2251,6 +2266,7 @@ impl Context<'_> {
                 design.above,
                 design.below,
                 design.right_gap,
+                design.text_above,
             ),
             None => {
                 // No variant data: grow the text glyph until its ink covers the
@@ -2284,6 +2300,7 @@ impl Context<'_> {
                     surd_above.0,
                     surd_below.0,
                     0,
+                    surd_above.0,
                 )
             }
         };
@@ -2330,7 +2347,24 @@ impl Context<'_> {
             x: Width(surd_x),
             // The surd's ink top meets the vinculum.
             y: Width(bar_y + above),
+            // A text renderer draws the fallback glyph at `size`; place its
+            // ink top on the same vinculum.
+            text_y: Width(bar_y + text_above),
             size: fallback,
+            text_scale_x: {
+                // The base radical is much wider than the tall narrow variant.
+                // Compress the fallback to the variant's advance so it does not
+                // overlap the radicand in the HTML/SVG proof.
+                let base_advance = self.metrics.advance("√", size).0 as i64;
+                let fallback_advance =
+                    (base_advance * fallback.0 as i64 / size.0.max(1) as i64).max(1);
+                if matches!(glyph, MathGlyph::Text) {
+                    1000
+                } else {
+                    ((advance as i64 * 1000 + fallback_advance / 2) / fallback_advance)
+                        .clamp(100, 4000) as u16
+                }
+            },
             design,
             glyph,
             stretch: 1000,
@@ -2427,7 +2461,9 @@ impl Context<'_> {
                 text: text.to_string(),
                 x: Width(left + (width - advance) / 2),
                 y: Width(op_y),
+                text_y: Width(op_y),
                 size: text_size,
+                text_scale_x: 1000,
                 design,
                 glyph,
                 stretch: 1000,
@@ -2456,7 +2492,9 @@ impl Context<'_> {
                 text: text.to_string(),
                 x: Width(left),
                 y: Width(op_y),
+                text_y: Width(op_y),
                 size: text_size,
+                text_scale_x: 1000,
                 design,
                 glyph,
                 stretch: 1000,
@@ -2991,7 +3029,9 @@ impl Context<'_> {
             text: text.to_string(),
             x: Width(self.cursor),
             y: Width(baseline + off),
+            text_y: Width(baseline + off),
             size: fallback,
+            text_scale_x: 1000,
             design: design_size,
             glyph,
             stretch: 1000,

@@ -517,21 +517,29 @@ fn paint_math(
 
     for item in &math.items {
         let x = left + item.x.0;
-        let y = baseline + item.y.0 - ascent_proxy(item.size);
+        let y = baseline + item.text_y.0 - ascent_proxy(item.size);
         let paint = match item.color {
             Some(value) => format!("#{value:06x}"),
             None => paint.clone(),
         };
         // A stretched glyph (an over/underbrace) is scaled on x only; the
-        // transform origin keeps its left edge where the layout put it.
-        let transform = if item.stretch == 1000 {
-            String::new()
-        } else {
+        // transform origin keeps its left edge where the layout put it. A tall
+        // radical variant is replaced by its base glyph in HTML, so compress
+        // that fallback to the variant's advance as well.
+        let transform = if item.stretch != 1000 {
             format!(
                 "transform:scaleX({}.{:03});transform-origin:left bottom;",
                 item.stretch / 1000,
                 item.stretch % 1000
             )
+        } else if item.text_scale_x != 1000 {
+            format!(
+                "transform:scaleX({}.{:03});transform-origin:left bottom;",
+                item.text_scale_x / 1000,
+                item.text_scale_x % 1000
+            )
+        } else {
+            String::new()
         };
         html.push_str(&format!(
             "<span class=\"math\" style=\"left:{};top:{};font-size:{};color:{};{}\">{}</span>\n",

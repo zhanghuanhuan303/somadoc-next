@@ -1113,6 +1113,10 @@ fn a_radical_uses_a_variant_and_starts_the_bar_at_its_ink() {
     let variant = VariantMetrics::variant("√", index, Width::EM).expect("variant");
     assert_eq!(surd.design, Width::EM);
     assert!(surd.size.0 > surd.design.0, "the fallback is larger");
+    assert!(
+        surd.text_scale_x < 1000,
+        "the tall variant is narrower than the uniformly scaled fallback"
+    );
     let bar = result.rules.last().expect("vinculum");
     let rule = bar.thickness.0;
     assert_eq!(

@@ -278,7 +278,9 @@ rule); when even the tallest is too short they use the tallest, never a scaled
 glyph. A variant is addressed by ordinal, not by glyph id, because the glyphs
 are unencoded. The PDF backend resolves the ordinal in the font it draws with;
 SVG and HTML, which cannot address an unencoded glyph, draw the base glyph at
-`MathItem.size`, a size calibrated to the variant's ink height (ADR-0075).
+`MathItem.size`. They use `MathItem.text_y` and `MathItem.text_scale_x` to put
+the fallback's ink top on the variant's ink top and compress its advance to the
+variant's, so a tall radical does not overlap its radicand (ADR-0075/0099).
 
 A radical's vinculum is `radicalVerticalGap` (or the display-style gap) above
 the radicand's ink and starts at the surd's **ink right** (`advance − right_gap

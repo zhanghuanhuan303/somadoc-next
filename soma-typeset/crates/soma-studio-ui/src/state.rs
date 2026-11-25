@@ -927,7 +927,7 @@ fn install_fonts(project: &ProjectPayload) {
         if font.url.is_empty() {
             continue;
         }
-        let format = if font.url.ends_with(".otf") {
+        let format = if font.role == "math" || font.url.ends_with(".otf") {
             "opentype"
         } else if font.url.ends_with(".ttf") {
             "truetype"

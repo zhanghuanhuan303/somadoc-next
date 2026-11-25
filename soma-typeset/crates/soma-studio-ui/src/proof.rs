@@ -16,6 +16,7 @@ use crate::state::{use_studio, Studio};
 const SHADOW_CSS: &str = r#"
 :host{all:initial;color:#111;color-scheme:light}
 .page{margin:0!important;box-shadow:none!important;background:transparent!important;color:#111!important;color-scheme:light;pointer-events:none;}
+.page .math{font-family:var(--soma-math,serif);}
 .page [style*="font-family:sans-serif"]{font-family:var(--soma-sans,sans-serif)!important;}
 .page [style*="font-family:serif"]{font-family:var(--soma-serif,serif)!important;}
 .page [style*="font-family:monospace"]{font-family:var(--soma-mono,monospace)!important;}

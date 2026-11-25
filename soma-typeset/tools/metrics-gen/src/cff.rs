@@ -181,6 +181,11 @@ impl<'a> Cff<'a> {
         if depth > 8 {
             return None;
         }
+        // A Type 2 charstring may carry an optional width as the first
+        // operand of its first stack-clearing operator. The width is not
+        // part of the outline, but leaving it on the stack shifts every later
+        // coordinate. Unencoded design variants (larger radicals) use it.
+        let mut first = depth == 0;
         let mut at = 0usize;
         while at < program.len() {
             let byte = *program.get(at)?;
@@ -188,6 +193,22 @@ impl<'a> Cff<'a> {
             if byte >= 32 || byte == 28 {
                 stack.push(decode_number(program, &mut at, byte)?);
                 continue;
+            }
+            if first {
+                let count = stack.values.len();
+                let extra = match byte {
+                    1 | 3 | 18 | 19 | 20 | 23 => count % 2 == 1,
+                    4 | 22 => count == 2,
+                    21 => count == 3,
+                    14 => count == 1 || count == 5,
+                    _ => false,
+                };
+                if extra {
+                    stack.values.remove(0);
+                    first = false;
+                } else if matches!(byte, 1 | 3 | 4 | 14 | 18 | 19 | 20 | 21 | 22 | 23) {
+                    first = false;
+                }
             }
             match byte {
                 // Hints: the arguments are stems, and `hintmask` needs their
@@ -769,6 +790,28 @@ mod tests {
         assert_fixture(include_bytes!(
             "../../../crates/soma-render-pdf/tests/fixtures/tiny-cff-name.otf"
         ));
+    }
+
+    #[test]
+    fn newcm_radical_variants_include_the_optional_width() {
+        // The larger radical variants carry an explicit Type 2 width. Leaving
+        // it on the stack shifted the whole outline up by 359 units, which put
+        // the vinculum above the surd in the PDF and the proof.
+        let data = include_bytes!("../../../crates/soma-cli/assets/NewCMMath-Regular.otf");
+        let font = crate::Font::open(data, 0).expect("font");
+        let upem = font.units_per_em().expect("upem");
+        let map = font.cmap().expect("cmap");
+        let advances = font.advances().expect("hmtx");
+        let variants = font.math_variants(upem, &map, &advances).expect("variants");
+        let radical = variants
+            .iter()
+            .find(|(codepoint, _)| *codepoint == 0x221A)
+            .map(|(_, rows)| rows)
+            .expect("radical variants");
+
+        assert_eq!(radical[1], (4096, 3482, 1434, 0));
+        assert_eq!(radical[2], (4096, 3891, 1843, 0));
+        assert_eq!(radical[5], (4096, 7168, 5120, 0));
     }
 
     #[test]

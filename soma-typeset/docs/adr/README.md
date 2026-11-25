@@ -117,6 +117,7 @@ only).
 | [0096](0096-footnote-mark-attachment.md) | A footnote mark attaches to the text before it (no break, no gap); body superscripts are 2/3 size, raised 2/5 em | Accepted |
 | [0097](0097-display-math-page-frame.md) | Display math HTML percentages resolve against the page; inline math keeps the block frame | Accepted |
 | [0098](0098-short-display-skip.md) | A display after a short line keeps half the template's space-before and 70% of its space-after | Accepted |
+| [0099](0099-radical-variant-measurement.md) | CFF variant ink drops the optional Type 2 width; HTML/SVG place the fallback glyph at the variant's ink top and advance | Accepted |
 
 ## Rules
 
