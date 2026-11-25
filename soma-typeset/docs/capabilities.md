@@ -21,7 +21,7 @@
 | `inline_code` | supported | `` `x` `` → `Code`，一个不可断 atom |
 | `inline_math` | supported | `$...$` / `\(...\)` → `MathInline`；货币写法不会被误吞 |
 | `display_math` | supported | `$$...$$`、`\[...\]` 与 equation 类环境 → `MathBlock` |
-| `latex_inline` | supported | 常用 LaTeX 文本命令（`\textbf`、`\emph`、`\underline`、`\href`、`\url`、`\ruby` 等）映射到 DocIR；`\footnote` 保留源码 |
+| `latex_inline` | supported | 常用 LaTeX 文本命令（`\textbf`、`\emph`、`\underline`、`\href`、`\url`、`\ruby` 等）映射到 DocIR；`\footnote` 生成真实脚注，脚注内 `\index` 会收集 |
 | `latex_block` | supported | 常用 LaTeX 环境（列表、引文、tabular、figure、equation、mermaid、tikz）交给 LaTeX 前端 |
 | `link` | supported | `[text](url)` → `Link` |
 | `image` | supported | `![alt](src)` → `Image` |

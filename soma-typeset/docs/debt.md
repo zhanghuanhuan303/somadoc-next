@@ -127,7 +127,7 @@
 | D105 | Studio 没有单文件静态导出 | 项目文件、字体与 PDF 依赖 Axum；`web/` 的 K-P slice 仍是唯一 server-free 嵌入件 | 不能把一个离线 HTML 直接分享给他人 | 有离线分享/静态托管需求时做 | 否 |
 | D107 | 流程图只覆盖 Mermaid flowchart 与 DOT 子集 | 子图只画成员包围框，不约束 rank；sequence/class/state/ER、图标、HTML 标签、外部链接没有实现；宽图低于 60% 或高于页高回退源码 | 复杂组织结构图会退化成较松的层次图；非 flowchart 图种仍显示为代码 | 有真实图种需求时扩 `soma-diagram` 的 frontend；子图 rank 约束优先 | 否 |
 | D108 | Studio 的 TikZ 导出只取第一张图 | `/api/tikz` 按文档顺序取第一张 Mermaid/DOT 图，导出自然尺寸；不能选择后续图、导出页面缩放后的几何，也不能导出 SVG | 含多张图的文档需要手工定位并裁剪导出的文件 | 有按图导出需求时给图块加稳定 target，UI 增加图列表选择 | 否 |
-| D109 | Markdown 内嵌 LaTeX 的脚注/计数器语义不完整 | 行内 `\footnote{...}` 保留为可见源码，不生成脚注定义；块级环境里的脚注只在标签不冲突时合并；Markdown 没有 LaTeX 导言区，`\newcommand`/计数器宏不参与 | 混合文档里的 LaTeX 脚注需要改成 Markdown `[^label]` 或改写为块级环境；复杂宏包语义不可用 | 有真实混合文档依赖这些语义时，做一层带标签重写的脚注合并与最小导言上下文 | 否 |
+| D109 | **部分完成（ADR-0107）**：Markdown 内嵌 LaTeX 的脚注已提升为真实定义，脚注内 `\index` 会收集；导言宏/计数器语义仍不完整 | 行内 `\footnote{...}` 现在生成 FootnoteRef + FootnoteDef；块级环境的脚注合并仍受标签冲突限制；Markdown 没有 LaTeX 导言区，`\newcommand`/计数器宏不参与 | 混合文档里的 LaTeX 脚注可以直接用；复杂宏包与计数器语义仍不可用 | 有真实混合文档依赖导言宏时，补一层最小导言上下文 | 否 |
 | D110 | **已完成（ADR-0106）**：`figure: width: natural/half/full` 与 `align`；LaTeX 仍只保留路径与语义尺寸提示 | 模板决定图宽/对齐；`natural` 按 96 dpi 的本征像素折算并封顶版心 | 作者不能直接写 `width=0.5\linewidth`；要由模板改 `figure.width` | 有逐图宽度需求时再加语义尺寸提示 | 否 |
 | D111 | 索引暂不排双栏 | `index_rows` 逐条生成单列 flow item；超过 24 条时仍是一列，页数浪费 | 长索引（>24 条）会多占页面 | 有长索引样书时按栏高切分生成双栏索引项 | 否 |
 | D112 | 页眉下没有细线 | `runningHead` 样式已独立，但模板没有 `header-rule` 参数，渲染器不画页眉分隔线 | 页眉与正文的视觉分层弱一些 | 需要时加 `page.header-rule` 与百分比宽度，PDF/SVG 同步 | 否 |

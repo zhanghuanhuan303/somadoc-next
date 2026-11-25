@@ -338,7 +338,8 @@ pub(crate) fn latex_inline_at(text: &str) -> Option<LatexCommand<'_>> {
     let args = match name {
         "textbf" | "emph" | "textit" | "textsl" | "underline" | "textsc" | "textsuperscript"
         | "textsubscript" | "texttt" | "url" | "index" | "label" | "cite" | "ref" | "pageref"
-        | "footnote" => 1,
+        | "footnote" | "section" | "subsection" | "subsubsection" | "chapter" | "paragraph"
+        | "subparagraph" => 1,
         "href" | "ruby" => 2,
         "ldots" | "dots" | "LaTeX" | "TeX" | "newline" => 0,
         "verb" => {

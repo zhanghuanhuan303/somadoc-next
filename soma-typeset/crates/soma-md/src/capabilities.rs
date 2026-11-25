@@ -94,7 +94,7 @@ pub const CAPABILITIES: &[Capability] = &[
     Capability {
         syntax: "latex_inline",
         status: CapabilityStatus::Supported,
-        note: "common LaTeX text commands map to DocIR; `\\footnote` keeps its source",
+        note: "common LaTeX text commands map to DocIR; `\\footnote` becomes a real definition and `\\index` inside it is collected",
     },
     Capability {
         syntax: "latex_block",

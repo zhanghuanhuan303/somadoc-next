@@ -274,11 +274,92 @@ fn html_blocks_parse_embedded_markdown_math_and_latex() {
 }
 
 #[test]
-fn inline_latex_footnote_stays_visible_without_a_dangling_reference() {
-    let document = parse_markdown("前文 \\footnote{一条注} 后文\n");
+fn inline_latex_footnote_becomes_a_definition() {
+    let document = parse_markdown("前文 \\footnote{一条注\\index{脚注词条}} 后文\n");
     document.validate().expect("valid DocIR");
-    assert!(document.plain_text().contains("\\footnote{一条注}"));
-    assert!(document.footnotes.is_empty());
+
+    assert_eq!(document.footnotes.len(), 1, "one footnote definition");
+    assert!(
+        document.footnotes[0]
+            .blocks
+            .iter()
+            .any(|block| match block {
+                Block::Paragraph(node) => {
+                    soma_doc::text::inlines_text(&node.inlines).contains("一条注")
+                }
+                _ => false,
+            }),
+        "the note body is in the definition"
+    );
+    assert!(
+        document.footnotes[0]
+            .blocks
+            .iter()
+            .any(|block| block_has_index(block, "脚注词条")),
+        "an index inside the note is collected"
+    );
+    let paragraph = document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Paragraph(node) => Some(node),
+            _ => None,
+        })
+        .expect("paragraph");
+    assert!(
+        paragraph.inlines.iter().any(inline_is_footnote_ref),
+        "the paragraph carries a real reference"
+    );
+    assert!(!document.plain_text().contains("\\footnote"));
+}
+
+fn inline_is_footnote_ref(inline: &Inline) -> bool {
+    match inline {
+        Inline::FootnoteRef(_) => true,
+        _ => inline.children().iter().any(inline_is_footnote_ref),
+    }
+}
+
+fn block_has_index(block: &Block, term: &str) -> bool {
+    match block {
+        Block::Paragraph(node) => node
+            .inlines
+            .iter()
+            .any(|inline| inline_has_index(inline, term)),
+        _ => false,
+    }
+}
+
+fn inline_has_index(inline: &Inline, term: &str) -> bool {
+    match inline {
+        Inline::Index(node) => node.term == term,
+        _ => inline
+            .children()
+            .iter()
+            .any(|child| inline_has_index(child, term)),
+    }
+}
+
+#[test]
+fn a_latex_section_command_becomes_a_heading() {
+    let document = parse_markdown("# 总标题\n\n\\section{脚注与索引}\n\n正文。\n");
+    document.validate().expect("valid DocIR");
+
+    let headings: Vec<_> = document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Heading(node) => Some(node),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(headings.len(), 2);
+    assert_eq!(headings[1].level, 1);
+    assert_eq!(
+        soma_doc::text::inlines_text(&headings[1].inlines),
+        "脚注与索引"
+    );
+    assert!(!document.plain_text().contains("\\section"));
 }
 
 #[test]

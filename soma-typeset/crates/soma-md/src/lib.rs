@@ -15,13 +15,14 @@
 //! - `$...$` / `\(...\)` become `MathInline`; `$$...$$`, `\[...\]` and
 //!   display environments become `MathBlock`;
 //! - a whitelist of LaTeX text commands is parsed by `soma-latex`, and a
-//!   whitelist of LaTeX environments is parsed as LaTeX blocks;
+//!   whitelist of LaTeX environments and section commands is parsed as LaTeX
+//!   blocks; inline `\footnote` becomes a real definition;
 //! - semantic inline HTML maps to DocIR containers, supported block HTML goes
 //!   through `soma-html`, and text inside an HTML block is parsed as Markdown
 //!   inline syntax again. Unknown HTML/LaTeX stays visible as Raw fallback.
 //!
-//! Not supported: inline LaTeX footnote definitions (the source stays visible),
-//! and an unterminated inline-code run stays literal text.
+//! Not supported: preamble macros/counters in Markdown, and an unterminated
+//! inline-code run stays literal text.
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
@@ -221,6 +222,40 @@ pub fn parse_markdown_with_meta(source: &str, meta: DocumentMeta) -> Document {
             continue;
         }
 
+        // A block-level LaTeX sectioning command is a heading, not source
+        // text. The line must hold the command alone, so a paragraph that
+        // merely starts with `\section` stays Markdown.
+        if let Some(command) = latex_inline_at(text) {
+            if is_section_command(command.name) && text[command.end..].trim().is_empty() {
+                let source = text[..command.end].trim_end();
+                let parsed = soma_latex::parse_latex(source);
+                if parsed
+                    .blocks
+                    .first()
+                    .is_some_and(|block| matches!(block, Block::Heading(_)))
+                {
+                    let collides = parsed.footnotes.iter().any(|definition| {
+                        footnotes
+                            .iter()
+                            .any(|existing| existing.label == definition.label)
+                    });
+                    if collides {
+                        blocks.push(raw_block(
+                            "latex",
+                            source,
+                            line.offset,
+                            line.offset + line.text.len() as u32,
+                        ));
+                    } else {
+                        blocks.extend(parsed.blocks);
+                        footnotes.extend(parsed.footnotes);
+                    }
+                    index += 1;
+                    continue;
+                }
+            }
+        }
+
         if let Some((level, rest)) = heading(text) {
             let offset = line.offset + (line.text.len() - text.len()) as u32 + level as u32 + 1;
             blocks.push(Block::Heading(Heading::new(
@@ -361,6 +396,9 @@ pub fn parse_markdown_with_meta(source: &str, meta: DocumentMeta) -> Document {
     let mut document = Document::new(meta);
     document.source_map = source_map;
     resolve_link_references(&mut blocks, &mut footnotes, &link_refs);
+    // Inline `\footnote` is emitted as Raw by the inline scanner so it can be
+    // lifted here with the full argument (and any `\index` inside it).
+    lift_latex_footnotes(&mut blocks, &mut footnotes);
     document.blocks = blocks;
     document.footnotes = footnotes;
     document.renumber();
@@ -1125,6 +1163,13 @@ fn parse_inlines_with(text: &str, offset: u32, allow_html: bool) -> Vec<Inline> 
         if let Some(command) = latex_inline_at(rest) {
             flush!();
             let source = &rest[..command.end];
+            // A sectioning command is a block construct. If it appears inside
+            // a paragraph it is not silently dropped: keep the source.
+            if is_section_command(command.name) {
+                out.push(raw_inline("latex", source, offset + cursor as u32));
+                cursor += command.end;
+                continue;
+            }
             let (inlines, notes) = if command.name == "footnote" {
                 (Vec::new(), Vec::new())
             } else {
@@ -1554,6 +1599,119 @@ fn latex_environment_start(text: &str) -> bool {
         return false;
     };
     latex_block_environment(&rest[..end])
+}
+
+/// A LaTeX sectioning command has no inline meaning; at block start it becomes
+/// a heading, anywhere else its source stays visible.
+fn is_section_command(name: &str) -> bool {
+    matches!(
+        name,
+        "section" | "subsection" | "subsubsection" | "chapter" | "paragraph" | "subparagraph"
+    )
+}
+
+/// Lift raw inline `\footnote{...}` commands into real definitions.
+///
+/// The inline scanner keeps the command as Raw so it can find the complete
+/// brace group without splitting Markdown text; this pass replaces that Raw
+/// with the reference and the definition produced by the LaTeX frontend. The
+/// definition may itself contain `\index`, which the LaTeX parser collects.
+fn lift_latex_footnotes(blocks: &mut [Block], notes: &mut Vec<FootnoteDef>) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(node) => lift_inline_notes(&mut node.inlines, notes),
+            Block::Heading(node) => lift_inline_notes(&mut node.inlines, notes),
+            Block::List(node) => {
+                for item in &mut node.items {
+                    lift_latex_footnotes(&mut item.blocks, notes);
+                }
+            }
+            Block::BlockQuote(node) => lift_latex_footnotes(&mut node.blocks, notes),
+            Block::Figure(node) => lift_inline_notes(&mut node.caption, notes),
+            Block::Table(node) => {
+                lift_inline_notes(&mut node.caption, notes);
+                for row in &mut node.rows {
+                    for cell in &mut row.cells {
+                        lift_latex_footnotes(&mut cell.blocks, notes);
+                    }
+                }
+            }
+            Block::Generated(node) => lift_latex_footnotes(&mut node.blocks, notes),
+            _ => {}
+        }
+    }
+}
+
+fn lift_inline_notes(inlines: &mut Vec<Inline>, notes: &mut Vec<FootnoteDef>) {
+    let mut index = 0usize;
+    while index < inlines.len() {
+        let source = match &inlines[index] {
+            Inline::Raw(raw)
+                if raw.content.format == "latex" && raw.content.value.starts_with("\\footnote") =>
+            {
+                Some(raw.content.value.clone())
+            }
+            _ => None,
+        };
+        if let Some(source) = source {
+            let (mut lifted, definitions) = soma_latex::parse_latex_inline_fragment(&source);
+            if !definitions.is_empty() {
+                let mut pending = Vec::with_capacity(definitions.len());
+                for mut definition in definitions {
+                    let old = definition.label.clone();
+                    let new = fresh_note_label(notes, &pending);
+                    definition.label = new.clone();
+                    rewrite_note_targets(&mut lifted, &old, &new);
+                    pending.push(definition);
+                }
+                let added = lifted.len();
+                notes.extend(pending);
+                inlines.splice(index..=index, lifted);
+                index += added.max(1);
+                continue;
+            }
+        }
+        match &mut inlines[index] {
+            Inline::Strong(node)
+            | Inline::Emphasis(node)
+            | Inline::Underline(node)
+            | Inline::Strikethrough(node) => lift_inline_notes(&mut node.children, notes),
+            Inline::Link(node) => lift_inline_notes(&mut node.children, notes),
+            _ => {}
+        }
+        index += 1;
+    }
+}
+
+fn fresh_note_label(notes: &[FootnoteDef], pending: &[FootnoteDef]) -> String {
+    let mut number = notes.len() + pending.len() + 1;
+    loop {
+        let label = alloc::format!("latex-note-{number}");
+        let used = notes
+            .iter()
+            .chain(pending.iter())
+            .any(|definition| definition.label == label);
+        if !used {
+            return label;
+        }
+        number += 1;
+    }
+}
+
+fn rewrite_note_targets(inlines: &mut [Inline], old: &str, new: &str) {
+    for inline in inlines {
+        match inline {
+            Inline::FootnoteRef(reference) if reference.target == old => {
+                reference.target = String::from(new);
+            }
+            Inline::Strong(node)
+            | Inline::Emphasis(node)
+            | Inline::Underline(node)
+            | Inline::Strikethrough(node) => rewrite_note_targets(&mut node.children, old, new),
+            Inline::Link(node) => rewrite_note_targets(&mut node.children, old, new),
+            _ => {}
+        }
+    }
 }
 
 fn collect_display_math(lines: &[Line<'_>], index: usize) -> Option<(String, u32, u32, usize)> {
