@@ -18,7 +18,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use soma_core::Width;
+use soma_core::{StyleId, Width};
 use soma_layout::{
     BoxKind, ImageSource, MathBox, NoImages, PagedLayout, PlacedBlock, TextSource, TikzSegment,
 };
@@ -37,6 +37,41 @@ pub fn render(layout: &PagedLayout, styles: &StyleTable, text: &dyn TextSource) 
     render_with(layout, styles, text, &NoImages)
 }
 
+/// One page rendered as an embeddable SVG.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SvgPage {
+    /// `<svg class="page" data-page="…">…</svg>`; the root fills its container.
+    pub body: String,
+}
+
+/// Render every page as its own embeddable `<svg>` element.
+pub fn render_fragments(
+    layout: &PagedLayout,
+    styles: &StyleTable,
+    text: &dyn TextSource,
+) -> Vec<SvgPage> {
+    render_fragments_with(layout, styles, text, &NoImages)
+}
+
+/// Render every page with images inlined as data URIs. The caller can mount
+/// each fragment in a fixed-size page slot; the root carries `width="100%"`
+/// and a `viewBox`, so no browser reflow is involved.
+pub fn render_fragments_with(
+    layout: &PagedLayout,
+    styles: &StyleTable,
+    text: &dyn TextSource,
+    assets: &dyn ImageSource,
+) -> Vec<SvgPage> {
+    let sources = Sources { text, assets };
+    layout
+        .pages
+        .iter()
+        .map(|page| SvgPage {
+            body: render_page(layout, styles, &sources, page, true),
+        })
+        .collect()
+}
+
 /// Render with an image source. A figure whose asset resolves is inlined as a
 /// `data:` URI, so the SVG stays a single file and never names an external
 /// resource (ADR-0048).
@@ -49,60 +84,78 @@ pub fn render_with(
     let sources = Sources { text, assets };
     let mut out = String::new();
     for page in &layout.pages {
+        out.push_str(&render_page(layout, styles, &sources, page, false));
+    }
+    out
+}
+
+fn render_page(
+    layout: &PagedLayout,
+    styles: &StyleTable,
+    sources: &Sources<'_>,
+    page: &soma_layout::Page,
+    embedded: bool,
+) -> String {
+    let mut out = String::new();
+    let view = format!("0 0 {} {}", layout.page.width.0, layout.page.height.0);
+    if embedded {
         out.push_str(&format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" data-page=\"{}\" width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\">\n",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"page\" data-page=\"{}\" width=\"100%\" height=\"100%\" viewBox=\"{view}\" preserveAspectRatio=\"xMidYMid meet\">\n",
+            page.number
+        ));
+    } else {
+        out.push_str(&format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" data-page=\"{}\" width=\"{}\" height=\"{}\" viewBox=\"{view}\">\n",
             page.number,
             px(layout.page.width),
-            px(layout.page.height),
-            layout.page.width.0,
-            layout.page.height.0
+            px(layout.page.height)
         ));
+    }
 
-        for block in &page.blocks {
-            render_block(&mut out, layout, styles, &sources, page.number, block);
-        }
-        for block in &page.header {
-            render_block(&mut out, layout, styles, &sources, page.number, block);
-        }
-        for block in &page.footer {
-            render_block(&mut out, layout, styles, &sources, page.number, block);
-        }
-        let footnote_top = (layout.page.content_height().0 - page.footnote_height.0).max(0);
-        if !page.footnotes.is_empty() {
-            out.push_str(&format!(
-                "<rect data-page=\"{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#333333\"/>\n",
-                page.number,
-                units(layout.page.margin_left),
-                units(Width(layout.page.margin_top.0 + footnote_top)),
-                units(soma_layout::footnote_rule_width(layout.page.content_width())),
-                units(soma_layout::FOOTNOTE_RULE_THICKNESS)
-            ));
-        }
-        for (index, block) in page.footnotes.iter().enumerate() {
-            if let Some(number) = page.footnote_numbers.get(index).copied().flatten() {
-                render_footnote_number(
-                    &mut out,
-                    layout,
-                    styles,
-                    page.number,
-                    block,
-                    number,
-                    footnote_top,
-                );
-            }
-            render_block_at(
+    for block in &page.blocks {
+        render_block(&mut out, layout, styles, sources, page.number, block);
+    }
+    for block in &page.header {
+        render_block(&mut out, layout, styles, sources, page.number, block);
+    }
+    for block in &page.footer {
+        render_block(&mut out, layout, styles, sources, page.number, block);
+    }
+    let footnote_top = (layout.page.content_height().0 - page.footnote_height.0).max(0);
+    if !page.footnotes.is_empty() {
+        out.push_str(&format!(
+            "<rect data-page=\"{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#333333\"/>\n",
+            page.number,
+            units(layout.page.margin_left),
+            units(Width(layout.page.margin_top.0 + footnote_top)),
+            units(soma_layout::footnote_rule_width(layout.page.content_width())),
+            units(soma_layout::FOOTNOTE_RULE_THICKNESS)
+        ));
+    }
+    for (index, block) in page.footnotes.iter().enumerate() {
+        if let Some(number) = page.footnote_numbers.get(index).copied().flatten() {
+            render_footnote_number(
                 &mut out,
                 layout,
                 styles,
-                &sources,
                 page.number,
                 block,
+                number,
                 footnote_top,
             );
         }
-
-        out.push_str("</svg>\n");
+        render_block_at(
+            &mut out,
+            layout,
+            styles,
+            sources,
+            page.number,
+            block,
+            footnote_top,
+        );
     }
+
+    out.push_str("</svg>\n");
     out
 }
 
@@ -159,6 +212,42 @@ fn render_footnote_number(
 }
 
 fn render_block_at(
+    out: &mut String,
+    layout: &PagedLayout,
+    styles: &StyleTable,
+    sources: &Sources<'_>,
+    page: u32,
+    block: &PlacedBlock,
+    extra_y: i32,
+) {
+    let family = block_family(styles, block.style);
+    out.push_str(&format!(
+        "<g class=\"block\" data-node=\"{}\" data-family=\"{family}\">\n",
+        block.node.0
+    ));
+    render_block_body(out, layout, styles, sources, page, block, extra_y);
+    out.push_str("</g>\n");
+}
+
+fn block_family(styles: &StyleTable, style: StyleId) -> &'static str {
+    style_family(styles.get(style).and_then(|style| style.family.as_deref()))
+}
+
+fn style_family(family: Option<&str>) -> &'static str {
+    let Some(family) = family else {
+        return "serif";
+    };
+    let family = family.to_ascii_lowercase();
+    if family.contains("mono") || family.contains("code") {
+        "mono"
+    } else if family.contains("sans") || family.contains("hei") || family.contains("gothic") {
+        "sans"
+    } else {
+        "serif"
+    }
+}
+
+fn render_block_body(
     out: &mut String,
     layout: &PagedLayout,
     styles: &StyleTable,
@@ -297,13 +386,29 @@ fn render_block_at(
             } else {
                 ""
             };
+            let family = style_family(effective.family.as_deref());
+            let css_family = match family {
+                "sans" => "sans-serif",
+                "mono" => "monospace",
+                _ => "serif",
+            };
+            let weight = if effective.weight == soma_template::FontWeight::Bold {
+                " font-weight=\"bold\""
+            } else {
+                ""
+            };
+            let slant = if effective.slant == soma_template::FontSlant::Italic {
+                " font-style=\"italic\""
+            } else {
+                ""
+            };
             // SVG is a preview like HTML, so it does not create external
             // references either; the PDF annotation is the actionable copy.
             let syntax = text
                 .atom_syntax(block.node, atom.atom)
                 .and_then(|class| styles.syntax_color(class));
             out.push_str(&format!(
-                "<text data-page=\"{page}\" data-node=\"{}\" data-atom=\"{}\" x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\"{decoration}>{}</text>\n",
+                "<text data-page=\"{page}\" data-node=\"{}\" data-atom=\"{}\" data-family=\"{family}\" font-family=\"{css_family}\"{weight}{slant} x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\"{decoration}>{}</text>\n",
                 block.node.0,
                 atom.atom,
                 units(Width(x)),

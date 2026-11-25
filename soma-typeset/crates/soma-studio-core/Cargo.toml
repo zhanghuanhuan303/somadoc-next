@@ -18,6 +18,7 @@ soma-diagram = { path = "../soma-diagram" }
 soma-md = { path = "../soma-md" }
 soma-metrics = { path = "../soma-metrics" }
 soma-render-html = { path = "../soma-render-html" }
+soma-render-svg = { path = "../soma-render-svg" }
 soma-rules = { path = "../soma-rules" }
 soma-template = { path = "../soma-template" }
 soma-docx = { path = "../soma-docx" }

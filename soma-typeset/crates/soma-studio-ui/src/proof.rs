@@ -16,6 +16,15 @@ use crate::state::{use_studio, Studio};
 const SHADOW_CSS: &str = r#"
 :host{all:initial;color:#111;color-scheme:light}
 .page{margin:0!important;box-shadow:none!important;background:transparent!important;color:#111!important;color-scheme:light;pointer-events:none;}
+svg.page{display:block;width:100%;height:100%;}
+svg text{font-family:var(--soma-serif,serif);}
+svg text[data-family="sans"]{font-family:var(--soma-sans,sans-serif)!important;}
+svg text[data-family="serif"]{font-family:var(--soma-serif,serif)!important;}
+svg text[data-family="mono"]{font-family:var(--soma-mono,monospace)!important;}
+svg text[data-math]{font-family:var(--soma-math,serif)!important;}
+svg g.block[data-family="sans"]{font-family:var(--soma-sans,sans-serif)!important;color:#111;}
+svg g.block[data-family="serif"]{font-family:var(--soma-serif,serif)!important;color:#111;}
+svg g.block[data-family="mono"]{font-family:var(--soma-mono,monospace)!important;color:#111;}
 .page .math{font-family:var(--soma-math,serif);}
 .page [style*="font-family:sans-serif"]{font-family:var(--soma-sans,sans-serif)!important;}
 .page [style*="font-family:serif"]{font-family:var(--soma-serif,serif)!important;}
@@ -95,7 +104,7 @@ pub fn ProofPane() -> impl IntoView {
         studio.build.with(|build| {
             build
                 .as_ref()
-                .map(|build| (0..build.fragments.len()).collect::<Vec<_>>())
+                .map(|build| (0..build.svg_fragments.len()).collect::<Vec<_>>())
                 .unwrap_or_default()
         })
     });
@@ -181,10 +190,9 @@ fn Page(index: usize) -> impl IntoView {
             .set_property("font-size", &format!("{:.4}px", px_per_em * zoom));
         let Some(html) = studio.build.with(|build| {
             build.as_ref().and_then(|build| {
-                let fragment = build.fragments.get(index)?;
+                let fragment = build.svg_fragments.get(index)?;
                 let page = build.build.pages.pages.get(index)?;
-                Some(page_html(
-                    &fragment.style,
+                Some(page_svg_html(
                     &fragment.body,
                     page,
                     &build.build.pages,
@@ -299,8 +307,7 @@ fn geometry(studio: &Studio) -> Option<(f64, f64, f64)> {
     })
 }
 
-fn page_html(
-    style: &str,
+fn page_svg_html(
     body: &str,
     page: &soma_layout::Page,
     layout: &soma_layout::PagedLayout,
@@ -308,7 +315,6 @@ fn page_html(
 ) -> String {
     let mut html = String::with_capacity(body.len() + 4096);
     html.push_str("<style>");
-    html.push_str(style);
     html.push_str(SHADOW_CSS);
     html.push_str("</style>");
     html.push_str(body);

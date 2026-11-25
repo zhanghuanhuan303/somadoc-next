@@ -65,7 +65,7 @@ fn fixture() -> Fixture {
 }
 
 fn attr<'a>(line: &'a str, name: &str) -> Option<&'a str> {
-    let needle = format!("{name}=\"");
+    let needle = format!(" {name}=\"");
     let start = line.find(&needle)? + needle.len();
     let rest = &line[start..];
     let end = rest.find('"')?;
@@ -322,6 +322,31 @@ fn html_and_svg_cover_the_same_atoms() {
 }
 
 #[test]
+fn page_fragments_are_embeddable_and_keep_the_layout() {
+    let fixture = fixture();
+    let pages = soma_render_svg::render_fragments(
+        &fixture.layout,
+        fixture.styled.table(),
+        &fixture.layout.text,
+    );
+    assert_eq!(pages.len(), fixture.layout.page_count() as usize);
+
+    for (index, page) in pages.iter().enumerate() {
+        let number = index + 1;
+        assert!(
+            page.body.starts_with(&format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"page\" data-page=\"{number}\" width=\"100%\" height=\"100%\""
+            )),
+            "page {number} root"
+        );
+        assert!(page.body.contains("viewBox=\"0 0 "));
+        assert!(page.body.contains("<g class=\"block\""), "block groups");
+        assert!(!page.body.contains("<script"), "no scripts");
+        assert!(!page.body.contains("href=\"http"), "no external links");
+    }
+}
+
+#[test]
 fn svg_bytes_are_a_visual_regression_lock() {
     let fixture = fixture();
     let svg = render(
@@ -356,4 +381,7 @@ fn svg_bytes_are_a_visual_regression_lock() {
 /// and table cells gain vertical padding (ADR-0082/0083/0084).
 /// 2026-11-25: footnote marks are two thirds of the body size and raised two
 /// fifths of an em, matching the PDF and LaTeX (ADR-0096).
-const GOLDEN_SVG_HASH: u64 = 13_836_169_350_716_239_419;
+/// 2026-11-26: each block is a `<g class="block">`, text carries its family
+/// and bold/italic attributes so the SVG can be a standalone Studio proof
+/// (ADR-0109).
+const GOLDEN_SVG_HASH: u64 = 6291207987599973007;

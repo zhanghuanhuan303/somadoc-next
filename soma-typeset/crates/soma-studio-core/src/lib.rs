@@ -20,6 +20,7 @@ use soma_engine::EngineConfig;
 use soma_layout::{ImageSource, PagedLayout, PaginationStrategy, StyledMetrics};
 use soma_metrics::{MetricsTable, FAMILY_FALLBACK, FAMILY_MONO, FAMILY_SANS, FAMILY_SERIF};
 use soma_render_html::PageFragment;
+use soma_render_svg::SvgPage;
 use soma_template::{parse_template, resolve, ComputedStyle, FontWeight, StyledDoc};
 
 /// The frontend selected for a source.
@@ -245,6 +246,18 @@ impl Build {
     pub fn fragments(&self, images: &ImageBytes) -> Vec<PageFragment> {
         let source = MapImages::new(images);
         soma_render_html::render_fragments_with(
+            &self.pages,
+            self.styled.table(),
+            &self.pages.text,
+            &source,
+        )
+    }
+
+    /// SVG proof pages: one `<svg class="page">` per page, scaled by the
+    /// caller's page slot. Images are inlined data URIs.
+    pub fn svg_fragments(&self, images: &ImageBytes) -> Vec<SvgPage> {
+        let source = MapImages::new(images);
+        soma_render_svg::render_fragments_with(
             &self.pages,
             self.styled.table(),
             &self.pages.text,

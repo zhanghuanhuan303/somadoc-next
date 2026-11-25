@@ -54,6 +54,26 @@ fn a_build_request_defaults_to_the_project_frontend() {
 }
 
 #[test]
+fn svg_fragments_follow_pages_and_stay_self_contained() {
+    let build = built();
+    let pages = build.pages.page_count() as usize;
+    let fragments = build.svg_fragments(&soma_studio_core::ImageBytes::new());
+    assert_eq!(fragments.len(), pages);
+    for (index, fragment) in fragments.iter().enumerate() {
+        assert!(
+            fragment.body.starts_with(&format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"page\" data-page=\"{}\"",
+                index + 1
+            )),
+            "fragment {index} must be a page SVG"
+        );
+        assert!(fragment.body.contains("<g class=\"block\""));
+        assert!(!fragment.body.contains("<script"), "no scripts");
+        assert!(!fragment.body.contains("href=\"http"), "no external links");
+    }
+}
+
+#[test]
 fn fragments_follow_pages_and_join_the_same_document() {
     let build = built();
     let pages = build.pages.page_count() as usize;
@@ -153,6 +173,7 @@ fn build_is_deterministic() {
     let second = built();
     let images = soma_studio_core::ImageBytes::new();
     assert_eq!(first.fragments(&images), second.fragments(&images));
+    assert_eq!(first.svg_fragments(&images), second.svg_fragments(&images));
     assert_eq!(
         first.summary(0).hash,
         second.summary(0).hash,

@@ -621,7 +621,7 @@ async fn s5(document: &Document, studio: Studio) -> String {
     let fragments = studio.build.with(|build| {
         build
             .as_ref()
-            .map(|build| build.fragments.len())
+            .map(|build| build.svg_fragments.len())
             .unwrap_or(0)
     });
     let contiguous = slots.iter().enumerate().all(|(index, element)| {

@@ -1,6 +1,6 @@
 # 提案：预览改为 SVG 校样，PDF 只在下载时生成
 
-- 状态：提案（待拍板）
+- 状态：**已实现（ADR-0109）**
 - 日期：2026-11-26
 - 关联：ADR-0093（全 Rust wasm Studio）、ADR-0103（TikZ 导出）、
   `docs/studio.md`、`crates/soma-render-svg`、`crates/soma-render-pdf`

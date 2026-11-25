@@ -89,7 +89,7 @@ tab is open.
 |---|---|
 | **分栏** (Split, default) | Source on the left, proof on the right, with a draggable splitter. Either pane can be closed with its `×`; the sidebar 「视图 → 分栏」 restores both. The ratio and open state persist in `localStorage`. |
 | **源文** (Source) | A soft-wrapping `<textarea>`; a long line wraps at the pane width instead of scrolling horizontally. Typing schedules a build 220 ms after the last keystroke; IME composition defers the build until `compositionend`. `⌘S` saves, `⌘↵` rebuilds now. |
-| **校样** (Proof) | Each page is a Shadow DOM root containing the exact HTML fragment of the engine's `PagedLayout`, scaled by the UI's zoom. The page CSS is scoped inside the shadow root; UI tokens never leak into the document. |
+| **校样** (Proof) | Each page is a Shadow DOM root containing one SVG page rendered from the engine's `PagedLayout` (ADR-0109). Text is `<text>` with `data-node`/`data-atom`, so it stays selectable and inspectable; the SVG is scaled by the UI's zoom. The page CSS is scoped inside the shadow root; UI tokens never leak into the document. |
 | **检视** (Inspect) | The exported line facts for the current page: ratio, adjustment, trim, boundary deviation, cost, flags. Clicking a row selects the same line in the overlay. Per-term cost is not exported (D102); the detail bar shows `—`. |
 | **校验** (Verify) | wasm vs native: canonical hash, parameter hash, page count and line count per page. A mismatch is a red state. |
 
@@ -160,6 +160,8 @@ metrics file triggers a native rebuild:
   every response, plus `X-Content-Type-Options: nosniff` and
   `Referrer-Policy: no-referrer`.
 - The renderer emits no `<script>` and no `<a href>`; the proof uses Shadow DOM.
+- The proof SVG carries `data-family`/`data-math`; the shadow CSS maps those to the
+  installed `@font-face` families, so the browser does not reflow the layout.
 - The assistant pane renders its markdown with raw HTML escaped and
   `javascript:`/`data:`/`vbscript:` destinations replaced. It has no write path
   to the engine (no `build`/`source`/`template` mutation, no breaker call).
@@ -206,7 +208,7 @@ directory; `examples/` is not modified.
 | S2 | Three files open as three tabs; reopening does not duplicate; closing the active tab selects the right neighbour; closing all shows the empty workspace; `+` opens the palette. |
 | S3 | Sidebar 180–380, AI 320–900, persistence, double-click reset, collapse; closed AI dock has no content width; closing/reopening the source and proof panes. |
 | S4 | Theme persists, both toggles work, and `studio.css` contains no hex values (tokens only). |
-| S5 | `page slots == fragments == page_count`; consecutive `data-page`; one Shadow `.page` per slot; PDF page count equals native; `/api/tikz` returns a `tikzpicture` with the fixture labels. |
+| S5 | `page slots == SVG fragments == page_count`; consecutive `data-page`; one Shadow `.page` SVG per slot; PDF page count equals native; `/api/tikz` returns a `tikzpicture` with the fixture labels. |
 | S6 | Typing rebuilds after the debounce and changes the hash; IME composition does not rebuild until it ends. |
 | S7 | Inspect rows equal the overlay lines on page 1; clicking a row selects the same box; unavailable fields display `—`. |
 | S8 | No external resources; no `<script>`/`<a href>` inside page shadows; remote AI disabled; CSP and nosniff present. |

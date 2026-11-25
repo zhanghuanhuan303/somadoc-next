@@ -16,6 +16,7 @@ soma-core = { path = "../soma-core" }
 soma-doc = { path = "../soma-doc" }
 soma-layout = { path = "../soma-layout" }
 soma-render-html = { path = "../soma-render-html" }
+soma-render-svg = { path = "../soma-render-svg" }
 soma-template = { path = "../soma-template" }
 
 leptos = { version = "0.8", features = ["csr"] }

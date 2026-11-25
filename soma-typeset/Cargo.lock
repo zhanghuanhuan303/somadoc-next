@@ -1839,6 +1839,7 @@ dependencies = [
  "soma-md",
  "soma-metrics",
  "soma-render-html",
+ "soma-render-svg",
  "soma-rules",
  "soma-template",
 ]
@@ -1859,6 +1860,7 @@ dependencies = [
  "soma-doc",
  "soma-layout",
  "soma-render-html",
+ "soma-render-svg",
  "soma-studio-core",
  "soma-template",
  "wasm-bindgen",
