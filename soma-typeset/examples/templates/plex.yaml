@@ -1,5 +1,7 @@
 # A page design transcribed from the pandoc template
-# ~/.local/share/pandoc/templates/soma.latex.
+# ~/.local/share/pandoc/templates/soma.latex, then finished for proposals:
+# tables breathe a little more, the contents page and cover have a deliberate
+# top, and the colophon is a quiet centred block.
 #
 # The reference is an article-class A4 page: one-inch margins, IBM Plex Sans SC
 # for text and Latin alike, \linespread{1.2} on a 12pt baseline, no first-line
@@ -9,7 +11,7 @@
 #
 # Build with: scripts/plex.sh
 name: soma-plex
-version: 1
+version: 2
 
 page:
   size: A4
@@ -256,21 +258,25 @@ styles:
 
   # The reference puts a table on the paragraph rhythm: 20pt above the
   # following text (\parskip), and enough room below the caption to let the
-  # top rule breathe.
+  # top rule breathe. A proposal table gets a little more air above so it does
+  # not touch the paragraph that introduces it.
   - selector:
       element: table
     declarations:
-      space-before: 0.3em
+      space-before: 0.8em
       space-after: 20pt
 
+  # Cells breathe: a 1.5 line height and a small symmetric pad keep a dense
+  # capability matrix readable without changing the table's width.
   - selector:
       element: paragraph
       within: cell
     declarations:
       first-indent: 0
       align: left
-      space-before: 0
-      space-after: 0
+      line-height: 1.5
+      space-before: 0.12em
+      space-after: 0.12em
 
   # hyperref uses black for internal links; leave links in the text colour.
   # Formula sizes keep the project's optical compensation for the math face.
@@ -301,16 +307,17 @@ styles:
       element: toc
     declarations:
       font-size: 10pt
-      line-height: 1.6
+      line-height: 1.9
       first-indent: 0
 
   - selector:
       element: tocTitle
     declarations:
-      font-size: 15pt
+      font-size: 18pt
       weight: bold
       align: center
-      space-after: 1.4em
+      space-before: 16mm
+      space-after: 1.8em
 
   - selector:
       element: indexEntry
@@ -329,34 +336,57 @@ styles:
 
   # \maketitle: \huge title, \large author and date, pushed toward the top by
   # \setlength{\droptitle}{-8em}. Our cover is a page of its own, so the same
-  # hierarchy is centred instead of sharing page 1 with the body.
+  # hierarchy is centred instead of sharing page 1 with the body. The extra
+  # leading space and the muted subtitle give the title page a deliberate top.
   - selector:
       element: coverTitle
     declarations:
-      font-size: 25pt
+      font-size: 26pt
       weight: bold
       line-height: 1.25
       align: center
-      space-before: 30mm
-      space-after: 4mm
+      space-before: 34mm
+      space-after: 5mm
 
   - selector:
       element: coverSubtitle
     declarations:
-      font-size: 12pt
-      line-height: 1.4
+      font-size: 12.5pt
+      line-height: 1.5
       align: center
-      space-after: 18mm
+      color: "#3c3c3c"
+      space-after: 20mm
 
   - selector:
       element: coverAuthor
     declarations:
       font-size: 11pt
       align: center
-      space-after: 2mm
+      space-after: 3mm
 
   - selector:
       element: coverDate
     declarations:
       font-size: 10pt
       align: center
+      color: "#555555"
+
+  # The colophon sits under the author/date as a quiet closing block: a 40%
+  # hairline and muted centred lines. Without these the block inherits the
+  # body's left alignment and collides with the author line.
+  - selector:
+      element: coverColophon
+    declarations:
+      font-size: 8pt
+      line-height: 1.5
+      color: "#666666"
+      letter-spacing: 0.04em
+      align: center
+      space-before: 0
+
+  - selector:
+      element: coverColophonRule
+    declarations:
+      color: "#b3b3b3"
+      space-before: 12mm
+      space-after: 0.8em

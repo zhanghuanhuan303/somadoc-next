@@ -375,6 +375,11 @@ IBM Plex Sans SC 正文 10pt / 1.44 行高、零首行缩进 + 20pt 段距、LaT
 面板与 mdBook Rust 语法配色。它也是 CLI 的**内置默认模板**（ADR-0088）；
 旧默认已归档为 `examples/templates/latex-article.yaml`。
 
+模板版本 2 面向提案文档做了一轮收尾：单元格 1.5 行高 + 0.12em 上下留白、
+表前 0.8em；目录标题 18pt 并下移 16mm、条目行高 1.9；封面标题 26pt、
+副标题与日期用静音色，版权块是居中发丝线 + 居中 8pt 小字。正文、标题与
+列表仍保持 pandoc 参考的尺寸与间距。
+
 运行 `scripts/plex.sh` 会用本机 Plex 面与 Noto Sans Mono 生成度量表
 （不随仓库分发字体），并排出：
 

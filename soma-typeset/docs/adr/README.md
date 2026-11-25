@@ -132,6 +132,7 @@ only).
 | [0111](0111-inline-code-and-separator-breaks.md) | Inline code breaks at its spaces and separators (`CODE_BREAK_PENALTY`); Latin `-`/`/` breaks are priced (`WORD_BREAK_PENALTY`); the Studio defaults to `book-v1` | Accepted; addresses the TACTUS line-breaking review |
 | [0112](0112-code-intrusive-breaks-and-short-lines.md) | Long unseamed code runs split per character (`INTRUSIVE_BREAK_PENALTY`); camelCase/`_`/`.` are seams; the short-line charge covers non-final lines; `modelVersion` 4 / `rulesVersion` 2 | Accepted; closes D114 and D115 |
 | [0113](0113-space-coverage-and-diagram-fit.md) | The metrics face covers its own space; layout and PDF fall back to the math face for glyphs the text face lacks; wide diagrams fit their label caps instead of shrinking | Accepted; fixes the TACTUS review's glyph and diagram findings |
+| [0114](0114-default-plex-template-v2.md) | Plex template v2: airier table cells, a deliberate contents page, a muted cover and a centred colophon; the built-in default follows | Accepted |
 
 ## Rules
 
