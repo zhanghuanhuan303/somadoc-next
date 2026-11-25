@@ -1346,6 +1346,18 @@ impl Glue {
         plus: Width::ZERO,
         minus: Width::ZERO,
     };
+
+    /// Combine a block margin with the glue already carried by its first or
+    /// last child. Margins do not collapse in this model, but a list's margin
+    /// and its item's own spacing should not add up either: the larger one
+    /// wins, so a list reads as one block.
+    fn outer(self, margin: Self) -> Self {
+        Self {
+            width: Width(self.width.0.max(margin.width.0)),
+            plus: Width(self.plus.0.max(margin.plus.0)),
+            minus: Width(self.minus.0.max(margin.minus.0)),
+        }
+    }
 }
 
 /// One line of a splittable block, or the single part of an atomic block.
@@ -1888,7 +1900,11 @@ impl Builder<'_> {
                 }
                 Block::List(node) => {
                     let style = self.style(node.meta.id, fallback);
-                    let list_indent = self.computed(style).indent_left;
+                    let list_computed = self.computed(style);
+                    let list_before = self.before_glue(&list_computed);
+                    let list_after = self.after_glue(&list_computed);
+                    let list_indent = list_computed.indent_left;
+                    let first = items.len();
                     for (index, item) in node.items.iter().enumerate() {
                         let item_style = self.style(item.meta.id, style);
                         // A description term is a bold run-in label: it has no
@@ -1948,6 +1964,15 @@ impl Builder<'_> {
                             marked = true;
                         }
                         self.extra_left = Width(self.extra_left.0 - list_indent.0 - item_indent.0);
+                    }
+                    // A list is one block: its own margins sit outside the
+                    // item spacing, so the paragraph after it never touches
+                    // the last marker (and the first item does not float up
+                    // against the preceding text).
+                    if items.len() > first {
+                        items[first].before = items[first].before.outer(list_before);
+                        let last = items.len() - 1;
+                        items[last].after = items[last].after.outer(list_after);
                     }
                 }
                 Block::BlockQuote(node) => {

@@ -871,6 +871,8 @@ styles:
       element: list
     declarations:
       indent-left: 2em
+      space-before: 1em
+      space-after: 2em
   - selector:
       element: listItem
     declarations:
@@ -922,6 +924,32 @@ fn a_bullet_item_starts_with_its_marker_and_is_indented() {
         body.width.0,
         "the measure shrinks with the indent"
     );
+}
+
+#[test]
+fn a_list_margin_separates_its_neighbours() {
+    let doc = document(vec![
+        paragraph("前文"),
+        Block::List(List::new(
+            NodeMeta::synthesized(),
+            false,
+            1,
+            vec![ListItem::new(
+                NodeMeta::synthesized(),
+                vec![paragraph("条目")],
+            )],
+        )),
+        paragraph("后文"),
+    ]);
+    let styled = styled(&doc, LISTS);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let blocks = &layout.pages[0].blocks;
+    assert_eq!(blocks.len(), 3, "paragraph, item, paragraph");
+
+    let before_gap = blocks[1].y.0 - (blocks[0].y.0 + blocks[0].height.0);
+    let after_gap = blocks[2].y.0 - (blocks[1].y.0 + blocks[1].height.0);
+    assert_eq!(before_gap, Width::from_em(1).0);
+    assert_eq!(after_gap, Width::from_em(2).0);
 }
 
 #[test]

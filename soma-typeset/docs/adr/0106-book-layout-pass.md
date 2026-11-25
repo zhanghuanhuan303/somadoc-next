@@ -83,6 +83,11 @@ The template gains generated element names without new YAML keys:
   LaTeX writes that field with `\colophon{...}`.
 - `runningHead`, `folio` as above.
 
+A list is one block for vertical spacing: its `space-before` and `space-after`
+are applied outside its first and last item, merged with the item's own glue by
+width (the larger value wins, so margins do not stack). Before this, a list
+followed by a paragraph touched the last item.
+
 ### 6. Figure width and alignment
 
 The template gains `figure: { width: natural | half | full, align: left |
