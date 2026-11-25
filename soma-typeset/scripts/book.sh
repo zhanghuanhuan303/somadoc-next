@@ -6,10 +6,10 @@
 # Writes examples/book/out/book.{html,svg,json,pdf}. The output is not
 # committed; rerun this after changing the engine, the template, or the source.
 #
-// When a TrueType font is available every format is laid out with a metrics
-// table generated from that same face, so HTML, SVG, JSON and PDF share one
-// set of coordinates and the same punctuation ink (ADR-0037). Without a font
-// the embedded table is used.
+# When a TrueType font is available every format is laid out with a metrics
+# table generated from that same face, so HTML, SVG, JSON and PDF share one
+# set of coordinates and the same punctuation ink (ADR-0037). Without a font
+# the embedded table is used.
 set -eu
 
 cd "$(dirname "$0")/.."

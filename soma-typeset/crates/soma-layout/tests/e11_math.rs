@@ -61,6 +61,31 @@ fn consecutive_display_formulas_keep_the_default_skip() {
 }
 
 #[test]
+fn a_display_after_a_short_line_keeps_half_the_template_skip() {
+    let doc = document(vec![
+        paragraph("短句"),
+        Block::MathBlock(MathBlock::new(NodeMeta::synthesized(), r"\frac{a}{b}")),
+    ]);
+    let styled = styled(&doc, TIGHT);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let body = styled.table().styles()[0].font_size.0;
+    let above = &layout.pages[0].blocks[0];
+    let math = &layout.pages[0].blocks[1];
+    let gap = math.y.0 - (above.y.0 + above.height.0);
+
+    // TIGHT has no mathBlock rule, so the default 1em before-glue is halved
+    // for a short preceding line. Page glue may add at most 0.1em.
+    assert!(
+        gap >= body * 49 / 100,
+        "short display gap {gap} is below half a body em ({body})"
+    );
+    assert!(
+        gap <= body * 61 / 100,
+        "short display gap {gap} grew past the template glue ({body})"
+    );
+}
+
+#[test]
 fn superscript_sits_above_the_baseline_and_is_smaller() {
     let layout = math_layout("x^2");
     let math = layout.pages[0].blocks[0].math.as_ref().expect("math box");

@@ -4068,13 +4068,18 @@ impl Builder<'_> {
                 }
             }
         }
-        // A short line before a display uses TeX's short skips: no space above
-        // and 70% of the normal space below. The template's own glue still
-        // scales, so a designer can change the base values.
+        // A short line before a display uses TeX's short display skips, but
+        // the template's own glue still matters: keep half of it above and
+        // 70% below. TeX's zero short skip made a CJK formula touch the line
+        // above; an explicit `space-before: 0` still resolves to zero.
         let mut before = self.before_glue(&computed);
         let mut after = self.after_glue(&computed);
         if self.last_line_short {
-            before = Glue::ZERO;
+            before = Glue {
+                width: Width(before.width.0 / 2),
+                plus: Width(before.plus.0 / 2),
+                minus: Width(before.minus.0 / 2),
+            };
             after = Glue {
                 width: Width(after.width.0 * 7 / 10),
                 plus: Width(after.plus.0 * 7 / 10),

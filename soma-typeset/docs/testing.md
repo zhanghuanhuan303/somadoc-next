@@ -201,9 +201,9 @@ Cumulative public test files (counts verified on 2026-11-25 against
 | `studio.rs` (studio-core) | 3 | fragments follow pages and join the full document, probe samples come from layout faces, build determinism |
 | `soma-studio-ui` unit | 2 | assistant markdown escapes raw HTML and rejects `javascript:`/`data:` destinations |
 
-Total: **929 tests passed** (`cargo test --workspace`), plus **1 ignored**
+Total: **930 tests passed** (`cargo test --workspace`), plus **1 ignored**
 (`perturbation.rs`, run with `--ignored`). Counting that ignored test, the
-workspace lists **930 test functions**. The standalone
+workspace lists **931 test functions**. The standalone
 `tools/metrics-gen` crate adds its own 4 (`cargo test --manifest-path tools/metrics-gen/Cargo.toml`).
 
 Still deferred: the human blind-test run (D01), a quality-labeled corpus

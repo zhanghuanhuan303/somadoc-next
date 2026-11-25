@@ -116,6 +116,7 @@ only).
 | [0095](0095-studio-builds-the-active-tab-frontend.md) | Studio builds each tab with its own frontend; `BuildRequest.format` is optional and falls back to the project input | Accepted |
 | [0096](0096-footnote-mark-attachment.md) | A footnote mark attaches to the text before it (no break, no gap); body superscripts are 2/3 size, raised 2/5 em | Accepted |
 | [0097](0097-display-math-page-frame.md) | Display math HTML percentages resolve against the page; inline math keeps the block frame | Accepted |
+| [0098](0098-short-display-skip.md) | A display after a short line keeps half the template's space-before and 70% of its space-after | Accepted |
 
 ## Rules
 

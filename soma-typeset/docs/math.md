@@ -198,9 +198,12 @@ A display formula is one indivisible flow item: it has glue before/after from
 the style (a template that does not style `mathBlock` still gets one body em
 before and after, plus 0.2em, minus 0.5em; an explicit rule overrides it,
 ADR-0080), `keep_with_next` and `page_break_before` are honoured, and it never
-splits. If it does not fit on an empty page the page is marked `overflow` like
-any other tall box. An inline formula is an indivisible *atom*: it moves to the
-next line with the rest of the line and never splits mid-formula.
+splits. When the preceding line is short, the glue above is halved and the glue
+below is kept at 70% (ADR-0098): a CJK formula still gets air instead of
+TeX's zero short skip, and an explicit `space-before: 0` stays zero. If it does
+not fit on an empty page the page is marked `overflow` like any other tall box.
+An inline formula is an indivisible *atom*: it moves to the next line with the
+rest of the line and never splits mid-formula.
 
 ## Ink, not the em box
 

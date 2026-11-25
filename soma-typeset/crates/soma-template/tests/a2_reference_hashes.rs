@@ -22,6 +22,6 @@ fn reference_templates_keep_their_canonical_hashes() {
     assert_eq!(plex.canonical_json().len(), 13_637);
 
     let book = parse_template(BOOK).expect("book reference template");
-    assert_eq!(book.template_hash().0, 10_538_007_619_996_569_898);
-    assert_eq!(book.canonical_json().len(), 8_011);
+    assert_eq!(book.template_hash().0, 17_119_048_038_987_802_348);
+    assert_eq!(book.canonical_json().len(), 8_280);
 }

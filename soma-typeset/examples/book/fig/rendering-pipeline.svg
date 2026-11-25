@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Source for rendering-pipeline.png. Regenerate with:
+     rsvg-convert -w 2000 -h 1200 rendering-pipeline.svg -o rendering-pipeline.png -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600" viewBox="0 0 1000 600">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#5a6b7d"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="600" fill="#ffffff"/>
+  <g font-family="MiSans, Noto Sans CJK SC, IBM Plex Sans SC, sans-serif">
+    <text x="500" y="26" text-anchor="middle" font-size="22" letter-spacing="4" fill="#5d6b78">语法层</text>
+
+    <g fill="#eef4fb" stroke="#3f6f9f" stroke-width="1.6">
+      <rect x="75" y="45" width="190" height="56" rx="8"/>
+      <rect x="295" y="45" width="190" height="56" rx="8"/>
+      <rect x="515" y="45" width="190" height="56" rx="8"/>
+      <rect x="735" y="45" width="190" height="56" rx="8"/>
+    </g>
+    <g font-size="28" fill="#1f2d3a" text-anchor="middle">
+      <text x="170" y="81">Markdown</text>
+      <text x="390" y="81">HTML</text>
+      <text x="610" y="81">LaTeX</text>
+      <text x="830" y="81">Word</text>
+    </g>
+
+    <g stroke="#5a6b7d" stroke-width="1.6" fill="none" marker-end="url(#arrow)">
+      <path d="M170 101 L500 158"/>
+      <path d="M390 101 L500 158"/>
+      <path d="M610 101 L500 158"/>
+      <path d="M830 101 L500 158"/>
+    </g>
+    <text x="516" y="137" font-size="16" fill="#7a8794">解析</text>
+
+    <rect x="100" y="160" width="800" height="90" rx="10" fill="#e9f4ea" stroke="#4b7d54" stroke-width="1.6"/>
+    <text x="500" y="196" text-anchor="middle" font-size="32" font-weight="600" fill="#1f2d3a">统一 DocIR</text>
+    <text x="500" y="227" text-anchor="middle" font-size="22" fill="#4a5b4c">结构 · 行内 · 脚注 · 表格 · 索引</text>
+
+    <path d="M500 250 L500 298" stroke="#5a6b7d" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+    <text x="516" y="281" font-size="16" fill="#7a8794">布局</text>
+
+    <rect x="100" y="300" width="800" height="92" rx="10" fill="#fdf0df" stroke="#a06b35" stroke-width="1.6"/>
+    <text x="500" y="337" text-anchor="middle" font-size="32" font-weight="600" fill="#1f2d3a">模板 + 排版引擎</text>
+    <text x="500" y="368" text-anchor="middle" font-size="22" fill="#6b4d32">K-P 断行 · 分页 · 数学 · TikZ</text>
+
+    <g stroke="#5a6b7d" stroke-width="1.6" fill="none">
+      <path d="M500 392 L500 430"/>
+      <path d="M170 430 L830 430"/>
+      <path d="M170 430 L170 458" marker-end="url(#arrow)"/>
+      <path d="M390 430 L390 458" marker-end="url(#arrow)"/>
+      <path d="M610 430 L610 458" marker-end="url(#arrow)"/>
+      <path d="M830 430 L830 458" marker-end="url(#arrow)"/>
+    </g>
+    <text x="516" y="415" font-size="16" fill="#7a8794">渲染</text>
+
+    <g fill="#f2f4f7" stroke="#5a6b7d" stroke-width="1.6">
+      <rect x="75" y="460" width="190" height="56" rx="8"/>
+      <rect x="295" y="460" width="190" height="56" rx="8"/>
+      <rect x="515" y="460" width="190" height="56" rx="8"/>
+      <rect x="735" y="460" width="190" height="56" rx="8"/>
+    </g>
+    <g font-size="28" fill="#1f2d3a" text-anchor="middle">
+      <text x="170" y="496">PDF</text>
+      <text x="390" y="496">HTML</text>
+      <text x="610" y="496">SVG</text>
+      <text x="830" y="496">JSON</text>
+    </g>
+
+    <text x="500" y="562" text-anchor="middle" font-size="22" letter-spacing="4" fill="#5d6b78">输出</text>
+  </g>
+</svg>
