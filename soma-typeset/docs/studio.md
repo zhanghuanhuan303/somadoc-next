@@ -236,5 +236,7 @@ directory; `examples/` is not modified.
   and a DOT subset are vector; sequence/class/state/ER diagrams and subgraph
   rank constraints are not implemented. A wide or too-tall diagram falls back
   to its source rather than overflowing the page.
+- **TikZ export is first-diagram, natural-size only (D108).** Multi-diagram
+  selection, page-scaled geometry and SVG export are not implemented.
 - **AI is local rules only.** It reads the exported line facts and proposes
   template YAML; it does not call a network model.

@@ -1,7 +1,7 @@
 # 未做清单（Debt register）
 
 状态：**2026-11-25，Web Studio 后**。这是全局台账，不随里程碑报告消失。
-当前：**107 条，83 条已关闭，24 条未关闭**（20 个技术债 + 4 个非目标；其中 D01 需人工评审）。
+当前：**108 条，83 条已关闭，25 条未关闭**（21 个技术债 + 4 个非目标；其中 D01 需人工评审）。
 关闭一项就改成 ~~删除线~~ 并写明关闭点；新增债务必须给 ID。
 
 口径：
@@ -126,6 +126,7 @@
 | D104 | Studio 构建在主线程 | 打字后 220 ms 防抖构建；提案里的「>800 atoms 走 Worker」没有实现。需要可序列化的 `AppBuild` 与第二个 wasm 二进制 | 超大文档（4k+ atoms）输入时可能掉帧 | 真实项目实测超预算时再做 | 否 |
 | D105 | Studio 没有单文件静态导出 | 项目文件、字体与 PDF 依赖 Axum；`web/` 的 K-P slice 仍是唯一 server-free 嵌入件 | 不能把一个离线 HTML 直接分享给他人 | 有离线分享/静态托管需求时做 | 否 |
 | D107 | 流程图只覆盖 Mermaid flowchart 与 DOT 子集 | 子图只画成员包围框，不约束 rank；sequence/class/state/ER、图标、HTML 标签、外部链接没有实现；宽图低于 60% 或高于页高回退源码 | 复杂组织结构图会退化成较松的层次图；非 flowchart 图种仍显示为代码 | 有真实图种需求时扩 `soma-diagram` 的 frontend；子图 rank 约束优先 | 否 |
+| D108 | Studio 的 TikZ 导出只取第一张图 | `/api/tikz` 按文档顺序取第一张 Mermaid/DOT 图，导出自然尺寸；不能选择后续图、导出页面缩放后的几何，也不能导出 SVG | 含多张图的文档需要手工定位并裁剪导出的文件 | 有按图导出需求时给图块加稳定 target，UI 增加图列表选择 | 否 |
 | D106 | Ghostscript 渲染 CJK TrueType 子集时字形错位 | Firefox/pdf.js 与 Poppler（`pdftoppm`/`pdftotext`）渲染正确，`gs` 会把正文 CJK 换成别的字形（标题粗体正常）。用整字体替换子集、加 `cmap`/`name`/`post`、写显式 `CIDToGIDMap` 均未改变结果，倾向是 Ghostscript 对保留 GID 空洞的 CIDFontType2 子集的解释差异 | 用 Ghostscript 打印或某些基于 gs 的查看器会看到错字 | 需要时改为紧凑 CID + 重排 GID 的子集格式，并加 gs 渲染回归 | 否 |
 
 ## 3. 非目标（不是债务）
@@ -173,4 +174,4 @@
 | 遗留清账 | **已完成（ADR-0064–0067）**：关闭 D12、D70；D24/D69/D81 补齐（Word 样式与图片、HTML `colgroup`、索引页码区间） |
 | Web Studio | **已完成（ADR-0093/0094）**：`soma-studio-core/-ui/-` 三个 crate、S1–S10、字体探针、SSE 重载、CSP；关闭 D95，新增 D101–D105 |
 | 流程图 | **已完成（ADR-0102）**：`Block::Diagram`、Mermaid/DOT frontend、确定性分层布局、三种渲染器零改动、TikZ 导出；新增 D107 |
-| 未排期 | D01、D32、D51、D60、D61、D62、D63、D65、D66、D67、D97、D98、D99、D100、D101–D107、N3–N6 |
+| 未排期 | D01、D32、D51、D60、D61、D62、D63、D65、D66、D67、D97、D98、D99、D100、D101–D108、N3–N6 |
