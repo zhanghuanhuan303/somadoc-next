@@ -106,9 +106,10 @@ fn inline_code_breaks_at_its_own_spaces() {
     assert!(code.iter().all(|atom| atom.kind == AtomKind::Other));
     // The space stays at the tail of the piece before it, so the pieces
     // concatenate back to the exact source text.
+    let texts: Vec<&str> = code.iter().map(|atom| atom.text.as_str()).collect();
+    assert_eq!(texts, ["let ", "x ", "= ", "1;"]);
     let joined: String = code.iter().map(|atom| atom.text.as_str()).collect();
     assert_eq!(joined, "let x = 1;");
-    assert!(code.iter().all(|atom| !atom.text.starts_with(' ')));
     // A break between two code pieces is allowed but priced.
     let first = paragraph
         .atoms

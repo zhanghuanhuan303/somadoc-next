@@ -4325,29 +4325,51 @@ impl Builder<'_> {
         style_id: StyleId,
     ) -> Result<Option<FlowItem>, LayoutError> {
         let computed = self.computed(style_id);
-        let options = soma_diagram::Options {
-            label_size: computed.font_size,
-            line_gap: computed.line_height,
-            line_width: Width::from_em_frac(1, 25),
-            max_label_width: computed.font_size.scale(16, 1),
-        };
-        let mut text = DiagramText::new(&computed, self.metrics, style_id);
-        let Ok(layout) = soma_diagram::layout(dialect, source, &options, &mut text) else {
-            return self.code_item(node, Some(dialect.source_language()), source, style_id);
-        };
         let available = self.content_width;
-        let scale = if layout.tikz.width.0 > available.0 && layout.tikz.width.0 > 0 {
-            (available.0 as i64 * 1000 / layout.tikz.width.0 as i64) as i32
-        } else {
-            1000
+        // A wide flowchart laid out with a 16 em label cap can need a 60%
+        // page scale, which leaves 6 pt labels. Wrapping the labels narrower
+        // makes the nodes narrower and the whole diagram fit at a larger
+        // scale. Try a few caps and keep the one with the largest final scale
+        // (the largest label after scaling), subject to the page height. Ties
+        // keep the earlier, less-wrapped layout.
+        let mut best: Option<(soma_diagram::DiagramLayout, i32)> = None;
+        for max_em in [16, 12, 10, 8] {
+            let options = soma_diagram::Options {
+                label_size: computed.font_size,
+                line_gap: computed.line_height,
+                line_width: Width::from_em_frac(1, 25),
+                max_label_width: computed.font_size.scale(max_em, 1),
+            };
+            let mut text = DiagramText::new(&computed, self.metrics, style_id);
+            let Ok(layout) = soma_diagram::layout(dialect, source, &options, &mut text) else {
+                return self.code_item(node, Some(dialect.source_language()), source, style_id);
+            };
+            if layout.tikz.width.0 <= 0 || layout.tikz.height.0 <= 0 {
+                continue;
+            }
+            let scale = if layout.tikz.width.0 > available.0 {
+                (available.0 as i64 * 1000 / layout.tikz.width.0 as i64) as i32
+            } else {
+                1000
+            };
+            if scale < 600 {
+                continue;
+            }
+            let height = layout.tikz.height.scale(scale, 1000);
+            if height.0 > self.page_height.0 {
+                continue;
+            }
+            if best
+                .as_ref()
+                .is_none_or(|(_, best_scale)| scale > *best_scale)
+            {
+                best = Some((layout, scale));
+            }
+        }
+        let Some((layout, scale)) = best else {
+            return self.code_item(node, Some(dialect.source_language()), source, style_id);
         };
-        if scale < 600 || layout.tikz.width.0 <= 0 || layout.tikz.height.0 <= 0 {
-            return self.code_item(node, Some(dialect.source_language()), source, style_id);
-        }
         let layout = soma_diagram::scale(&layout, scale);
-        if layout.tikz.height.0 > self.page_height.0 {
-            return self.code_item(node, Some(dialect.source_language()), source, style_id);
-        }
         let height = layout.tikz.height;
         let x = Width((available.0 - layout.tikz.width.0).max(0) / 2);
         Ok(Some(FlowItem {

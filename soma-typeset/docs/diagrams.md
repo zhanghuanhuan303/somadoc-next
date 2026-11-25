@@ -59,9 +59,12 @@ asymmetric, ellipse.
 - orthogonal routing; back edges use an outer channel; self-loops are routed
   after layering; parallel edges share ports;
 - CJK labels use the document's own metrics and punctuation rules; `<br/>`
-  forces a line;
+  forces a line; a label may also wrap after `/` or `-` (`CoreAudio/AAudio/…`);
 - a wide diagram is scaled down (never up); below 60% of the measure, or taller
   than the page content box, it falls back to source;
+- the label cap is fitted: the diagram is laid out with 16, 12, 10 and 8 em
+  label widths and the candidate with the largest final scale wins, so a wide
+  flowchart wraps its node text instead of shrinking the labels to 60%;
 - hard limits: 2000 nodes, 8000 edges, 200 subgraphs, 256 KiB source.
 
 ## TikZ export

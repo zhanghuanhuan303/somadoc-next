@@ -217,7 +217,15 @@ impl Face {
     /// range whose advances agree, not a promise that every codepoint in the
     /// range exists (extension B is sparsely covered even in a large face).
     /// Version 1 and 2 blobs fall back to blocks and can over-report.
+    ///
+    /// The space is not stored in the character table: every face records its
+    /// advance in [`Self::space`] instead, so it is covered by definition.
+    /// Without this, a code atom with a trailing space would look unsupported
+    /// and the layout would switch to a rescue face (ADR-0113).
     pub fn has(&self, codepoint: u32) -> bool {
+        if codepoint == u32::from(b' ') {
+            return true;
+        }
         if !self.glyph_ink.is_empty() {
             return self
                 .glyph_ink
@@ -242,9 +250,18 @@ impl Face {
     }
 
     /// Advance of one codepoint, in 1/4096 em.
+    ///
+    /// The space is the face's own `space` width, not the face-wide default:
+    /// the generator records it in the face header. A run that contains a
+    /// space (`"sample "` in inline code) must measure the space it draws.
     pub fn advance_at(&self, codepoint: u32) -> i32 {
-        self.advance_recorded(codepoint)
-            .unwrap_or(self.default_advance)
+        if let Some(value) = self.advance_recorded(codepoint) {
+            return value;
+        }
+        if codepoint == u32::from(b' ') {
+            return self.space;
+        }
+        self.default_advance
     }
 
     /// Advance of one codepoint when the table records it explicitly (an
@@ -859,6 +876,11 @@ mod tests {
         assert_eq!(face.ink(0x3002), Some((128, 3072)));
         assert_eq!(face.ink_right(0xFF0C), Some(2900));
         assert_eq!(face.ink(0x4E2D), None, "Han characters carry no ink entry");
+        // The space lives in the face header, not in the character table; a run
+        // that contains one must measure the face's own space (ADR-0113).
+        assert!(face.has(' ' as u32));
+        assert_eq!(face.advance_at(' ' as u32), UNIT / 4);
+        assert_eq!(face.advance("a b"), UNIT + UNIT / 4 + UNIT);
     }
 
     #[test]

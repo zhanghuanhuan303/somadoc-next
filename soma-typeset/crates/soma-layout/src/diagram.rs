@@ -114,6 +114,19 @@ fn cells(text: &str) -> Vec<Cell<'_>> {
             pending_space = false;
             continue;
         }
+        // A path or hyphen separator stays with the token before it, so a
+        // narrow label may wrap after `CoreAudio/` without starting a line
+        // with a separator. A diagram label has no code span to carry this.
+        if ch == '/' || ch == '-' {
+            if start.is_none() {
+                start = Some(index);
+                token_space = pending_space;
+                pending_space = false;
+            }
+            let end = index + ch.len_utf8();
+            push_cell(text, &mut start, end, &mut token_space, &mut out);
+            continue;
+        }
         if start.is_none() {
             start = Some(index);
             token_space = pending_space;

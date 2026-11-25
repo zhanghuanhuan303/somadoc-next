@@ -530,6 +530,34 @@ impl Used {
 }
 
 impl PdfFonts<'_> {
+    /// The role that draws `text` without a `.notdef` box.
+    ///
+    /// The role selected by the style is tried first. When its face lacks a
+    /// character (Plex Sans SC has `±` but no `µ`, for example), the rescue
+    /// face, the math face and finally the body face are tried in that order.
+    /// Every candidate must cover the whole atom, so an ASCII run never
+    /// switches to a symbol face for one odd character (ADR-0113).
+    fn role_for_text(&self, style: &ComputedStyle, text: &str, fallback: bool) -> Role {
+        let primary = self.role_for(style, fallback);
+        if covers(self.font(primary), text) {
+            return primary;
+        }
+        if let Some(font) = self.fallback {
+            if covers(font, text) {
+                return Role::Fallback;
+            }
+        }
+        if let Some(font) = self.math {
+            if covers(font, text) {
+                return Role::Math;
+            }
+        }
+        if covers(self.regular, text) {
+            return Role::Regular;
+        }
+        primary
+    }
+
     fn font(&self, role: Role) -> &PdfFont {
         match role {
             Role::Bold => self.bold.unwrap_or(self.regular),
@@ -615,7 +643,11 @@ fn collect_blocks(
                     .style(style_id)
                     .cloned()
                     .unwrap_or_else(ComputedStyle::base);
-                let role = fonts.role_for(&style, text.uses_fallback(block.node, atom.atom));
+                let role = fonts.role_for_text(
+                    &style,
+                    text.atom_text(block.node, atom.atom),
+                    text.uses_fallback(block.node, atom.atom),
+                );
                 for character in text.atom_text(block.node, atom.atom).chars() {
                     used.add(role, fonts.font(role), character);
                 }
@@ -637,7 +669,8 @@ fn collect_blocks(
                         .style(style_id)
                         .cloned()
                         .unwrap_or_else(ComputedStyle::base);
-                    let role = fonts.role_for(&style, text.uses_fallback(block.node, last.atom));
+                    let role =
+                        fonts.role_for_text(&style, "-", text.uses_fallback(block.node, last.atom));
                     used.add(role, fonts.font(role), '-');
                 }
             }
@@ -646,6 +679,15 @@ fn collect_blocks(
             collect_math(math, fonts, used, block_role);
         }
     }
+}
+
+/// True when `font` has a real glyph for every character in `text`. The
+/// placeholder codepoints of inline objects and footnote marks are not drawn
+/// from the text face and are ignored.
+fn covers(font: &PdfFont, text: &str) -> bool {
+    text.chars()
+        .filter(|character| *character != '\u{fffc}' && *character != FOOTNOTE_MARKER)
+        .all(|character| font.glyph(character as u32) != 0)
 }
 
 /// The face that draws `character` inside a formula: the math face when it has
@@ -1475,7 +1517,11 @@ fn paint_block(
                 .style(style_id)
                 .cloned()
                 .unwrap_or_else(|| style.clone());
-            let role = fonts.role_for(&atom_style, text.uses_fallback(block.node, atom.atom));
+            let role = fonts.role_for_text(
+                &atom_style,
+                text_value,
+                text.uses_fallback(block.node, atom.atom),
+            );
             let font = fonts.font(role);
             // A footnote reference is a superscript: smaller and raised.
             let full = painter.scale.size(&atom_style);
@@ -1622,7 +1668,11 @@ fn paint_block(
                     .style(style_id)
                     .cloned()
                     .unwrap_or_else(|| style.clone());
-                let role = fonts.role_for(&last_style, text.uses_fallback(block.node, last.atom));
+                let role = fonts.role_for_text(
+                    &last_style,
+                    "-",
+                    text.uses_fallback(block.node, last.atom),
+                );
                 let font = fonts.font(role);
                 let glyph = font.glyph('-' as u32);
                 painter.set_fill(last_style.color.unwrap_or(0));

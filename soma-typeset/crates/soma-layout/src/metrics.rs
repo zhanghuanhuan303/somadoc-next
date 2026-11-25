@@ -161,9 +161,10 @@ impl<'a> StyledMetrics<'a> {
     }
 
     /// The face that draws `text`: the style's own face when it has every
-    /// glyph, otherwise the first rescue face that does. `None` when even the
-    /// rescue faces cannot draw it, and the caller falls back to the style face
-    /// (which will render `.notdef`, but the widths stay sane).
+    /// glyph, otherwise the first rescue face that does, then the math face
+    /// (which carries most symbols a text face omits, such as the micro sign).
+    /// `None` when nothing can draw it, and the caller falls back to the style
+    /// face (which will render `.notdef`, but the widths stay sane).
     fn face_for(&self, text: &str, computed: &ComputedStyle) -> Option<&soma_metrics::Face> {
         let primary = self.face_of(computed)?;
         if primary.covers(text) {
@@ -174,6 +175,7 @@ impl<'a> StyledMetrics<'a> {
             .iter()
             .filter(|face| face.family == soma_metrics::FAMILY_FALLBACK)
             .find(|face| face.covers(text))
+            .or_else(|| self.table.math_face().filter(|face| face.covers(text)))
             // No rescue face either: keep the style's face so widths stay
             // sane. The glyph will render as .notdef, which is visible.
             .or(Some(primary))
