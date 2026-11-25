@@ -121,14 +121,19 @@ pub fn parse_latex_with_meta(source: &str, mut meta: DocumentMeta) -> Document {
             }
         }
     }
-    // A colophon is cover data, not body content.
+    // A colophon is cover data, not body content. A `\\` in its group is a
+    // deliberate line break; the layout turns each line into a paragraph.
     if let Some(colophon) = preamble_group(&expanded, "colophon") {
-        let text = colophon.trim();
+        let text = colophon.replace("\\\\", "\n");
+        let text = text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<alloc::vec::Vec<_>>()
+            .join("\n");
         if !text.is_empty() {
             let cover = meta.cover.get_or_insert_with(CoverData::new);
-            cover
-                .fields
-                .push(MetaField::new("colophon", String::from(text)));
+            cover.fields.push(MetaField::new("colophon", text));
         }
     }
 

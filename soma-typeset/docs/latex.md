@@ -85,7 +85,8 @@ let document = parse_latex(r"\section{标题}
 - 列表、引用、verbatim；
 - tabular 的表头与网格，并通过 `validate`；
 - 元数据（标题/作者/日期）；导言区的 `\subtitle{...}` 进封面，`\language{...}`
-  进元数据并写入 PDF `/Lang`，`\colophon{...}` 进封面字段。
+  进元数据并写入 PDF `/Lang`，`\colophon{...}` 进封面字段；`\\` 在 colophon
+  内表示换行。
 - 未知命令保留参数；
 - 畸形输入不 panic；
 - canonical 确定性；

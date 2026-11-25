@@ -128,6 +128,7 @@ only).
 | [0107](0107-markdown-section-and-footnote.md) | Markdown delegates block section commands and lifts inline `\footnote` into real definitions; `\index` inside a note is collected | Accepted; closes the footnote part of D109 |
 | [0108](0108-math-font-commands-and-details.md) | Font-selection math commands are transparent, matrices get a half-em gutter, `<details>/<summary>` are semantic blocks | Accepted |
 | [0109](0109-svg-proof.md) | The Studio proof is SVG rendered from `PagedLayout`; PDF stays download-only | Accepted; implements `docs/proposal-svg-proof.md` |
+| [0110](0110-colophon-block.md) | The colophon is a ruled multi-line block; `\colophon{a\\b}` splits lines | Accepted |
 
 ## Rules
 

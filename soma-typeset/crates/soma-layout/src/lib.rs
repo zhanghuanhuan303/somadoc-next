@@ -3568,7 +3568,6 @@ impl Builder<'_> {
             (styles.subtitle, subtitle),
             (styles.author, authors),
             (styles.date, date),
-            (styles.colophon, colophon),
         ] {
             let Some(text) = text else { continue };
             if text.trim().is_empty() {
@@ -3587,6 +3586,59 @@ impl Builder<'_> {
             }
             y = y + item.height;
             y = y + item.after.width;
+        }
+
+        // The colophon is its own small block: a hairline, then one line per
+        // metadata role. Keeping the project/version, the work and the
+        // year/licence on separate lines avoids the uneven CJK/Latin spacing
+        // of a single `a · 中文 · b · c` run.
+        if let Some(colophon) = colophon {
+            let rule_style = styles.colophon_rule;
+            let rule = self.computed(rule_style);
+            let rule_width = Width(self.content_width.0 * 2 / 5);
+            let rule_height = Width::from_em_frac(1, 32);
+            y = y + rule.space_before;
+            let node = self.generated_id();
+            blocks.push(PlacedBlock {
+                node,
+                kind: BoxKind::Rule,
+                style: rule_style,
+                x: Width((self.content_width.0 - rule_width.0).max(0) / 2),
+                y,
+                width: rule_width,
+                height: rule_height,
+                lines: Vec::new(),
+                marks: Vec::new(),
+                line_offset: 0,
+                lines_total: 0,
+                stage: FallbackStage::Normal,
+                math: None,
+                inline_math: Vec::new(),
+                ruby: Vec::new(),
+            });
+            y = y + rule_height + rule.space_after;
+
+            for line in colophon.lines() {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                let node = self.generated_id();
+                let inline =
+                    Inline::Text(soma_doc::Text::new(soma_doc::NodeMeta::synthesized(), line));
+                let Some(item) =
+                    self.paragraph_item(node, BoxKind::Paragraph, &[inline], styles.colophon)?
+                else {
+                    continue;
+                };
+                // The rule already owns the block's top spacing; every
+                // colophon line sits on the same baseline grid.
+                for mut block in item.blocks {
+                    block.y = y;
+                    blocks.push(block);
+                }
+                y = y + item.height;
+            }
         }
 
         if blocks.is_empty() {

@@ -79,6 +79,7 @@ pub const ELEMENTS: &[&str] = &[
     "coverAuthor",
     "coverDate",
     "coverColophon",
+    "coverColophonRule",
 ];
 
 /// How a figure is sized and placed in the measure.

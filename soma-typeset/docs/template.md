@@ -179,8 +179,10 @@ Markdown 竖线表格的分隔行里，破折号越多那一列越宽；全列�
 标题的分页，其余 `page-break-before` 不变。生成样式 `tocChapter` / `tocSection` /
 `tocListTitle` 分别控制目录章条、节条和图表目录标题；未定义时分别继承
 `toc` / `tocTitle`。`runningHead` / `folio` 控制页眉页脚，未定义时继承正文，
-页眉文字只取一级标题。封面第五行 `coverColophon` 读取 `cover.fields` 里键为
-`colophon` 的字段（LaTeX 写作 `\colophon{...}`）。
+页眉文字只取一级标题。封面 colophon 读取 `cover.fields` 里键为
+`colophon` 的字段（LaTeX 写作 `\colophon{...}`，`\\` 分行）。它是一个块：
+`coverColophonRule` 画一条 40% 版心的细分隔线，`coverColophon` 控制每行文字；
+没有换行时仍是一行，只是多了上面的细线。
 
 图宽（`figure:`）：模板统一控制，DocIR 仍只带路径与本征尺寸；`natural` 按
 96 dpi 把像素折算成物理宽并封顶版心。

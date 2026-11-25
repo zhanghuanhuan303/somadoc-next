@@ -329,10 +329,19 @@ styles:
       element: coverColophon
     declarations:
       font-size: 8pt
+      line-height: 1.5
       color: "#666666"
-      letter-spacing: 0.02em
+      letter-spacing: 0.04em
       align: center
-      space-before: 47mm
+      space-before: 0
+
+  # The hairline above the colophon: a quiet 40% rule, not a full frame.
+  - selector:
+      element: coverColophonRule
+    declarations:
+      color: "#b3b3b3"
+      space-before: 34mm
+      space-after: 1em
 
   # Page furniture has a fixed, quiet style: it must not inherit a heading's
   # weight or size.

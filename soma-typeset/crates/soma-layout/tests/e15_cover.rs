@@ -126,6 +126,42 @@ fn a_cover_page_uses_the_cover_metadata() {
 }
 
 #[test]
+fn a_multiline_colophon_gets_a_rule_and_separate_lines() {
+    let mut meta = full_meta();
+    if let Some(cover) = meta.cover.as_mut() {
+        cover.fields.clear();
+        cover.fields.push(MetaField::new(
+            "colophon",
+            "soma-typeset 0.1.0\n全能力排样\n2026 · Apache-2.0",
+        ));
+    }
+    let doc = document(meta);
+    let layout = build(&doc, TEMPLATE);
+    let page = &layout.pages[0];
+    let rule = page
+        .blocks
+        .iter()
+        .find(|block| block.kind == BoxKind::Rule)
+        .expect("colophon rule");
+    assert_eq!(rule.width.0, layout.page.content_width().0 * 2 / 5);
+    assert_eq!(rule.x.0, (layout.page.content_width().0 - rule.width.0) / 2);
+
+    let text = text_of(&layout, 0);
+    let compact: String = text.chars().filter(|ch| !ch.is_whitespace()).collect();
+    assert!(compact.contains("soma-typeset0.1.0"), "{text}");
+    assert!(compact.contains("全能力排样"), "{text}");
+    assert!(compact.contains("2026·Apache-2.0"), "{text}");
+    assert!(
+        page.blocks
+            .iter()
+            .filter(|block| block.kind == BoxKind::Paragraph)
+            .count()
+            >= 3,
+        "cover lines are separate paragraphs"
+    );
+}
+
+#[test]
 fn the_cover_uses_its_master() {
     let doc = document(full_meta());
     let layout = build(&doc, TEMPLATE);

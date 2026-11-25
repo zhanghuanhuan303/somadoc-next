@@ -303,6 +303,7 @@ pub struct CoverStyles {
     pub author: StyleId,
     pub date: StyleId,
     pub colophon: StyleId,
+    pub colophon_rule: StyleId,
 }
 
 /// The resolved style layer for one document.
@@ -697,6 +698,7 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         author: intern_element(&mut resolver, "coverAuthor", &root)?,
         date: intern_element(&mut resolver, "coverDate", &root)?,
         colophon: intern_element(&mut resolver, "coverColophon", &root)?,
+        colophon_rule: intern_element(&mut resolver, "coverColophonRule", &root)?,
     };
     let toc_title_style = resolver.compute(
         "tocTitle",

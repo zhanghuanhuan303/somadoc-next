@@ -342,6 +342,23 @@ fn a_subtitle_reaches_the_cover_data() {
 }
 
 #[test]
+fn a_colophon_keeps_its_line_breaks() {
+    let source = r#"\colophon{甲乙\\丙丁}
+\begin{document}
+正文。
+\end{document}
+"#;
+    let doc = parse_latex(source);
+    let cover = doc.meta.cover.as_ref().expect("cover data");
+    let colophon = cover
+        .fields
+        .iter()
+        .find(|field| field.key == "colophon")
+        .expect("colophon field");
+    assert_eq!(colophon.value, "甲乙\n丙丁");
+}
+
+#[test]
 fn a_language_tag_reaches_the_metadata() {
     let source = r#"\language{zh-Hans}
 \title{书}
