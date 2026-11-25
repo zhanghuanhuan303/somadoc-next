@@ -152,6 +152,53 @@ fn a_repeated_header_appears_on_every_table_page() {
 }
 
 #[test]
+fn a_repeated_header_keeps_its_rules_on_continuation_pages() {
+    let source = TIGHT.replace(
+        "styles:",
+        "table:\n  outer-rule-width: 0.8pt\n  header-rule-width: 0.6pt\nstyles:",
+    );
+    let (header, _) = cell_with_id("表头", 1, 1);
+    let mut rows = vec![Row::new(NodeMeta::synthesized(), true, vec![header])];
+    for index in 0..40 {
+        rows.push(Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![cell(&format!("第{index}行"), 1, 1)],
+        ));
+    }
+    let table = Table::new(NodeMeta::synthesized(), columns(1), rows);
+    let doc = document(vec![Block::Table(table)]);
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+
+    assert!(layout.page_count() >= 3, "the table must span pages");
+    for page in layout.pages.iter().skip(1) {
+        let cells: Vec<_> = page
+            .blocks
+            .iter()
+            .filter(|block| block.kind == BoxKind::TableCell)
+            .collect();
+        let first = cells
+            .iter()
+            .min_by_key(|block| block.y.0)
+            .unwrap_or_else(|| panic!("page {} has no table cells", page.number));
+        assert_eq!(
+            block_text(&layout, first),
+            "表头",
+            "page {} must start with the repeated header",
+            page.number
+        );
+        assert!(
+            page.blocks
+                .iter()
+                .any(|block| block.kind == BoxKind::TableRule && block.y.0 == 0),
+            "page {} must redraw the table's top rule above the header",
+            page.number
+        );
+    }
+}
+
+#[test]
 fn a_width_hint_widens_its_column() {
     let narrow = Table::new(
         NodeMeta::synthesized(),

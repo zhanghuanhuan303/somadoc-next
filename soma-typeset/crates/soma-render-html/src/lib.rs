@@ -286,7 +286,9 @@ fn render_block(
             return;
         }
         BoxKind::Math if block.math.is_some() => {
-            render_math(html, style, block, left, top, block_frame);
+            // Display math is emitted directly into the page body, so its
+            // percentages resolve against `.page`, not against a block frame.
+            render_math(html, style, block, left, top, page);
             return;
         }
         _ => {}
@@ -414,6 +416,9 @@ fn render_block(
 /// positioning, so the span top is approximated as `baseline - 7/8 em` of the
 /// item size: the metric faces sit at about 0.875 em ascent, and the browser
 /// then places its own baseline inside that line box. SVG output is exact.
+///
+/// `frame` is the positioning context the emitted spans will land in: the page
+/// for display math, the block for inline math.
 fn render_math(
     html: &mut String,
     style: Option<&ComputedStyle>,
