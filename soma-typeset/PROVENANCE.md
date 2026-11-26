@@ -1,8 +1,8 @@
 # Provenance
 
-This workspace is a **clean-room** implementation of the project brief and the
-frozen architecture in [`docs/architecture-v2.md`](docs/architecture-v2.md).
-The brief is not distributed with this repository; the normative public
+This workspace is a **clean-room** implementation of the brief in
+[`../prd.md`](../prd.md) and the frozen architecture in
+[`docs/architecture-v2.md`](docs/architecture-v2.md). The normative public
 contract is the architecture and the ADRs. It does not include, copy, or
 reference code from a prior Typst project.
 
@@ -10,7 +10,7 @@ No path or git dependency points at a Typst-based project.
 
 ## Public references
 
-- The project brief (not distributed), and this workspace's own architecture/ADR documents.
+- The PRD ([`../prd.md`](../prd.md)) and this workspace's own architecture/ADR documents.
 - The published Knuth-Plass line-breaking algorithm description.
 - CLReq / GB/T and publisher practice for Chinese rules, cited by clause; tables
   are not copied wholesale.

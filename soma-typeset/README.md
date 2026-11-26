@@ -501,9 +501,8 @@ cargo check -p soma-core --target wasm32-unknown-unknown
 
 This is a clean-room implementation. See [`PROVENANCE.md`](PROVENANCE.md): no
 code from a prior Typst project is included or referenced; public references
-are the project brief (not distributed; the architecture is normative), the
-published Knuth-Plass algorithm, and cited CJK rules. No Typst-dependent code is
-included.
+are the project brief ([`../prd.md`](../prd.md)), the published Knuth-Plass
+algorithm, and cited CJK rules. No Typst-dependent code is included.
 
 ## Documentation
 

@@ -2,9 +2,11 @@
 
 ## Why
 
-Link the issue and, for behavior changes, the ADR.
+Link the issue and, for behavior changes, the ADR in `soma-typeset/docs/adr/`.
 
 ## Checks
+
+Run from `soma-typeset/`:
 
 - [ ] `cargo fmt --all -- --check`
 - [ ] `cargo test --workspace`
