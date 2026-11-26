@@ -132,8 +132,9 @@ font APIs. Clean-room provenance is in [`PROVENANCE.md`](PROVENANCE.md).
   development-only I/O host for files, fonts and native verification. The default
   workspace is a closable left-source/right-proof split; inspect and verify are
   sidebar views. It has Shadow-DOM pages, tabs, a command palette, a theme
-  system, a local-rules assistant, and a font-consistency probe. Both sides
-  call `soma-studio-core`; canonical hashes must match, which closes the
+  system, a local-rules assistant, and a font-consistency probe. The browser
+  and the development host call `soma-studio-core`; canonical hashes must
+  match, which closes the
   page-geometry half of D95. Typing rebuilds after a 220 ms debounce and IME
   composition defers the build. A missing `--font` falls back to a system CJK
   face via fontconfig, so PDF export still produces text. `scripts/studio.sh`

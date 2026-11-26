@@ -7,5 +7,7 @@ Please report vulnerabilities through GitHub's private security advisory form:
 
 <https://github.com/zhanghuanhuan303/somadoc-next/security/advisories/new>
 
-Do not open a public issue for a vulnerability. The Studio binds loopback by
-default and has no authentication; deploy it behind TLS and a reverse proxy.
+Do not open a public issue for a vulnerability. The public Studio is a static
+browser-local bundle with no `/api` (ADR-0121). The development host binds
+loopback by default and has no authentication; do not expose port 7070
+publicly.
