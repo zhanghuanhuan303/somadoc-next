@@ -10,8 +10,8 @@
   file picker or a window drop; text and DOCX bytes never leave the page.
 - Local verification shows the wasm build summary. The chrome no longer claims
   a runtime `wasm = native`; cross-target equality remains a CI gate.
-- `scripts/static.sh` serves `dist/` without Axum and locks S1/S3–S10/S12, zero
-  `/api` requests, and a 404 for `/api/health`.
+- `scripts/static.sh` serves `dist/` without Axum and locks S1/S3–S10/S12/S13,
+  zero `/api` requests, and a 404 for `/api/health`.
 
 ## 0.1.0 — 2026-11-26
 

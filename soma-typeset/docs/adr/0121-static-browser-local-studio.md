@@ -56,7 +56,7 @@ and the proof/PDF share the same bytes.
    `no-cache` for `index.html`. The hashed JS/CSS/wasm names come from
    ADR-0120.
 7. **A gate locks the shape.** `scripts/static.sh` serves `dist/` without
-   Axum, runs S1/S3–S10/S12 with `?local=1`, asserts that the session makes no
+   Axum, runs S1/S3–S10/S12/S13 with `?local=1`, asserts that the session makes no
    `/api` request, and asserts `/api/health` is 404.
 
 ## Consequences
