@@ -1,14 +1,16 @@
 # Provenance
 
-This workspace is a **clean-room** implementation of the PRD in `../prd.md` and
-the frozen architecture in [`docs/architecture-v2.md`](docs/architecture-v2.md).
-It does not include, copy, or reference code from a prior Typst project.
+This workspace is a **clean-room** implementation of the project brief and the
+frozen architecture in [`docs/architecture-v2.md`](docs/architecture-v2.md).
+The brief is not distributed with this repository; the normative public
+contract is the architecture and the ADRs. It does not include, copy, or
+reference code from a prior Typst project.
 
 No path or git dependency points at a Typst-based project.
 
 ## Public references
 
-- The PRD and this workspace's own architecture/ADR documents.
+- The project brief (not distributed), and this workspace's own architecture/ADR documents.
 - The published Knuth-Plass line-breaking algorithm description.
 - CLReq / GB/T and publisher practice for Chinese rules, cited by clause; tables
   are not copied wholesale.
@@ -44,6 +46,12 @@ Computer Modern Math as the math face. It exists so `--metrics` reproduces the
 same line breaks without the font installed; the PDF still needs the font file
 to embed outlines.
 
+`examples/templates/plex.smt` is the Plex reference template's table, measured
+from **IBM Plex Sans SC** (SIL OFL 1.1) and **New Computer Modern Math** (GUST
+Font License). It stores numbers only. It is committed because the
+browser-local Studio embeds it: a fresh clone can build the wasm UI without
+installing a font or regenerating a table.
+
 The CJK and LXGW families are under the SIL OFL 1.1; New Computer Modern Math
 is under the GUST Font License. Both permit redistribution of derived
 measurements. The licence text is available from each font distribution.
@@ -65,6 +73,16 @@ a machine with no TeX installation (ADR-0079).
 The face is used only after its advances agree with the metrics table; a custom
 table measured from another math face makes the CLI probe installed faces
 instead. Apart from this file, the repository does not redistribute font files.
+
+## Browser Studio fonts
+
+The hosted Studio and the browser-local mode do not commit font binaries. They
+generate GB2312 levels 1+2 subsets into `dist/fonts/v2/` from IBM Plex Sans SC,
+Noto Sans Mono and New Computer Modern Math with `scripts/local-assets.sh`.
+IBM Plex Sans SC and Noto Sans Mono are SIL OFL 1.1; New Computer Modern Math
+is GUST Font License. The generated files are deploy artifacts, not repository
+assets. The proof and PDF exporter share them; characters outside GB2312 are
+not covered (D119).
 
 ## Legacy quarantine
 

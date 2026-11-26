@@ -109,7 +109,7 @@ cd crates/soma-studio-ui && trunk build --release && cd ../..
 cargo run -p soma-studio -- \
   --input examples/book/full.tex \
   --template examples/templates/plex.yaml \
-  --metrics examples/templates/out/plex.smt \
+  --metrics examples/templates/plex.smt \
   --font ~/.fonts/IBMPlexSansSC_Regular.ttf \
   --font-bold ~/.fonts/IBMPlexSansSC_Bold.ttf \
   --font-sans ~/.fonts/IBMPlexSansSC_Regular.ttf \

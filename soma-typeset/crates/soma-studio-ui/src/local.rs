@@ -26,7 +26,7 @@ use crate::state::Studio;
 pub const SOURCE: &str = include_str!("../../../examples/book/welcome.md");
 pub const TEMPLATE: &str = include_str!("../../../examples/templates/plex.yaml");
 pub const ENGINE: &str = include_str!("../../../examples/templates/proposal.engine");
-pub const METRICS: &[u8] = include_bytes!("../../../examples/templates/out/plex.smt");
+pub const METRICS: &[u8] = include_bytes!("../../../examples/templates/plex.smt");
 pub const HYPHENATION: &str = include_str!("../../../examples/book/hyphen-en.pat");
 
 /// GB2312 levels 1+2 subsets (6 763 characters), shared by the proof and PDF.

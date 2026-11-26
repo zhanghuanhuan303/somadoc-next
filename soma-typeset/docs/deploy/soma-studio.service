@@ -1,3 +1,6 @@
+# Example unit for a hosted Soma Studio. Adjust User/WorkingDirectory and the
+# reverse proxy certificate for your host. Keep the bind loopback-only and let
+# Apache/nginx terminate TLS; see SECURITY.md.
 [Unit]
 Description=Soma Studio (all-Rust typesetting workbench)
 After=network-online.target
@@ -5,15 +8,19 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=admin
-Group=Users
-WorkingDirectory=/home/admin/soma-studio
-Environment=SOMA_HOST=0.0.0.0
+User=soma
+Group=soma
+WorkingDirectory=/opt/soma-studio
+Environment=SOMA_HOST=127.0.0.1
 Environment=SOMA_PORT=7070
-ExecStart=/home/admin/soma-studio/run.sh
+ExecStart=/opt/soma-studio/run.sh
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/soma-studio
 
 [Install]
 WantedBy=multi-user.target

@@ -16,3 +16,8 @@ examples/diagram/*.pdf
 examples/diagram/showcase-*.png
 examples/mixed/*.pdf
 examples/mixed/_*.png
+.probe/
+docs/tmp-review/
+examples/book/*.pdf
+.env
+.env.*

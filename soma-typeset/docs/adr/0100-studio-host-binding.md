@@ -11,7 +11,7 @@
 The Studio server was hard-wired to `127.0.0.1`. The bind address said so, and
 `check_origin` only accepted `http://127.0.0.1:<port>` and
 `http://localhost:<port>`. Running the binary on another machine and opening
-`http://10.0.0.6:7070/` loaded the UI, but every `/api` call returned 403
+`http://192.0.2.10:7070/` loaded the UI, but every `/api` call returned 403
 `cross-origin request refused`, so the page reported a failed build.
 
 Changing only the bind address would be worse than useless: the browser would
@@ -29,8 +29,8 @@ already running.
   - Loopback names are always allowed for the configured port:
     `http://127.0.0.1:<port>`, `http://localhost:<port>`,
     `http://[::1]:<port>`.
-  - With a concrete non-loopback host (e.g. `--host 10.0.0.6`) the origin
-    `http://10.0.0.6:<port>` is added. No other origin is accepted.
+  - With a concrete non-loopback host (e.g. `--host 192.0.2.10`) the origin
+    `http://192.0.2.10:<port>` is added. No other origin is accepted.
   - With a wildcard host (`0.0.0.0`, `::`) the origin must equal
     `http://<Host header>`: the request is accepted only if the browser
     addressed the same authority it claims as its origin. A mismatched
@@ -48,8 +48,8 @@ already running.
 
 ## Consequences
 
-- `soma-studio --host 10.0.0.6 --port 7070` serves the UI and its `/api` calls
-  from `http://10.0.0.6:7070/`, and `curl -H 'Origin: http://10.0.0.6:7070'`
+- `soma-studio --host 192.0.2.10 --port 7070` serves the UI and its `/api` calls
+  from `http://192.0.2.10:7070/`, and `curl -H 'Origin: http://192.0.2.10:7070'`
   succeeds where it previously returned 403.
 - `origin_allowed` becomes a pure function and gains unit tests: loopback
   stays local, a concrete host adds exactly itself, a wildcard bind follows the

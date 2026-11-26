@@ -1260,10 +1260,10 @@ mod tests {
             &[]
         ));
         assert!(!origin_allowed(
-            "http://10.0.0.6:7070",
+            "http://192.0.2.10:7070",
             "127.0.0.1",
             7070,
-            Some("10.0.0.6:7070"),
+            Some("192.0.2.10:7070"),
             &[]
         ));
         assert!(!origin_allowed(
@@ -1278,29 +1278,29 @@ mod tests {
     #[test]
     fn origin_allowed_adds_a_concrete_lan_host() {
         assert!(origin_allowed(
-            "http://10.0.0.6:7070",
-            "10.0.0.6",
+            "http://192.0.2.10:7070",
+            "192.0.2.10",
             7070,
             None,
             &[]
         ));
         assert!(origin_allowed(
             "http://127.0.0.1:7070",
-            "10.0.0.6",
+            "192.0.2.10",
             7070,
             None,
             &[]
         ));
         assert!(!origin_allowed(
-            "http://10.0.0.7:7070",
-            "10.0.0.6",
+            "http://192.0.2.11:7070",
+            "192.0.2.10",
             7070,
-            Some("10.0.0.7:7070"),
+            Some("192.0.2.11:7070"),
             &[]
         ));
         assert!(!origin_allowed(
             "http://evil.example:7070",
-            "10.0.0.6",
+            "192.0.2.10",
             7070,
             None,
             &[]
@@ -1310,21 +1310,21 @@ mod tests {
     #[test]
     fn origin_allowed_wildcard_follows_the_request_host() {
         assert!(origin_allowed(
-            "http://10.0.0.6:7070",
+            "http://192.0.2.10:7070",
             "0.0.0.0",
             7070,
-            Some("10.0.0.6:7070"),
+            Some("192.0.2.10:7070"),
             &[]
         ));
         assert!(!origin_allowed(
             "http://evil.example:7070",
             "0.0.0.0",
             7070,
-            Some("10.0.0.6:7070"),
+            Some("192.0.2.10:7070"),
             &[]
         ));
         assert!(!origin_allowed(
-            "http://10.0.0.6:7070",
+            "http://192.0.2.10:7070",
             "0.0.0.0",
             7070,
             None,
@@ -1376,7 +1376,7 @@ mod tests {
     fn origin_allowed_brackets_ipv6_hosts() {
         assert_eq!(authority("::1", 7070), "[::1]:7070");
         assert_eq!(authority("[::1]", 7070), "[::1]:7070");
-        assert_eq!(authority("10.0.0.6", 7070), "10.0.0.6:7070");
+        assert_eq!(authority("192.0.2.10", 7070), "192.0.2.10:7070");
         assert!(origin_allowed("http://[::1]:7070", "::1", 7070, None, &[]));
         assert!(origin_allowed(
             "http://[fd00::6]:7070",
@@ -1394,10 +1394,10 @@ mod tests {
             String::from("--input"),
             String::from(input),
             String::from("--host"),
-            String::from("10.0.0.6"),
+            String::from("192.0.2.10"),
         ];
         let (options, _) = parse_args(args).expect("args should parse");
-        assert_eq!(options.host, "10.0.0.6");
+        assert_eq!(options.host, "192.0.2.10");
         assert_eq!(options.port, 7070);
 
         let args = vec![

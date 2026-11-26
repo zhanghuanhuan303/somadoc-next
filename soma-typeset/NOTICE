@@ -6,3 +6,28 @@ This product includes code adapted from somadoc-engine
 Copyright 2026 zhanghuanhuan303.
 
 Licensed under the Apache License, Version 2.0. See the LICENSE file for details.
+
+Third-party assets
+------------------
+
+New Computer Modern Math (`crates/soma-cli/assets/NewCMMath-Regular.otf`) is
+distributed under the GUST Font License. The licence text is at
+`crates/soma-cli/assets/GUST-FONT-LICENSE.txt`. This is the only font binary in
+the repository.
+
+The metric tables (`crates/soma-metrics/data/noto-cjk.smt`,
+`examples/book/metrics-lxgw.smt` and `examples/templates/plex.smt`) contain
+integer measurements only, with no font outlines. They were generated from
+Noto Serif CJK SC, Noto Sans CJK SC, LXGW WenKai and IBM Plex Sans SC, all
+distributed under the SIL Open Font License 1.1, and New Computer Modern Math
+(GUST Font License). The measurement data is redistributed here under the
+project's Apache-2.0 licence with the source provenance recorded in
+`PROVENANCE.md`.
+
+The browser Studio's GB2312 subsets are generated at deploy time from IBM Plex
+Sans SC, Noto Sans Mono and New Computer Modern Math; they are not committed.
+The hosted demo loads them as static files.
+
+The evaluation corpus under `corpus/` is licensed under CC-BY-4.0; see
+`corpus/README.md`. Public-domain classical excerpts keep their public-domain
+status.

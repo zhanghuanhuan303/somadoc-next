@@ -1,11 +1,19 @@
 # soma-typeset
 
-**A runtime-independent typesetting core for Chinese-first, mixed CJK/Latin text.**
+[![CI](https://github.com/zhanghuanhuan303/somadoc-next/actions/workflows/ci.yml/badge.svg)](https://github.com/zhanghuanhuan303/somadoc-next/actions/workflows/ci.yml)
 
-This workspace contains the verified Phase 1 inline kernel (K1–K8) and the
-frozen architecture for the document/template/page phase. It is a clean-room
-implementation of the PRD in [`../prd.md`](../prd.md); it is deliberately
-independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
+**A Chinese-first, deterministic typesetting engine with a browser-local Studio.**
+
+Current snapshot (2026-11-26): **1,006 tests**, **120 ADRs**, **28 crates**. The
+engine parses Markdown, LaTeX, HTML and DOCX into DocIR, resolves a pure-YAML
+template, runs Knuth–Plass line breaking and vertical pagination in 1/4096 em
+integers, and renders PDF, HTML and SVG. The same engine is compiled into wasm:
+the hosted Studio at [somadoc.art](https://somadoc.art) edits one `welcome.md`
+and exports a PDF in the browser without an API round-trip. The authoritative
+map is [`docs/soma-atlas.html`](docs/soma-atlas.html).
+
+It is deliberately independent of Typst, TeX, DOM, the filesystem, and platform
+font APIs. Clean-room provenance is in [`PROVENANCE.md`](PROVENANCE.md).
 
 ## What works now
 
@@ -63,7 +71,7 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   (`docHash` for exact reproduction, `contentHash` for content identity). The
   crate has **zero dependencies** and no floats; Gate A enforces that.
 - A3–A6 pipeline: `soma-layout` builds paragraph boxes over the frozen kernel and
-  paginates with **line-level vertical K-P** by default (`soma.pages/10`):
+  paginates with **line-level vertical K-P** by default (`soma.pages/11`):
   paragraphs split across pages, widows/orphans are penalties, vertical glue can
   stretch, footnotes are charged to the marker's line, and page masters add a
   running header, footer, and folio. Figure boxes, table cell boxes,
@@ -294,8 +302,10 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
 
 - The human blind-test run (D01; Gate Q remains `Inconclusive`), incremental
   layout (N4), nested box trees (D51), page/chapter search windows (D66), and
-  the wider TikZ library surface (D99). Browser WASM packaging is delivered
-  (`web/`, ADR-0071). See [`docs/debt.md`](docs/debt.md).
+  the wider TikZ library surface (D99).
+- Browser fonts cover GB2312 levels 1+2 only (D119); the Studio builds on the
+  main thread (D104); there is no single-file offline export (D105).
+- See [`docs/debt.md`](docs/debt.md) for the full register.
 
 ## Limitations
 
@@ -369,6 +379,7 @@ scripts/
   wasm-hash.sh # native vs wasm32-wasip1 canonical bytes
   kp-verify.sh # K-P closure: gates + bench budget + length policy
   studio.sh    # S1–S11: browser self-test, CSP, PDF pages, SSE reloads, font probe
+  local-assets.sh # GB2312 v2 fonts + welcome.md for browser-local mode
 web/
   soma-kp.js       # ES module: compile / measure / break / render (no dependencies)
   soma-kp.wasm     # built slice (32.7 KB gzip, zero imports) — rebuilt by scripts/web.sh
@@ -378,13 +389,14 @@ web/
   parity.txt       # fixture shared by the Rust ABI test and the browser harness
 docs/
   soma-atlas.html     # single-file research atlas: capability map, gates, numbers, pitfalls
+  studio.md           # browser/Studio boundary, flags, deployment and security
   architecture-v2.md  # frozen architecture
   fonts.md            # how a body font is scored and a metrics table is built
   mixed-font.md       # coverage, rescue faces, and the fallback plan
   font-preset.md      # proposal: ink-aware line width, one profile per font
-  adr/                # accepted decisions (ADR-0001 … 0092)
+  adr/                # accepted decisions (ADR-0001 … 0120)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
-  debt.md             # global not-done register (D01–D100, N1–N6)
+  debt.md             # global not-done register (D01–D119, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
   proposal-web-kp.md  # Web v1: the K-P slice in wasm (measurement, ABI, budgets)
   e1-q-report.md      # E1–Q′ delivery report
@@ -434,11 +446,17 @@ scripts/demo.sh            # writes target/demo.html
 scripts/web.sh             # build the browser slice + W1-W6 gates
 scripts/web-bundle.sh      # -> target/soma-kp-standalone.html (open it, no server)
 
-# Soma Studio (all-Rust wasm UI + Axum boundary)
+# Browser-local Studio (no API round-trip)
 (cd crates/soma-studio-ui && trunk build --release)
-cargo run -p soma-studio -- --input examples/book/full.tex \
-  --template examples/templates/plex.yaml --metrics examples/templates/out/plex.smt \
-  --font ~/.fonts/IBMPlexSansSC_Regular.ttf --font-bold ~/.fonts/IBMPlexSansSC_Bold.ttf \
+SOMA_FONT_DIR=/path/to/fonts bash scripts/local-assets.sh
+# serve crates/soma-studio-ui/dist and open ?local=1&selftest=1
+# hosted demo: https://somadoc.art
+
+# Server mode (file tree + native verification)
+cargo run -p soma-studio -- --input examples/book/welcome.md \
+  --template examples/templates/plex.yaml --metrics examples/templates/plex.smt \
+  --font /path/to/IBMPlexSansSC_Regular.ttf --font-bold /path/to/IBMPlexSansSC_Bold.ttf \
+  --font-mono /path/to/NotoSansMono-Regular.ttf --font-math /path/to/NewCMMath-Regular.otf \
   --port 7070
 scripts/studio.sh          # S1–S11 (starts its own server)
 (cd . && python3 -m http.server 8000)   # or browse /web/demo.html
@@ -449,14 +467,20 @@ cargo run -p soma-eval --release -- inspect --kind mixed --atoms 500
 cargo run -p soma-eval --release -- blind preferences.csv
 ```
 
+`SOMA_FONT_DIR` must contain Plex regular/bold, Noto Sans Mono regular/bold and
+New Computer Modern Math. The fonts are not redistributed; the script generates
+GB2312 subsets and `dist/welcome.md` locally.
+
 ## Test
 
 ```sh
-scripts/gates.sh
-scripts/studio.sh   # S1-S11 for the web workbench (needs chromium)
+scripts/gates.sh    # core gates (format, clippy, tests, wasm, demo, boundaries, A/C/V-R/Q')
+scripts/studio.sh   # S1-S11 server mode (needs chromium)
+scripts/web.sh      # W1-W6 browser slice
+cargo test --workspace
 ```
 
-The gate runs format, clippy, 986 tests, a `wasm32-unknown-unknown` check for
+The gate runs format, clippy, **1,006 tests**, a `wasm32-unknown-unknown` check for
 `soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-highlight`, `soma-template`,
 `soma-layout`, `soma-tikz`, `soma-md`, `soma-render-html`, `soma-render-svg`, and
 `soma-render-pdf`, a
@@ -464,7 +488,9 @@ native/`wasm32-wasip1` canonical-byte comparison (DocIR + inline layout + pages)
 a demo smoke render, the `soma-core` dependency-boundary check, Gate A, Gate C,
 Gate V/R (SVG visual lock + cross-renderer atom parity), and Gate Q′ (effect
 scorecard). `scripts/kp-verify.sh` additionally runs the benchmark budget and
-the deterministic length policy. The individual commands are still available:
+the deterministic length policy. The browser-local S12 check (local PDF in wasm)
+is run by opening `?selftest=1` on a local mode page. The individual commands are
+still available:
 
 ```sh
 cargo test
@@ -475,9 +501,33 @@ cargo check -p soma-core --target wasm32-unknown-unknown
 
 This is a clean-room implementation. See [`PROVENANCE.md`](PROVENANCE.md): no
 code from a prior Typst project is included or referenced; public references
-are the PRD, the published Knuth-Plass algorithm, and cited CJK rules. No
-Typst-dependent code is included.
+are the project brief (not distributed; the architecture is normative), the
+published Knuth-Plass algorithm, and cited CJK rules. No Typst-dependent code is
+included.
+
+## Documentation
+
+[`docs/soma-atlas.html`](docs/soma-atlas.html) is the dated, single-file map;
+[`docs/README.md`](docs/README.md) indexes the normative contracts and the
+historical reports; [`REPO_LAYOUT.md`](REPO_LAYOUT.md) maps the tree and lists
+what is intentionally not committed.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). Behavior changes start with an ADR;
+determinism, clean-room provenance, and the gate baselines are not optional.
+
+## Security
+
+See [`SECURITY.md`](SECURITY.md). The Studio binds loopback by default and has
+no user authentication; deploy it behind TLS and a reverse proxy, with an
+explicit `--allow-origin` allowlist.
+
+## Code of conduct
+
+This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
 
 ## License
 
-Apache-2.0. See [`LICENSE`](LICENSE).
+Apache-2.0. See [`LICENSE`](LICENSE). The evaluation corpus is CC-BY-4.0; see
+[`corpus/README.md`](corpus/README.md).

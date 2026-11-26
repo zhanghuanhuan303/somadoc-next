@@ -52,6 +52,8 @@ if [ -z "$mono_bold" ] || [ ! -f "$mono_bold" ]; then
 fi
 
 input=${SOMA_INPUT:-examples/book/full.tex}
+# The Studio uses the committed `examples/templates/plex.smt`; this sample
+# regenerates its own ignored copy so running it does not dirty the tree.
 metrics="$out/plex.smt"
 
 # Register each face under both family slots: the reference maps \setmainfont,

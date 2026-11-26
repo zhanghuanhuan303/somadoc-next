@@ -35,7 +35,7 @@ PLEX_BOLD="${SOMA_PLEX_BOLD:-$HOME/.fonts/IBMPlexSansSC_Bold.ttf}"
 MONO_REGULAR="${SOMA_MONO_REGULAR:-/usr/share/fonts/noto/NotoSansMono-Regular.ttf}"
 MONO_BOLD="${SOMA_MONO_BOLD:-/usr/share/fonts/noto/NotoSansMono-Bold.ttf}"
 MATH_FACE="${SOMA_MATH_FACE:-/usr/share/texmf-dist/fonts/opentype/public/newcomputermodern/NewCMMath-Regular.otf}"
-METRICS="${SOMA_METRICS:-examples/templates/out/plex.smt}"
+METRICS="${SOMA_METRICS:-examples/templates/plex.smt}"
 
 cleanup() {
     [ -n "$CURL_PID" ] && kill "$CURL_PID" 2>/dev/null || true

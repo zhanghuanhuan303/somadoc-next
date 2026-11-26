@@ -164,7 +164,7 @@ are one answer.
 profile: cjk/monospaced/full-width/w400
 distance,path,face,profile
 0.0048,/usr/share/fonts/TTF/LXGWWenKai-Light.ttf,0,cjk/monospaced/full-width/w300
-0.0244,/home/badleric/.fonts/IBMPlexSansSC_Regular.ttf,0,cjk/monospaced/full-width/w400
+0.0244,/path/to/fonts/IBMPlexSansSC_Regular.ttf,0,cjk/monospaced/full-width/w400
 ```
 
 `script` is `cjk` / `cjk-partial` / `latin`, `width` is `monospaced` /

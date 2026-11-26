@@ -24,7 +24,7 @@ cd ../..
 cargo run -p soma-studio -- \
   --input examples/book/full.tex \
   --template examples/templates/plex.yaml \
-  --metrics examples/templates/out/plex.smt \
+  --metrics examples/templates/plex.smt \
   --font ~/.fonts/IBMPlexSansSC_Regular.ttf \
   --font-bold ~/.fonts/IBMPlexSansSC_Bold.ttf \
   --font-sans ~/.fonts/IBMPlexSansSC_Regular.ttf \
@@ -48,7 +48,7 @@ Options:
 | `--font`, `--font-bold`, `--font-sans`, `--font-sans-bold`, `--font-mono`, `--font-mono-bold`, `--font-math`, `--font-fallback` | Optional font files for PDF and for `@font-face` in the proof. `path#index` selects a TTC face. Math is bundled when omitted. When a body face is omitted, the server probes fontconfig (`fc-match`) for Noto Serif/Sans CJK SC and Noto Sans Mono; a face must cover `中` (or `A` for mono) to be accepted. Auto faces are referenced by family name in the proof and subset into the PDF, so a missing `--font` does not produce a blank export. |
 | `--no-auto-font` | Disable fontconfig discovery; only explicit font flags are used. |
 | `--dist` | UI build directory (default `crates/soma-studio-ui/dist`). |
-| `--host` | Bind address, default `127.0.0.1` (loopback only). Use the machine's LAN address, e.g. `--host 10.0.0.6`, to serve other devices; the `/api` Origin allowlist follows it. `0.0.0.0` binds every interface and accepts the authority the browser used — see **Security**. |
+| `--host` | Bind address, default `127.0.0.1` (loopback only). Use the machine's LAN address, e.g. `--host 192.0.2.10`, to serve other devices; the `/api` Origin allowlist follows it. `0.0.0.0` binds every interface and accepts the authority the browser used — see **Security**. |
 | `--port` | Default 7070. |
 | `--open` | Open the browser after binding. |
 | `--no-watch` | Disable the file watcher and SSE reloads. |
@@ -60,9 +60,9 @@ To serve another machine on the same network, bind a concrete LAN address and
 use the same URL in the browser:
 
 ```sh
-soma-studio --input … --host 10.0.0.6 --port 7070 \
+soma-studio --input … --host 192.0.2.10 --port 7070 \
   --dist /opt/soma-studio/dist
-# then open http://10.0.0.6:7070/
+# then open http://192.0.2.10:7070/
 ```
 
 `--host` defaults to `127.0.0.1`, so omitting it keeps the local-only
@@ -149,7 +149,7 @@ metrics file triggers a native rebuild:
 
 - The page is same-origin only. `/api` rejects cross-origin `Origin` and
   `Sec-Fetch-Site: cross-site` requests. Loopback origins are always accepted;
-  `--host 10.0.0.6` additionally accepts `http://10.0.0.6:<port>`, and a
+  `--host 192.0.2.10` additionally accepts `http://192.0.2.10:<port>`, and a
   wildcard bind accepts only the authority in the request's `Host` header.
 - **`--host` exposes read/write API routes.** There is no authentication: anyone
   who can reach the port can read and write files under the project root and

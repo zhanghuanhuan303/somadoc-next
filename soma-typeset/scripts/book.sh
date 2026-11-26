@@ -22,7 +22,7 @@ pdf_font=${SOMA_PDF_FONT:-}
 if [ -z "$pdf_font" ]; then
     for candidate in \
         /usr/share/fonts/misan/MiSans-Normal.ttf \
-        /home/badleric/.fonts/IBMPlexSansSC_Text.ttf \
+        "$HOME/.fonts/IBMPlexSansSC_Text.ttf" \
         /usr/share/fonts/TTF/LXGWWenKai-Regular.ttf; do
         if [ -f "$candidate" ]; then
             pdf_font=$candidate
