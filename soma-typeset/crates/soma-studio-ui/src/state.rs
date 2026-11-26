@@ -120,6 +120,9 @@ pub struct Toast {
     pub kind: &'static str,
 }
 
+/// Raw PDF faces fetched once for the first export, keyed by face name.
+pub type PdfFontCache = Arc<BTreeMap<String, Vec<u8>>>;
+
 #[derive(Clone, Copy)]
 pub struct Studio {
     pub project: RwSignal<Option<ProjectPayload>>,
@@ -166,7 +169,7 @@ pub struct Studio {
     /// for verification, PDF or TikZ.
     pub local: bool,
     /// Raw PDF faces, fetched once from `/fonts/` on the first export.
-    pub pdf_fonts: RwSignal<Option<Arc<BTreeMap<String, Vec<u8>>>>>,
+    pub pdf_fonts: RwSignal<Option<PdfFontCache>>,
 }
 
 impl Default for Studio {
