@@ -8,7 +8,7 @@
 //! (copied next to `dist/` at deploy time) and are fetched once when the first
 //! PDF export asks for them.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use gloo_net::http::Request;
@@ -21,48 +21,30 @@ use soma_studio_core::{
 
 use crate::state::Studio;
 
-/// The document the standalone build opens. It is small enough to embed and
-/// exercises the full template (headings, tables, figures, footnotes).
-pub const SOURCE: &str = include_str!("../../../examples/book/full.tex");
+/// The single document the standalone build opens. It is the user's entry
+/// point: replace the prose, keep editing, and the proof follows.
+pub const SOURCE: &str = include_str!("../../../examples/book/welcome.md");
 pub const TEMPLATE: &str = include_str!("../../../examples/templates/plex.yaml");
 pub const ENGINE: &str = include_str!("../../../examples/templates/proposal.engine");
 pub const METRICS: &[u8] = include_bytes!("../../../examples/templates/out/plex.smt");
 pub const HYPHENATION: &str = include_str!("../../../examples/book/hyphen-en.pat");
 
-const PDF_PLEX_REGULAR: &str = "/fonts/v1/IBMPlexSansSC_Regular.ttf";
-const PDF_PLEX_BOLD: &str = "/fonts/v1/IBMPlexSansSC_Bold.ttf";
-const PDF_MONO_REGULAR: &str = "/fonts/v1/NotoSansMono-Regular.ttf";
-const PDF_MONO_BOLD: &str = "/fonts/v1/NotoSansMono-Bold.ttf";
-const PDF_MATH: &str = "/fonts/v1/NewCMMath-Regular.otf";
+/// GB2312 levels 1+2 subsets (6 763 characters), shared by the proof and PDF.
+/// The same bytes are served to `@font-face`, so exporting a PDF does not
+/// download a second, larger font. Characters outside GB2312 render as empty
+/// boxes in the browser; the native CLI still has the full faces.
+const PLEX_REGULAR: &str = "/fonts/v2/IBMPlexSansSC_Regular.ttf";
+const PLEX_BOLD: &str = "/fonts/v2/IBMPlexSansSC_Bold.ttf";
+const MONO_REGULAR: &str = "/fonts/v2/NotoSansMono-Regular.ttf";
+const MONO_BOLD: &str = "/fonts/v2/NotoSansMono-Bold.ttf";
+const MATH: &str = "/fonts/v2/NewCMMath-Regular.otf";
 
-/// The proof only needs the glyphs this document (and the Studio chrome) uses.
-/// A full CJK face is 19 MB; the subset is under 0.5 MB and keeps the first
-/// paint local. PDF export still fetches the complete faces below.
-const DISPLAY_PLEX_REGULAR: &str = "/fonts/v1/subset/IBMPlexSansSC_Regular.woff2";
-const DISPLAY_PLEX_BOLD: &str = "/fonts/v1/subset/IBMPlexSansSC_Bold.woff2";
-const DISPLAY_MONO_REGULAR: &str = "/fonts/v1/subset/NotoSansMono-Regular.woff2";
-const DISPLAY_MONO_BOLD: &str = "/fonts/v1/subset/NotoSansMono-Bold.woff2";
-const DISPLAY_MATH: &str = "/fonts/v1/subset/NewCMMath-Regular.woff2";
-
-/// Unique faces fetched for PDF embedding. `serif`/`sans` and `fallback`
-/// share the Plex face; the PDF writer embeds each font once per role anyway.
-const PDF_FONTS: &[(&str, &str)] = &[
-    ("plex", PDF_PLEX_REGULAR),
-    ("plex-bold", PDF_PLEX_BOLD),
-    ("mono", PDF_MONO_REGULAR),
-    ("mono-bold", PDF_MONO_BOLD),
-    ("math", PDF_MATH),
-];
-
-/// PDF faces subsetted to the embedded document plus the template strings.
-/// They are used only when the current source is covered by the subset; an
-/// edited document outside that set falls back to the full faces above.
-const PDF_SUBSET_FONTS: &[(&str, &str)] = &[
-    ("plex", "/fonts/v1/pdf-subset/IBMPlexSansSC_Regular.ttf"),
-    ("plex-bold", "/fonts/v1/pdf-subset/IBMPlexSansSC_Bold.ttf"),
-    ("mono", "/fonts/v1/pdf-subset/NotoSansMono-Regular.ttf"),
-    ("mono-bold", "/fonts/v1/pdf-subset/NotoSansMono-Bold.ttf"),
-    ("math", "/fonts/v1/pdf-subset/NewCMMath-Regular.otf"),
+const FONTS: &[(&str, &str)] = &[
+    ("plex", PLEX_REGULAR),
+    ("plex-bold", PLEX_BOLD),
+    ("mono", MONO_REGULAR),
+    ("mono-bold", MONO_BOLD),
+    ("math", MATH),
 ];
 
 /// True on the public somadoc hosts unless the page explicitly asks for the
@@ -92,9 +74,9 @@ pub fn project() -> ProjectPayload {
         version: 1,
         engine_version: String::from(env!("CARGO_PKG_VERSION")),
         root: String::from("local"),
-        input: String::from("full.tex"),
-        input_relative: String::from("full.tex"),
-        format: SourceFormat::Latex,
+        input: String::from("welcome.md"),
+        input_relative: String::from("welcome.md"),
+        format: SourceFormat::Markdown,
         source_text: Some(SOURCE.to_string()),
         template_path: Some(String::from("examples/templates/plex.yaml")),
         template: TEMPLATE.to_string(),
@@ -112,19 +94,14 @@ pub fn project() -> ProjectPayload {
 
 fn fonts() -> Vec<FontInfo> {
     vec![
-        font(
-            "fallback",
-            "IBM Plex Sans SC",
-            DISPLAY_PLEX_REGULAR,
-            "normal",
-        ),
-        font("math", "NewComputerModernMath", DISPLAY_MATH, "normal"),
-        font("mono", "Noto Sans Mono", DISPLAY_MONO_REGULAR, "normal"),
-        font("mono-bold", "Noto Sans Mono", DISPLAY_MONO_BOLD, "bold"),
-        font("sans", "IBM Plex Sans SC", DISPLAY_PLEX_REGULAR, "normal"),
-        font("sans-bold", "IBM Plex Sans SC", DISPLAY_PLEX_BOLD, "bold"),
-        font("serif", "IBM Plex Sans SC", DISPLAY_PLEX_REGULAR, "normal"),
-        font("serif-bold", "IBM Plex Sans SC", DISPLAY_PLEX_BOLD, "bold"),
+        font("fallback", "IBM Plex Sans SC", PLEX_REGULAR, "normal"),
+        font("math", "NewComputerModernMath", MATH, "normal"),
+        font("mono", "Noto Sans Mono", MONO_REGULAR, "normal"),
+        font("mono-bold", "Noto Sans Mono", MONO_BOLD, "bold"),
+        font("sans", "IBM Plex Sans SC", PLEX_REGULAR, "normal"),
+        font("sans-bold", "IBM Plex Sans SC", PLEX_BOLD, "bold"),
+        font("serif", "IBM Plex Sans SC", PLEX_REGULAR, "normal"),
+        font("serif-bold", "IBM Plex Sans SC", PLEX_BOLD, "bold"),
     ]
 }
 
@@ -140,8 +117,8 @@ fn font(role: &str, family: &str, url: &str, weight: &str) -> FontInfo {
 
 pub fn tree() -> Vec<FileEntry> {
     vec![FileEntry {
-        path: String::from("full.tex"),
-        name: String::from("full.tex"),
+        path: String::from("welcome.md"),
+        name: String::from("welcome.md"),
         kind: String::from("file"),
         size: SOURCE.len() as u64,
     }]
@@ -175,7 +152,7 @@ async fn font_cache(studio: Studio) -> Result<Arc<BTreeMap<String, Vec<u8>>>, St
     if let Some(cache) = studio.pdf_fonts.get_untracked() {
         return Ok(cache);
     }
-    let cache = Arc::new(fetch_fonts(PDF_FONTS).await?);
+    let cache = Arc::new(fetch_fonts(FONTS).await?);
     studio.pdf_fonts.set(Some(cache.clone()));
     Ok(cache)
 }
@@ -188,34 +165,11 @@ async fn fetch_fonts(urls: &[(&str, &str)]) -> Result<BTreeMap<String, Vec<u8>>,
     Ok(map)
 }
 
-fn subset_covers(studio: Studio) -> bool {
-    let active = studio.active.get_untracked();
-    let Some(tab) = studio.tabs.with_untracked(|tabs| tabs.get(active).cloned()) else {
-        return true;
-    };
-    if tab.format == SourceFormat::Docx {
-        return false;
-    }
-    let coverage: BTreeSet<char> = SOURCE
-        .chars()
-        .chain(TEMPLATE.chars())
-        .chain(ENGINE.chars())
-        .collect();
-    studio
-        .source
-        .get_untracked()
-        .chars()
-        .all(|ch| coverage.contains(&ch))
-}
-
-/// Render the current build to PDF entirely in wasm. The caller downloads the
-/// bytes; nothing crosses the network except the cached font files.
+/// Render the current build to PDF entirely in wasm. The GB2312 faces are the
+/// same files the proof uses, so the browser usually serves them from cache and
+/// there is no coverage check or fallback download.
 pub async fn pdf(studio: Studio) -> Result<Vec<u8>, String> {
-    let cache = if subset_covers(studio) {
-        Arc::new(fetch_fonts(PDF_SUBSET_FONTS).await?)
-    } else {
-        font_cache(studio).await?
-    };
+    let cache = font_cache(studio).await?;
     let bytes = studio.build.with_untracked(|app| {
         let Some(app) = app.as_ref() else {
             return Err(String::from("还没有可导出的构建"));

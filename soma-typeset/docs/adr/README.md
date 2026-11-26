@@ -136,7 +136,8 @@ only).
 | [0115](0115-keep-identifiers-and-proposal-tails.md) | Separator breaks cost 3000 (intrusive 8000); a line may not start with `*`/`+`/`=`; `proposal-v1` charges a 4–5 character tail at twice the book rate and becomes the Studio default | Accepted; answers the keep-together and short-tail review findings |
 | [0116](0116-diagram-labels-use-the-text-face.md) | Diagram labels carry `MathFace::Text`, so the PDF draws them with the template's text face like the SVG proof | Accepted |
 | [0117](0117-reverse-proxy-origins.md) | `--allow-origin` names public authorities; `/api` accepts their `http` and `https` origins behind a TLS proxy, default stays loopback-only | Accepted |
-| [0118](0118-browser-local-studio.md) | The public host defaults to browser-local mode: embedded project, local verify/PDF/TikZ, subset WOFF2 proof fonts, full faces only on PDF export | Accepted |
+| [0118](0118-browser-local-studio.md) | The public host defaults to browser-local mode: embedded project, local verify/PDF/TikZ, subset WOFF2 proof fonts, full faces only on PDF export | Accepted; font strategy superseded by 0119 |
+| [0119](0119-gb2312-subsets-and-single-md.md) | `welcome.md` is the single online source; GB2312 1+2 subsets serve both proof and PDF, so export has no coverage check or full-font fallback | Accepted |
 
 ## Rules
 

@@ -1014,15 +1014,18 @@ async fn s10(document: &Document, studio: Studio) -> String {
 /// Local mode: the PDF must be written by wasm, not by Axum. Runs before S2
 /// closes every tab, so a build is still available.
 async fn s12(studio: Studio) -> String {
+    let started = js_sys::Date::now();
     match crate::local::pdf(studio).await {
         Ok(bytes) => {
             let ok = bytes.len() > 1024 && bytes.starts_with(b"%PDF-");
+            let elapsed = (js_sys::Date::now() - started).max(0.0) as u64;
             result(
                 "S12",
                 ok,
                 format!(
-                    "本地 PDF {} KB · {}",
+                    "本地 PDF {} KB · {} ms · {}",
                     bytes.len().div_ceil(1024),
+                    elapsed,
                     if ok { "%PDF" } else { "bad header" }
                 ),
             )

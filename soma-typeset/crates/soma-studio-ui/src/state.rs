@@ -646,8 +646,8 @@ pub fn open_file(studio: Studio, path: String) {
     };
     let name = file_name(&path);
     if studio.local {
-        if path != "full.tex" {
-            toast(studio, "本地模式只内置 full.tex", "warn");
+        if path != "welcome.md" {
+            toast(studio, "本地模式只内置 welcome.md", "warn");
             return;
         }
         let text = crate::local::SOURCE.to_string();
