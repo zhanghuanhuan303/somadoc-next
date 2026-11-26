@@ -10,6 +10,7 @@ use leptos::task::spawn_local;
 use soma_studio_core::{BuildRequest, NativeSummary, ProjectPayload, SourceFormat};
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
 
 use crate::probe::ProbeReport;
 use crate::{api, engine, engine::SourceInput};
@@ -104,6 +105,10 @@ pub struct DocTab {
     pub source: String,
     pub format: SourceFormat,
     pub dirty: bool,
+    /// Original bytes for a DOCX tab. Text tabs keep `None`; the source text
+    /// is the document. Holding the bytes here means switching back to a DOCX
+    /// tab never re-fetches anything from a server.
+    pub bytes: Option<Arc<Vec<u8>>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -247,6 +252,7 @@ pub fn apply_project(studio: Studio, project: ProjectPayload) {
         source: source.clone(),
         format: project.format,
         dirty: false,
+        bytes: None,
     };
     studio.tabs.set(vec![tab]);
     studio.active.set(0);
@@ -276,7 +282,13 @@ pub fn apply_project(studio: Studio, project: ProjectPayload) {
         }
         if project.format == SourceFormat::Docx {
             if let Ok(bytes) = api::source_bytes().await {
-                studio.docx_bytes.set(Some(bytes));
+                let bytes = Arc::new(bytes);
+                studio.docx_bytes.set(Some((*bytes).clone()));
+                studio.tabs.update(|tabs| {
+                    if let Some(tab) = tabs.get_mut(0) {
+                        tab.bytes = Some(bytes.clone());
+                    }
+                });
                 rebuild_now(studio);
             } else {
                 studio
@@ -309,6 +321,7 @@ pub fn apply_local_project(studio: Studio) {
         source: source.clone(),
         format: project.format,
         dirty: false,
+        bytes: None,
     };
     studio.tabs.set(vec![tab]);
     studio.active.set(0);
@@ -635,6 +648,116 @@ pub fn verify_now(studio: Studio) {
 
 /* --------------------------------------------------------------------- files */
 
+/// Open a local file picker. The bytes never leave the browser: text sources
+/// are decoded in wasm and DOCX is parsed by `soma-docx` in the same module.
+/// This is the only file-entry path in a static deployment.
+pub fn pick_file(studio: Studio) {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    let Ok(element) = document.create_element("input") else {
+        toast(studio, "无法创建文件选择器", "bad");
+        return;
+    };
+    let Ok(input) = element.dyn_into::<web_sys::HtmlInputElement>() else {
+        toast(studio, "无法创建文件选择器", "bad");
+        return;
+    };
+    input.set_type("file");
+    let _ = input.set_attribute("accept", ".md,.markdown,.html,.htm,.tex,.latex,.docx");
+    let _ = input.set_attribute("style", "display:none");
+    let Some(body) = document.body() else {
+        return;
+    };
+    if body.append_child(&input).is_err() {
+        return;
+    }
+
+    let fallback = input.clone();
+    let closure = Closure::once_into_js(move |event: web_sys::Event| {
+        let input = event
+            .target()
+            .and_then(|target| target.dyn_into::<web_sys::HtmlInputElement>().ok())
+            .unwrap_or_else(|| fallback.clone());
+        if let Some(parent) = input.parent_node() {
+            let _ = parent.remove_child(&input);
+        }
+        let Some(files) = input.files() else {
+            return;
+        };
+        let Some(file) = files.get(0) else {
+            return;
+        };
+        spawn_local(async move {
+            if let Err(error) = open_upload_file(studio, file).await {
+                toast(studio, error, "bad");
+            }
+        });
+    });
+    input.set_onchange(Some(closure.unchecked_ref()));
+    input.click();
+}
+
+/// Read one file into a tab. Text formats keep UTF-8 in `source`; DOCX keeps
+/// the original archive in `bytes` and is parsed on every rebuild.
+pub async fn open_upload_file(studio: Studio, file: web_sys::File) -> Result<(), String> {
+    let name = file.name();
+    let Some(format) = SourceFormat::from_path(&name) else {
+        return Err(format!("不支持的文件类型：{name}"));
+    };
+    let buffer = JsFuture::from(file.array_buffer())
+        .await
+        .map_err(|_| format!("读取 {name} 失败"))?;
+    let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+    let (source, bytes) = if format == SourceFormat::Docx {
+        (String::new(), Some(Arc::new(bytes)))
+    } else {
+        let text = String::from_utf8(bytes)
+            .map_err(|_| format!("{name} 不是 UTF-8 文本；DOCX 以外的二进制文件不打开"))?;
+        (text, None)
+    };
+
+    let existing = studio
+        .tabs
+        .with_untracked(|tabs| tabs.iter().position(|tab| tab.path == name));
+    let index = if let Some(index) = existing {
+        studio.tabs.update(|tabs| {
+            if let Some(tab) = tabs.get_mut(index) {
+                tab.source = source.clone();
+                tab.format = format;
+                tab.bytes = bytes.clone();
+                tab.dirty = false;
+            }
+        });
+        index
+    } else {
+        let index = studio.tabs.with_untracked(|tabs| tabs.len());
+        let id = studio
+            .tabs
+            .with_untracked(|tabs| tabs.iter().map(|tab| tab.id).max().unwrap_or(0) + 1);
+        studio.tabs.update(|tabs| {
+            tabs.push(DocTab {
+                id,
+                path: name.clone(),
+                title: name.clone(),
+                source: source.clone(),
+                format,
+                dirty: false,
+                bytes: bytes.clone(),
+            });
+        });
+        index
+    };
+
+    studio.active.set(index);
+    studio.source.set(source);
+    studio.docx_bytes.set(bytes.map(|bytes| (*bytes).clone()));
+    studio.page.set(0);
+    studio.selection.set(Selection::default());
+    rebuild_now(studio);
+    Ok(())
+}
+
 pub fn open_file(studio: Studio, path: String) {
     if let Some(index) = studio
         .tabs
@@ -650,7 +773,7 @@ pub fn open_file(studio: Studio, path: String) {
     let name = file_name(&path);
     if studio.local {
         if path != "welcome.md" {
-            toast(studio, "本地模式只内置 welcome.md", "warn");
+            toast(studio, "本地模式请用「打开本地文件…」", "warn");
             return;
         }
         let text = crate::local::SOURCE.to_string();
@@ -663,6 +786,7 @@ pub fn open_file(studio: Studio, path: String) {
                 source: text.clone(),
                 format,
                 dirty: false,
+                bytes: None,
             });
         });
         studio.active.set(index);
@@ -677,7 +801,8 @@ pub fn open_file(studio: Studio, path: String) {
                 toast(studio, "无法读取 DOCX", "bad");
                 return;
             };
-            studio.docx_bytes.set(Some(bytes));
+            let bytes = Arc::new(bytes);
+            studio.docx_bytes.set(Some((*bytes).clone()));
             let index = studio.tabs.with_untracked(|tabs| tabs.len());
             studio.tabs.update(|tabs| {
                 tabs.push(DocTab {
@@ -687,6 +812,7 @@ pub fn open_file(studio: Studio, path: String) {
                     source: String::new(),
                     format,
                     dirty: false,
+                    bytes: Some(bytes),
                 });
             });
             studio.active.set(index);
@@ -707,6 +833,7 @@ pub fn open_file(studio: Studio, path: String) {
                 source: text.clone(),
                 format,
                 dirty: false,
+                bytes: None,
             });
         });
         studio.active.set(index);
@@ -734,14 +861,28 @@ pub fn activate_tab(studio: Studio, index: usize) {
         studio.page.set(0);
         studio.selection.set(Selection::default());
         if tab.format == SourceFormat::Docx {
-            let path = tab.path.clone();
-            spawn_local(async move {
-                if let Ok(bytes) = api::asset(&path).await {
-                    studio.docx_bytes.set(Some(bytes));
-                    rebuild_now(studio);
-                }
-            });
+            if let Some(bytes) = tab.bytes.clone() {
+                studio.docx_bytes.set(Some((*bytes).clone()));
+                rebuild_now(studio);
+            } else if studio.local {
+                toast(studio, "DOCX 内容已丢失；请重新打开文件", "bad");
+            } else {
+                let path = tab.path.clone();
+                spawn_local(async move {
+                    if let Ok(bytes) = api::asset(&path).await {
+                        let bytes = Arc::new(bytes);
+                        studio.docx_bytes.set(Some((*bytes).clone()));
+                        studio.tabs.update(|tabs| {
+                            if let Some(tab) = tabs.get_mut(index) {
+                                tab.bytes = Some(bytes.clone());
+                            }
+                        });
+                        rebuild_now(studio);
+                    }
+                });
+            }
         } else {
+            studio.docx_bytes.set(None);
             rebuild_now(studio);
         }
     }
@@ -782,6 +923,9 @@ pub fn close_tab(studio: Studio, index: usize) {
     studio.active.set(next);
     if let Some(tab) = studio.tabs.with_untracked(|tabs| tabs.get(next).cloned()) {
         studio.source.set(tab.source);
+        studio
+            .docx_bytes
+            .set(tab.bytes.as_ref().map(|bytes| (**bytes).clone()));
     }
     rebuild_now(studio);
 }
@@ -794,6 +938,17 @@ pub fn save_active(studio: Studio) {
     };
     let text = studio.source.get_untracked();
     let path = tab.path.clone();
+    if tab.format == SourceFormat::Docx {
+        let Some(bytes) = tab.bytes.clone() else {
+            toast(studio, "DOCX 内容不在内存里；请重新打开文件", "bad");
+            return;
+        };
+        match api::download(&path, bytes.as_ref().as_slice()) {
+            Ok(()) => toast(studio, "已下载 DOCX 原文件", "ok"),
+            Err(error) => toast(studio, error, "bad"),
+        }
+        return;
+    }
     if studio.local {
         match api::download(&path, text.as_bytes()) {
             Ok(()) => {

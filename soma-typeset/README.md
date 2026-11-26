@@ -126,9 +126,10 @@ font APIs. Clean-room provenance is in [`PROVENANCE.md`](PROVENANCE.md).
   consumes. `scripts/web.sh` verifies zero imports, size, native/wasm parity,
   timing, memory stability and the fallback policy. See
   [`web/README.md`](web/README.md).
-- Soma Studio (ADR-0093, ADR-0094): the **whole engine runs in the browser**
-  (`soma-studio-ui`, Leptos CSR) and Axum is only an I/O boundary
-  (`soma-studio`) for files, fonts, native verification and PDF. The default
+- Soma Studio (ADR-0093, ADR-0094, ADR-0121): the **whole engine runs in the
+  browser** (`soma-studio-ui`, Leptos CSR): parse, layout, PDF and TikZ. The
+  public site is a static bundle with no `/api`; Axum (`soma-studio`) is a
+  development-only I/O host for files, fonts and native verification. The default
   workspace is a closable left-source/right-proof split; inspect and verify are
   sidebar views. It has Shadow-DOM pages, tabs, a command palette, a theme
   system, a local-rules assistant, and a font-consistency probe. Both sides
@@ -137,6 +138,10 @@ font APIs. Clean-room provenance is in [`PROVENANCE.md`](PROVENANCE.md).
   composition defers the build. A missing `--font` falls back to a system CJK
   face via fontconfig, so PDF export still produces text. `scripts/studio.sh`
   locks S1–S11. See [`docs/studio.md`](docs/studio.md).
+- Local files: the static Studio opens `.md`, `.html`, `.tex` and `.docx` via
+  the file picker or a window drop. The bytes stay in wasm; `soma-docx` parses
+  DOCX in the browser. `scripts/static.sh` locks the static bundle, a local
+  session with zero `/api` requests, and the absence of `/api/health`.
 - Code blocks (`ADR-0055`): each source line keeps its own spaces and is laid
   out on the block's atom table — indentation survives, nothing reflows, and a
   line that is too long overflows instead of wrapping.
@@ -356,7 +361,7 @@ crates/
   soma-wasm/   # native/WASI fixture for cross-target byte verification
   soma-studio-core/ # shared Studio build: parse, layout, fragments, probes, DTOs
   soma-studio-ui/   # Leptos CSR workbench; the whole engine compiled to wasm
-  soma-studio/      # Axum boundary: files, assets, fonts, verify, PDF, SSE
+  soma-studio/      # development-only Axum host: files, assets, fonts, verify, SSE
 tools/dry-run-panel/ # simulated blind-test panel generator (not human data)
 tools/
   metrics-gen/ # offline OTF/TTC -> soma.metrics/7 (numbers + ink)

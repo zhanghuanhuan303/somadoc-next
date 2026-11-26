@@ -50,6 +50,11 @@ pub fn Titlebar() -> impl IntoView {
         let Some(wasm) = studio.summary() else {
             return (String::from("—"), "idle", true);
         };
+        if studio.local {
+            // Native comparison is a CI property (`wasm-hash.sh`), not a
+            // runtime request. Do not claim it from a local self-comparison.
+            return (String::from("wasm 构建"), "ok", false);
+        }
         match studio.verify.get() {
             None => (String::from("校验中"), "idle", false),
             Some(native) if native.hash == wasm.hash && native.params_hash == wasm.params_hash => {
@@ -75,13 +80,13 @@ pub fn Titlebar() -> impl IntoView {
                 <span class=move || format!("verify-chip {}", verify().1)
                     id="verify-chip"
                     hidden=move || verify().2
-                    title="wasm 与 native 的 canonical 哈希一致"
+                    title=if studio.local { "浏览器 wasm 构建摘要；native 一致性由 CI 锁定" } else { "wasm 与 native 的 canonical 哈希一致" }
                     aria-label="校验状态">{move || verify().0}</span>
                 <button class="mini title-action" title="并排显示源文与校样" aria-label="并排显示源文与校样"
                     on:click=move |_| state::set_mode(studio, Mode::Split)>"◫ 分栏"</button>
-                <button class="mini title-action" title="导出当前文档第一张流程图为 TikZ（服务端）" aria-label="导出 TikZ"
+                <button class="mini title-action" title=if studio.local { "导出当前文档第一张流程图为 TikZ（浏览器内）" } else { "导出当前文档第一张流程图为 TikZ（服务端）" } aria-label="导出 TikZ"
                     on:click=move |_| export_tikz(studio)>"⤴ TikZ"</button>
-                <button class="mini title-action" title="导出 PDF（服务端）" aria-label="导出 PDF（服务端）"
+                <button class="mini title-action" title=if studio.local { "导出 PDF（浏览器内）" } else { "导出 PDF（服务端）" } aria-label="导出 PDF"
                     on:click=move |_| export_pdf(studio)>"⤓ PDF"</button>
                 <button class="icon-btn" title="切换主题" aria-label="切换主题"
                     on:click=move |_| toggle_theme(studio)>{move || if studio.theme.get() == "dark" { "☀" } else { "☾" }}</button>
@@ -92,26 +97,29 @@ pub fn Titlebar() -> impl IntoView {
     }
 }
 
+/// Project files plus any in-memory tab. In static mode an uploaded file only
+/// exists as a tab; merging it here makes the sidebar and command palette show
+/// exactly what is open without inventing a server-side tree.
+fn visible_files(studio: &crate::state::Studio) -> Vec<soma_studio_core::FileEntry> {
+    let mut files = studio.tree.get();
+    for tab in studio.tabs.get() {
+        if !files.iter().any(|file| file.path == tab.path) {
+            files.push(soma_studio_core::FileEntry {
+                path: tab.path.clone(),
+                name: tab.title.clone(),
+                kind: String::from("file"),
+                size: 0,
+            });
+        }
+    }
+    files
+}
+
 #[component]
 pub fn Sidebar() -> impl IntoView {
     let studio = use_studio();
     let drag = use_drag();
-    let files = move || {
-        let entries = studio.tree.get();
-        if entries.is_empty() {
-            return studio.tabs.with(|tabs| {
-                tabs.iter()
-                    .map(|tab| soma_studio_core::FileEntry {
-                        path: tab.path.clone(),
-                        name: tab.title.clone(),
-                        kind: String::from("file"),
-                        size: 0,
-                    })
-                    .collect::<Vec<_>>()
-            });
-        }
-        entries
-    };
+    let files = move || visible_files(&studio);
     let outline = Memo::new(move |_| {
         studio.build.with(|build| {
             build
@@ -156,6 +164,12 @@ pub fn Sidebar() -> impl IntoView {
                             }
                         }).collect_view()
                     }}
+                    {studio.local.then(|| view! {
+                        <button class="nav-item" title="从本地打开 md / html / tex / docx"
+                            on:click=move |_| state::pick_file(studio)>
+                            <span class="nav-label">"打开本地文件…"</span>
+                        </button>
+                    })}
                 </div>
                 <div class="nav-group">
                     <span class="nav-title">"大纲"</span>
@@ -203,7 +217,7 @@ pub fn Sidebar() -> impl IntoView {
                     <span class="nav-title">"诊断"</span>
                     <button class="nav-item" class:active=move || { studio.mode.get() == Mode::Verify && studio.aux.get().is_none() }
                         on:click=move |_| state::set_mode(studio, Mode::Verify)>
-                        <span class="nav-label">"wasm vs native"</span>
+                        <span class="nav-label">{if studio.local { "构建摘要" } else { "wasm vs native" }}</span>
                     </button>
                     <button class="nav-item" class:active=move || { studio.aux.get() == Some(Aux::Capabilities) }
                         on:click=move |_| studio.aux.set(Some(Aux::Capabilities))>
@@ -280,8 +294,14 @@ pub fn Tabs() -> impl IntoView {
                         }
                     }}
                 />
-                <button class="tab-add" title="打开文件（⌘K）" aria-label="打开文件"
-                    on:click=move |_| open_palette(studio)>"+"</button>
+                <button class="tab-add" title=if studio.local { "打开本地文件" } else { "打开文件（⌘K）" } aria-label="打开文件"
+                    on:click=move |_| {
+                        if studio.local {
+                            state::pick_file(studio);
+                        } else {
+                            open_palette(studio);
+                        }
+                    }>"+"</button>
             </div>
             <div class="tabs-fill"></div>
             <button class="icon-btn" title="重新排版（⌘↵）" aria-label="重新排版"
@@ -310,6 +330,9 @@ pub fn Breadcrumb() -> impl IntoView {
         let Some(wasm) = studio.summary() else {
             return ("chip", String::from("—"), true);
         };
+        if studio.local {
+            return ("chip ok", String::from("wasm 构建"), false);
+        }
         match studio.verify.get() {
             None => ("chip", String::from("校验中"), false),
             Some(native) if native.hash == wasm.hash => {
@@ -525,6 +548,12 @@ fn palette_items(studio: &crate::state::Studio) -> Vec<PaletteItem> {
             group: "文件",
         },
         PaletteItem {
+            id: String::from("upload"),
+            label: String::from("打开本地文件…"),
+            hint: String::from("md / html / tex / docx"),
+            group: "文件",
+        },
+        PaletteItem {
             id: String::from("tikz"),
             label: String::from("导出 TikZ（第一张流程图）"),
             hint: String::new(),
@@ -532,7 +561,11 @@ fn palette_items(studio: &crate::state::Studio) -> Vec<PaletteItem> {
         },
         PaletteItem {
             id: String::from("pdf"),
-            label: String::from("导出 PDF（服务端）"),
+            label: if studio.local {
+                String::from("导出 PDF（浏览器内）")
+            } else {
+                String::from("导出 PDF（服务端）")
+            },
             hint: String::new(),
             group: "文件",
         },
@@ -603,7 +636,7 @@ fn palette_items(studio: &crate::state::Studio) -> Vec<PaletteItem> {
             group: "诊断",
         },
     ];
-    for file in studio.tree.get() {
+    for file in visible_files(studio) {
         items.push(PaletteItem {
             id: format!("file:{}", file.path),
             label: format!("打开：{}", file.name),
@@ -629,7 +662,7 @@ fn palette_items(studio: &crate::state::Studio) -> Vec<PaletteItem> {
 fn item_kind(id: &str) -> &'static str {
     if id.starts_with("mode:") {
         "◫"
-    } else if id.starts_with("file:") {
+    } else if id.starts_with("file:") || id == "upload" {
         "▤"
     } else if id.starts_with("page:") {
         "§"
@@ -675,6 +708,7 @@ fn run_item(studio: crate::state::Studio, id: &str) {
     match id {
         "rebuild" => rebuild_now(studio),
         "save" => save_active(studio),
+        "upload" => state::pick_file(studio),
         "tikz" => export_tikz(studio),
         "pdf" => export_pdf(studio),
         "fit" => studio.fit.set(true),

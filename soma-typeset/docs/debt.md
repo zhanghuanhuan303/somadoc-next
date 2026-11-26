@@ -124,7 +124,7 @@
 | D102 | `Line` 只导出总 `cost` | 检视页能显示 ratio、裁剪、边界偏差与总代价，但逐项代价（badness、short-last、line 等）没有进入 canonical 或 UI；`inspect-detail` 显示 `—` | 标定时看不到某一行为什么贵 | 有调试/教学需求时加一个非 canonical 的 trace 导出层 | 否 |
 | D103 | atom 没有源文偏移 | 行→源文映射是块级精确、行级尽力；点击行只能定位到块，不能精确选中该行的源文片段 | 编辑器无法做行级双向高亮 | 编辑器需要行级选中或诊断时，给 atom 加源文 span 索引 | 否 |
 | D104 | Studio 构建在主线程 | 打字后 220 ms 防抖构建；提案里的「>800 atoms 走 Worker」没有实现。需要可序列化的 `AppBuild` 与第二个 wasm 二进制 | 超大文档（4k+ atoms）输入时可能掉帧 | 真实项目实测超预算时再做 | 否 |
-| D105 | Studio 没有单文件静态导出 | 项目文件、字体与 PDF 依赖 Axum；`web/` 的 K-P slice 仍是唯一 server-free 嵌入件 | 不能把一个离线 HTML 直接分享给他人 | 有离线分享/静态托管需求时做 | 否 |
+| D105 | **部分完成（ADR-0121）**：Studio 已可纯静态、无 Axum 运行；仍没有单文件导出 | 公网由 `index.html` + 内容哈希 JS/CSS/wasm + `/fonts/v2/` 组成；字体不嵌入 wasm，离线需带走整个目录 | 不能把一个离线 HTML 直接分享给他人 | 有单文件/离线分享需求时加 `embed-fonts` 构建；纯静态托管已完成 | 否 |
 | D107 | 流程图只覆盖 Mermaid flowchart 与 DOT 子集 | 子图只画成员包围框，不约束 rank；sequence/class/state/ER、图标、HTML 标签、外部链接没有实现；宽图低于 60% 或高于页高回退源码 | 复杂组织结构图会退化成较松的层次图；非 flowchart 图种仍显示为代码 | 有真实图种需求时扩 `soma-diagram` 的 frontend；子图 rank 约束优先 | 否 |
 | D108 | Studio 的 TikZ 导出只取第一张图 | `/api/tikz` 按文档顺序取第一张 Mermaid/DOT 图，导出自然尺寸；不能选择后续图、导出页面缩放后的几何，也不能导出 SVG | 含多张图的文档需要手工定位并裁剪导出的文件 | 有按图导出需求时给图块加稳定 target，UI 增加图列表选择 | 否 |
 | D109 | **部分完成（ADR-0107）**：Markdown 内嵌 LaTeX 的脚注已提升为真实定义，脚注内 `\index` 会收集；导言宏/计数器语义仍不完整 | 行内 `\footnote{...}` 现在生成 FootnoteRef + FootnoteDef；块级环境的脚注合并仍受标签冲突限制；Markdown 没有 LaTeX 导言区，`\newcommand`/计数器宏不参与 | 混合文档里的 LaTeX 脚注可以直接用；复杂宏包与计数器语义仍不可用 | 有真实混合文档依赖导言宏时，补一层最小导言上下文 | 否 |

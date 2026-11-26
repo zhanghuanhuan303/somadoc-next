@@ -30,10 +30,10 @@ web-sys = { version = "=0.3.106", features = [
   "ShadowRootInit", "ShadowRootMode", "Event", "MouseEvent", "KeyboardEvent",
   "PointerEvent", "InputEvent", "EventTarget", "DomRect", "DomTokenList",
   "ScrollIntoViewOptions", "ScrollBehavior", "ScrollLogicalPosition", "NodeList",
-  "Location", "Storage", "Blob", "Url", "HtmlAnchorElement", "HtmlStyleElement",
-  "CssStyleDeclaration", "console", "MediaQueryList", "UrlSearchParams",
-  "FontFaceSet", "EventSource", "MessageEvent", "PointerEventInit",
-  "EventInit", "HtmlCanvasElement", "CanvasRenderingContext2d", "TextMetrics"
+  "Location", "Storage", "Blob", "File", "FileList", "Url", "HtmlAnchorElement",
+  "HtmlStyleElement", "CssStyleDeclaration", "console", "MediaQueryList", "UrlSearchParams",
+  "FontFaceSet", "EventSource", "MessageEvent", "PointerEventInit", "DragEvent",
+  "DataTransfer", "EventInit", "HtmlCanvasElement", "CanvasRenderingContext2d", "TextMetrics"
 ] }
 gloo-net = "0.6"
 gloo-timers = { version = "0.4", features = ["futures"] }

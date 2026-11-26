@@ -1,6 +1,7 @@
-# Example unit for a hosted Soma Studio. Adjust User/WorkingDirectory and the
-# reverse proxy certificate for your host. Keep the bind loopback-only and let
-# Apache/nginx terminate TLS; see SECURITY.md.
+# Development-only unit for a hosted Soma Studio. The public somadoc.art site
+# is a static bundle served directly by Apache (ADR-0121) and does not use this
+# unit. Adjust User/WorkingDirectory for a development host, keep the bind
+# loopback-only, and let Apache/nginx terminate TLS when needed; see SECURITY.md.
 [Unit]
 Description=Soma Studio (all-Rust typesetting workbench)
 After=network-online.target

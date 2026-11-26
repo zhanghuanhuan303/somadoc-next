@@ -139,6 +139,7 @@ only).
 | [0118](0118-browser-local-studio.md) | The public host defaults to browser-local mode: embedded project, local verify/PDF/TikZ, subset WOFF2 proof fonts, full faces only on PDF export | Accepted; font strategy superseded by 0119 |
 | [0119](0119-gb2312-subsets-and-single-md.md) | `welcome.md` is the single online source; GB2312 1+2 subsets serve both proof and PDF, so export has no coverage check or full-font fallback | Accepted |
 | [0120](0120-content-hashed-assets.md) | Trunk hashes JS/CSS/wasm; `index.html` revalidates, fonts stay under a versioned namespace, and `welcome.md` is published as a downloadable source | Accepted |
+| [0121](0121-static-browser-local-studio.md) | The public Studio is a static bundle: local is the default on every non-loopback host, Axum is development-only, files open and PDF render in wasm, and local verify no longer claims a runtime native comparison | Accepted |
 
 ## Rules
 

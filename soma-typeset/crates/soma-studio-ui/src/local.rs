@@ -47,25 +47,44 @@ const FONTS: &[(&str, &str)] = &[
     ("math", MATH),
 ];
 
-/// True on the public somadoc hosts unless the page explicitly asks for the
-/// server (`?server=1`). Loopback and LAN hosts stay on the server path: their
-/// gates and the developer workflow expect the file tree and native check.
-/// Any other host can opt in with `?local=1`.
+/// True unless the page is on loopback, where the native host is the developer
+/// workflow. The public bundle is served from hosts we do not know in advance
+/// (somadoc.art, a CDN preview, a custom domain), so local must be the default:
+/// a host allowlist would make those deployments silently call `/api`.
+///
+/// `?server=1` forces the server anywhere; `?local=1` forces the browser-local
+/// engine, including on loopback for the static gate.
 pub fn is_local() -> bool {
     let Some(window) = web_sys::window() else {
         return true;
     };
-    let Ok(search) = window.location().search() else {
-        return true;
+    let search = window.location().search().unwrap_or_default();
+    let host = window.location().hostname().unwrap_or_default();
+    resolve_local(&search, &host)
+}
+
+fn resolve_local(search: &str, host: &str) -> bool {
+    let flag = |name: &str| {
+        search
+            .trim_start_matches('?')
+            .split('&')
+            .any(|pair| pair == format!("{name}=1"))
     };
-    if search.contains("server=1") {
+    if flag("server") {
         return false;
     }
-    if search.contains("local=1") {
+    if flag("local") {
         return true;
     }
-    let host = window.location().hostname().unwrap_or_default();
-    host == "somadoc.art" || host.ends_with(".somadoc.art")
+    !is_loopback(host)
+}
+
+fn is_loopback(host: &str) -> bool {
+    host == "localhost"
+        || host == "127.0.0.1"
+        || host == "::1"
+        || host == "[::1]"
+        || host.ends_with(".localhost")
 }
 
 pub fn project() -> ProjectPayload {
@@ -259,4 +278,33 @@ pub fn tikz(studio: Studio) -> Result<String, String> {
             hyphenation: hyphenation.as_deref(),
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_local;
+
+    #[test]
+    fn public_hosts_default_to_local() {
+        assert!(resolve_local("", "somadoc.art"));
+        assert!(resolve_local("", "www.somadoc.art"));
+        assert!(resolve_local("", "preview.example.net"));
+        assert!(resolve_local("", "192.0.2.10"));
+    }
+
+    #[test]
+    fn loopback_keeps_the_development_server() {
+        assert!(!resolve_local("", "localhost"));
+        assert!(!resolve_local("", "127.0.0.1"));
+        assert!(!resolve_local("", "[::1]"));
+        assert!(resolve_local("?local=1", "127.0.0.1"));
+    }
+
+    #[test]
+    fn explicit_flags_win() {
+        assert!(!resolve_local("?server=1", "somadoc.art"));
+        assert!(!resolve_local("?server=1", "127.0.0.1"));
+        assert!(resolve_local("?local=1", "preview.example.net"));
+        assert!(resolve_local("?theme=dark&local=1", "preview.example.net"));
+    }
 }

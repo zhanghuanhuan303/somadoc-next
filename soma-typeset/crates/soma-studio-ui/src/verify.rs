@@ -1,27 +1,86 @@
-//! Verify: the wasm build and the native build must agree byte for byte.
+//! Verify: local builds show their wasm summary; server mode compares wasm
+//! with native byte for byte.
 //!
-//! This is the D95 gate made visible: the canonical `PagedLayout::hash()`,
-//! page count, line counts and parameter hash are compared. A mismatch is a
-//! red state, not a warning.
+//! The local path deliberately does not claim a runtime native comparison. The
+//! native/wasm equality is a CI property (`scripts/wasm-hash.sh`); a browser
+//! cannot run the native binary.
 
 use leptos::prelude::*;
 use soma_studio_core::NativeSummary;
 
-use crate::state::{use_studio, verify_now};
+use crate::state::{use_studio, verify_now, Mode, Studio};
 
 #[component]
 pub fn VerifyPane() -> impl IntoView {
     let studio = use_studio();
+    if studio.local {
+        local_verify(studio).into_any()
+    } else {
+        server_verify(studio).into_any()
+    }
+}
 
+fn local_verify(studio: Studio) -> impl IntoView {
     view! {
-        <section class="doc-page" hidden=move || { studio.mode.get() != crate::state::Mode::Verify }>
-            <h1>{if studio.local { "本地校验（wasm）" } else { "校验：wasm vs native" }}</h1>
+        <section class="doc-page" hidden=move || { studio.mode.get() != Mode::Verify }>
+            <h1>"构建摘要（wasm）"</h1>
             <p class="lead">
-                {if studio.local {
-                    "整份文档在浏览器 wasm 内解析、断行、分页与校样；下面记录这次构建的 canonical 哈希、页数与每页行数。"
-                } else {
-                    "同一份源文、模板与引擎参数，分别在浏览器里和 Axum 里排版。canonical 哈希、页数与每页行数必须一致。"
-                }}
+                "整份文档在浏览器 wasm 内解析、断行、分页与校样。这里记录本次构建的 canonical 哈希、参数、页数与每页行数；native 与 wasm 的字节一致性由 CI 的 wasm-hash.sh 锁定，运行时不再请求 native。"
+            </p>
+            {move || {
+                let Some(summary) = studio.summary() else {
+                    return view! {
+                        <div class="banner warn">
+                            <span class="fill">"还没有构建。"</span>
+                        </div>
+                    }.into_any();
+                };
+                view! {
+                    <div class="banner ok">
+                        <span class="pill ok">"已记录"</span>
+                        <span class="fill">"这份摘要是当前 wasm 构建的唯一事实来源；重新排版会更新它。"</span>
+                    </div>
+                    <div class="workspace" style="gap:14px;padding:0 0 14px">
+                        <div style="flex:1;min-width:0">
+                            <Summary title="wasm（浏览器）" summary=summary.clone() other=None/>
+                        </div>
+                    </div>
+                    <div class="panel">
+                        <div class="panel-head">
+                            <div>
+                                <h2>"逐页行数"</h2>
+                                <p>"分页结果的一部分；用于同目标跨构建比较。"</p>
+                            </div>
+                            <button class="ghost" on:click=move |_| verify_now(studio)>"重新记录"</button>
+                        </div>
+                        <div class="table-wrap">
+                            <table class="compact">
+                                <thead>
+                                    <tr><th class="num">"页"</th><th class="num">"行数"</th></tr>
+                                </thead>
+                                <tbody>
+                                    {summary.page_lines.iter().enumerate().map(|(index, lines)| view! {
+                                        <tr>
+                                            <td class="num">{(index + 1).to_string()}</td>
+                                            <td class="num">{lines.to_string()}</td>
+                                        </tr>
+                                    }).collect_view()}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                }.into_any()
+            }}
+        </section>
+    }
+}
+
+fn server_verify(studio: Studio) -> impl IntoView {
+    view! {
+        <section class="doc-page" hidden=move || { studio.mode.get() != Mode::Verify }>
+            <h1>"校验：wasm vs native"</h1>
+            <p class="lead">
+                "同一份源文、模板与引擎参数，分别在浏览器里和 Axum 里排版。canonical 哈希、页数与每页行数必须一致。"
             </p>
 
             {move || {
@@ -61,11 +120,7 @@ pub fn VerifyPane() -> impl IntoView {
                         <div class="banner ok">
                             <span class="pill ok">"一致"</span>
                             <span class="fill">
-                                {if studio.local {
-                                    "本地构建的 canonical 哈希、参数、页数与每页行数已记录。"
-                                } else {
-                                    "wasm 与 native 的 canonical 哈希、参数、页数与每页行数全部相等。"
-                                }}
+                                "wasm 与 native 的 canonical 哈希、参数、页数与每页行数全部相等。"
                             </span>
                         </div>
                     }.into_any()
@@ -85,7 +140,7 @@ pub fn VerifyPane() -> impl IntoView {
                             <Summary title="wasm（浏览器）" summary=wasm.clone() other=Some(native.clone())/>
                         </div>
                         <div style="flex:1;min-width:0">
-                            <Summary title=if studio.local { "本地摘要（同一构建）" } else { "native（Axum）" } summary=native.clone() other=Some(wasm.clone())/>
+                            <Summary title="native（Axum）" summary=native.clone() other=Some(wasm.clone())/>
                         </div>
                     </div>
                     <div class="panel">

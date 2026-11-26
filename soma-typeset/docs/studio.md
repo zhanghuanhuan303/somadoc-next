@@ -1,14 +1,20 @@
 # Soma Studio (web preview)
 
-Status: implemented, 2026-11-25. Design record: ADR-0093 (all-Rust wasm +
-Axum I/O boundary) and ADR-0094 (HTML geometry as percentages).
+Status: implemented, 2026-11-25; public deployment made static, 2026-11-27.
+Design record: ADR-0093 (all-Rust wasm), ADR-0094 (HTML geometry as
+percentages), ADR-0118 (browser-local mode) and ADR-0121 (static public
+bundle).
 
 The Studio is a desktop-class workbench for one project:
 
-- **the whole engine runs in the browser** (`soma-studio-ui`, Leptos CSR);
-- **Axum is only an I/O boundary** (`soma-studio`): files, images, fonts,
-  native verification, PDF, and a file watcher;
-- both sides call the same `soma-studio-core` build, and the canonical
+- **the whole engine runs in the browser** (`soma-studio-ui`, Leptos CSR):
+  parsing, layout, pagination, proof, PDF and TikZ;
+- **the public site is static**: Apache serves `dist/` and `/fonts/v2/`; there
+  is no `/api` and no Axum process. `is_local()` defaults to local on every
+  non-loopback host;
+- **Axum is a development-only host** (`soma-studio`): file tree, image/font
+  reads, native verification, PDF and a watcher on loopback;
+- both paths call the same `soma-studio-core` build, and the canonical
   `PagedLayout::hash()` must be equal. D95's page-geometry half is closed; the
   remaining difference is glyph ink (D101).
 
@@ -43,8 +49,8 @@ Options:
 | `--input`, `-i` | The project input. Required. Its parent directory is the project root and the file tree. |
 | `--template`, `-t` | Template YAML. Omitted: the built-in Plex reference. |
 | `--engine` | `soma.engine/1` YAML. Omitted: the built-in `proposal-v1` preset (Chinese proposal defaults: tighter tolerance plus an eight-character short-tail threshold). The command-line tool still defaults to `latex-v1` (ADR-0069, ADR-0115). |
-| `--metrics` | Metrics table. Omitted: the embedded `soma.metrics/7` table. The browser fetches the same bytes from `/api/metrics`. |
-| `--hyphenation` | TeX pattern file (e.g. `hyphen-en.pat`) for Liang hyphenation of Latin words. Omitted: the server uses `<project root>/hyphen-en.pat` when present, otherwise no word is broken. The browser fetches the same text from `/api/hyphenation`. |
+| `--metrics` | Metrics table. Omitted: the embedded `soma.metrics/7` table. In static mode the browser uses the embedded `plex.smt`; in development it can fetch the configured bytes from `/api/metrics`. |
+| `--hyphenation` | TeX pattern file (e.g. `hyphen-en.pat`) for Liang hyphenation of Latin words. Omitted: the server uses `<project root>/hyphen-en.pat` when present, otherwise no word is broken. In static mode the browser uses the embedded `hyphen-en.pat`; in development it can fetch `/api/hyphenation`. |
 | `--font`, `--font-bold`, `--font-sans`, `--font-sans-bold`, `--font-mono`, `--font-mono-bold`, `--font-math`, `--font-fallback` | Optional font files for PDF and for `@font-face` in the proof. `path#index` selects a TTC face. Math is bundled when omitted. When a body face is omitted, the server probes fontconfig (`fc-match`) for Noto Serif/Sans CJK SC and Noto Sans Mono; a face must cover `中` (or `A` for mono) to be accepted. Auto faces are referenced by family name in the proof and subset into the PDF, so a missing `--font` does not produce a blank export. |
 | `--no-auto-font` | Disable fontconfig discovery; only explicit font flags are used. |
 | `--dist` | UI build directory (default `crates/soma-studio-ui/dist`). |
@@ -62,11 +68,16 @@ use the same URL in the browser:
 ```sh
 soma-studio --input … --host 192.0.2.10 --port 7070 \
   --dist /opt/soma-studio/dist
-# then open http://192.0.2.10:7070/
+# then open http://192.0.2.10:7070/?server=1
 ```
 
+Since ADR-0121, every non-loopback host defaults to the browser-local engine.
+A LAN development session must opt into the server with `?server=1`; a public
+host must not do this.
+
 `--host` defaults to `127.0.0.1`, so omitting it keeps the local-only
-behaviour. Use `--dist` when the binary runs outside the source checkout, and
+behaviour. Loopback remains server mode by default; other hosts are local
+unless the URL says `?server=1`. Use `--dist` when the binary runs outside the source checkout, and
 keep the font and metrics paths absolute (or shipped next to the binary).
 
 Mermaid `flowchart`/`graph` and Graphviz DOT fences are compiled by
@@ -91,14 +102,15 @@ tab is open.
 | **源文** (Source) | A soft-wrapping `<textarea>`; a long line wraps at the pane width instead of scrolling horizontally. Typing schedules a build 220 ms after the last keystroke; IME composition defers the build until `compositionend`. `⌘S` saves, `⌘↵` rebuilds now. |
 | **校样** (Proof) | Each page is a Shadow DOM root containing one SVG page rendered from the engine's `PagedLayout` (ADR-0109). Text is `<text>` with `data-node`/`data-atom`, so it stays selectable and inspectable; the SVG is scaled by the UI's zoom. The page CSS is scoped inside the shadow root; UI tokens never leak into the document. |
 | **检视** (Inspect) | The exported line facts for the current page: ratio, adjustment, trim, boundary deviation, cost, flags. Clicking a row selects the same line in the overlay. Per-term cost is not exported (D102); the detail bar shows `—`. |
-| **校验** (Verify) | wasm vs native: canonical hash, parameter hash, page count and line count per page. A mismatch is a red state. |
+| **校验** (Verify) | Static mode: the wasm build summary (canonical hash, parameter hash, pages, lines per page); native equality is a CI property. Development mode: wasm vs native, where a mismatch is a red state. |
 
 Pane close buttons sit in each pane head; closing the last pane shows an empty-pane
 state with “并排显示 / 只要源文 / 只要校样”. The source pane head intentionally
 omits the file name and format badge: the tab already carries the file. The
-page/zoom/overlay controls live in the proof pane head, and the `wasm = native`
-verification chip plus the “分栏”, “TikZ” and “PDF” actions live in the title
-bar; there is no global breadcrumb row.
+page/zoom/overlay controls live in the proof pane head, and the verification
+chip (static: `wasm 构建`; development: `wasm = native`) plus the “分栏”,
+“TikZ” and “PDF” actions live in the title bar; there is no global breadcrumb
+row.
 
 The title bar also carries `⤓ PDF`, `⤴ TikZ` and `◫ 分栏`; PDF export works with
 the proof closed, and the toast reports the page count and file size. A
@@ -113,8 +125,20 @@ The pane head keeps the `line:column` cursor badge.
 URL parameters (handy for screenshots and links):
 `mode=split|source|proof|inspect|verify`, `page=N` (1-based), `theme=dark|light`,
 `zoom=0.5…2`, `events=off` (disable SSE for headless capture),
-`selftest=1` (run the browser gate). `only=s9font` restricts the self-test to
-the missing-font assertion.
+`selftest=1` (run the browser gate), `local=1` (force browser-local on
+loopback), `server=1` (force the development server on any host). `only=s9font`
+restricts the self-test to the missing-font assertion.
+
+### Static mode
+
+On a public host the page opens `welcome.md` from the wasm and uses the
+embedded template, engine parameters, metrics and hyphenation. The sidebar
+「打开本地文件…」 action, the tab `+` button, the command palette and a window
+drop open `.md`, `.html`, `.tex` or `.docx` without a server: text is decoded as
+UTF-8, DOCX is parsed by `soma-docx` in wasm, and the bytes stay in the page.
+`⌘S` downloads the current text (or the original DOCX archive). PDF and TikZ
+are generated by the same wasm module. The only HTTP requests are same-origin
+static assets under `/fonts/`.
 
 ## Font probe (D101)
 
@@ -131,10 +155,11 @@ The probe samples 16 characters (CJK, Latin, digits, punctuation) through
 1/4096 em. It never feeds the breaker or the renderer; it is a signal, not a
 layout input.
 
-## Server-side reloads
+## Development server reloads (loopback only)
 
-With the watcher enabled (default), a change to the input, template, engine or
-metrics file triggers a native rebuild:
+Static mode has no watcher. On the development host, with the watcher enabled
+(default), a change to the input, template, engine or metrics file triggers a
+native rebuild:
 
 - success → SSE `{"type":"built","version":n}`. The UI reloads a clean tab,
   updates fonts/template/engine and rebuilds in wasm. Unsaved local edits win:
@@ -147,14 +172,19 @@ metrics file triggers a native rebuild:
 
 ## Security
 
-- The page is same-origin only. `/api` rejects cross-origin `Origin` and
+- **Public static mode.** Apache serves `dist/` directly; there is no
+  `ProxyPass`, no Axum process and no `/api`. `/api/health` is a 404. Layout and
+  PDF run on the visitor's machine (ADR-0121).
+- **Development mode only.** `/api` rejects cross-origin `Origin` and
   `Sec-Fetch-Site: cross-site` requests. Loopback origins are always accepted;
   `--host 192.0.2.10` additionally accepts `http://192.0.2.10:<port>`, and a
   wildcard bind accepts only the authority in the request's `Host` header.
+  `Origin` validation is not authentication.
 - **`--host` exposes read/write API routes.** There is no authentication: anyone
   who can reach the port can read and write files under the project root and
   download PDFs. Bind a concrete LAN address on a trusted network; do not bind
-  `0.0.0.0` on an untrusted one. The default remains loopback-only.
+  `0.0.0.0` on an untrusted one. The default remains loopback-only. Do not put
+  this server behind a public vhost.
 - `Content-Security-Policy: default-src 'self'; …; script-src 'self'
   'unsafe-inline' 'wasm-unsafe-eval'; …; frame-ancestors 'none'` is added to
   every response, plus `X-Content-Type-Options: nosniff` and
@@ -168,7 +198,10 @@ metrics file triggers a native rebuild:
 - File reads and assets go through `safe_join`: absolute paths and `..` are
   refused.
 
-## API surface
+## API surface (development host only)
+
+The public site does not expose these routes. They exist only when
+`soma-studio` is running, normally on loopback for development.
 
 | Route | Method | Purpose |
 |---|---|---|
@@ -193,6 +226,8 @@ metrics file triggers a native rebuild:
 bash scripts/studio.sh          # S1–S11, starts its own server on port 7091
 SOMA_STUDIO_SKIP_TRUNK=1 bash scripts/studio.sh   # reuse dist/
 SOMA_STUDIO_PORT=7099 bash scripts/studio.sh      # another port
+bash scripts/static.sh          # static bundle: S1/S3–S10/S12, zero /api
+SOMA_STATIC_SKIP_TRUNK=1 bash scripts/static.sh   # reuse dist/
 ```
 
 The browser assertions live in `crates/soma-studio-ui/src/selftest.rs` and are
@@ -204,8 +239,8 @@ directory; `examples/` is not modified.
 
 | Gate | What it locks |
 |---|---|
-| S1 | 38/30/24 chrome (no breadcrumb row); side head, tab bar and AI header share a 30 px baseline; default split pane; title-bar `wasm = native` chip; the status bar spans the window; one navigation tree. |
-| S2 | Three files open as three tabs; reopening does not duplicate; closing the active tab selects the right neighbour; closing all shows the empty workspace; `+` opens the palette. |
+| S1 | 38/30/24 chrome (no breadcrumb row); side head, tab bar and AI header share a 30 px baseline; default split pane; title-bar verification chip (static `wasm 构建`, development `wasm = native`); the status bar spans the window; one navigation tree. |
+| S2 | Three files open as three tabs; reopening does not duplicate; closing the active tab selects the right neighbour; closing all shows the empty workspace; `+` opens the palette (development) or the file picker (static). |
 | S3 | Sidebar 180–380, AI 320–900, persistence, double-click reset, collapse; closed AI dock has no content width; closing/reopening the source and proof panes. |
 | S4 | Theme persists, both toggles work, and `studio.css` contains no hex values (tokens only). |
 | S5 | `page slots == SVG fragments == page_count`; consecutive `data-page`; one Shadow `.page` SVG per slot; PDF page count equals native; `/api/tikz` returns a `tikzpicture` with the fixture labels. |
@@ -222,9 +257,11 @@ directory; `examples/` is not modified.
   debounce keeps typing responsive for the project sizes tested here. Moving
   the build to a worker needs a serializable `AppBuild` and a second wasm
   binary, and is deliberately deferred.
-- **No single-file static export (D105).** The Studio needs the Axum boundary
-  for project files and PDF. The K-P slice (`web/`) remains the embeddable,
-  server-free artifact.
+- **No single-file export (D105).** The public Studio is a static bundle, but
+  it still ships `index.html`, hashed JS/CSS/wasm and `/fonts/v2/` together.
+  The fonts are not embedded in the wasm; a single-file offline build is
+  deferred. The K-P slice (`web/`) remains the embeddable, server-free
+  artifact.
 - **Inspect shows total cost only** (D102), and line text is best-effort
   because atoms carry no source offsets (D103).
 - **The proof's ink is pinned to `#111`.** Page CSS sets `color:#111;color-scheme:light`

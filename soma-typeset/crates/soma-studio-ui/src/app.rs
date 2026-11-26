@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{KeyboardEvent, PointerEvent};
+use web_sys::{DragEvent, KeyboardEvent, PointerEvent};
 
 use crate::ai::AiDock;
 use crate::api;
@@ -109,7 +109,7 @@ fn Loading() -> impl IntoView {
                 } else {
                     view! {
                         <strong>"正在加载"</strong>
-                        <span>"读取项目、模板与引擎参数；排版会在浏览器里完成。"</span>
+                        <span>{if studio.local { "加载内置说明稿与模板；排版、PDF 与校验都在浏览器里完成。" } else { "读取项目、模板与引擎参数；排版会在浏览器里完成。" }}</span>
                     }.into_any()
                 }
             }}
@@ -130,11 +130,15 @@ fn EmptyWorkspace() -> impl IntoView {
         <div class="empty-state" id="empty-workspace" hidden=move || { !visible() }>
             <div class="mark">"S"</div>
             <strong>"没有打开的文档"</strong>
-            <span>"从左侧稿件栏选择文件，或按 ⌘K 打开命令面板。"</span>
+            <span>"从左侧稿件栏选择文件，或直接打开本地 md / html / tex / docx。"</span>
             <button class="primary" on:click=move |_| {
-                studio.palette_query.set(String::new());
-                studio.palette_open.set(true);
-            }>"打开文件"</button>
+                if studio.local {
+                    state::pick_file(studio);
+                } else {
+                    studio.palette_query.set(String::new());
+                    studio.palette_open.set(true);
+                }
+            }>{if studio.local { "打开本地文件" } else { "打开文件" }}</button>
         </div>
     }
 }
@@ -300,8 +304,8 @@ fn AuxPage() -> impl IntoView {
                     Some(Aux::Template) => "模板是纯 YAML；这里只读展示当前生效的文件。",
                     Some(Aux::Engine) => "引擎配置是参数层，不属于模板。改动会换 paramHash。",
                     Some(Aux::Capabilities) => "前端对每种源文构造的声明；与 docs/capabilities.md 同源。",
-                    Some(Aux::Fonts) => "服务端为这次会话提供的字体；浏览器用同一族名注入 @font-face。",
-                    Some(Aux::About) => "全 Rust wasm 前端 + Axum 后端。",
+                    Some(Aux::Fonts) => if studio.local { "静态字体文件；浏览器用同一族名注入 @font-face，PDF 复用同一份字节。" } else { "服务端为这次会话提供的字体；浏览器用同一族名注入 @font-face。" },
+                    Some(Aux::About) => if studio.local { "全 Rust wasm 前端；公网分发为纯静态文件，没有 Axum、没有 /api。" } else { "全 Rust wasm 前端 + 开发态 Axum 宿主。" },
                     _ => "",
                 }}
             </p>
@@ -387,11 +391,19 @@ fn AuxPage() -> impl IntoView {
                 Some(Aux::About) => view! {
                     <div class="panel">
                         <div class="panel-body">
-                            <p>"Soma Studio 把整个排版引擎编进 wasm：源文解析、模板解析、断行、分页、HTML 页面都在浏览器里完成。Axum 只负责文件、图片/字体、PDF 与 native 校验。"</p>
-                            <p>"canonical 哈希在两边必须相等；不一致是红状态。"</p>
+                            <p>{if studio.local {
+                                "Soma Studio 把整个排版引擎编进 wasm：源文解析、模板解析、断行、分页、HTML 页面、PDF 与 TikZ 都在浏览器里完成。公网分发是纯静态文件，不运行 Axum，也没有 /api。"
+                            } else {
+                                "Soma Studio 把整个排版引擎编进 wasm：源文解析、模板解析、断行、分页、HTML 页面都在浏览器里完成。Axum 只负责开发态的文件、图片/字体、PDF 与 native 校验。"
+                            }}</p>
+                            <p>{if studio.local {
+                                "native 与 wasm 的 canonical 哈希由 CI 的 wasm-hash.sh 锁定；本地校验只记录当前 wasm 构建。"
+                            } else {
+                                "canonical 哈希在两边必须相等；不一致是红状态。"
+                            }}</p>
                             <div class="kv-grid">
                                 <div class="kv"><div class="k">"前端"</div><div class="v">"Leptos CSR → wasm"</div></div>
-                                <div class="kv"><div class="k">"后端"</div><div class="v">"Axum"</div></div>
+                                <div class="kv"><div class="k">"后端"</div><div class="v">{if studio.local { "无（静态托管）" } else { "Axum（开发态）" }}</div></div>
                                 <div class="kv"><div class="k">"引擎"</div><div class="v">{move || studio.project.with(|project| project.as_ref().map(|project| format!("soma {}", project.engine_version)).unwrap_or_default())}</div></div>
                                 <div class="kv"><div class="k">"快捷键"</div><div class="v">"⌘K / ⌘J / ⌘↵ / ⌘S"</div></div>
                             </div>
@@ -543,4 +555,49 @@ fn install_global(studio: Studio, drag: DragCtx) {
     });
     let _ = window.add_event_listener_with_callback("pointerup", up.as_ref().unchecked_ref());
     up.forget();
+
+    // Drop a source file anywhere in the window. Only file drags are
+    // intercepted, so dragging selected text inside the editor keeps working.
+    let dragover = Closure::<dyn FnMut(DragEvent)>::new(move |event: DragEvent| {
+        let has_files = event
+            .data_transfer()
+            .map(|data| {
+                data.types()
+                    .iter()
+                    .any(|value| value.as_string().as_deref() == Some("Files"))
+            })
+            .unwrap_or(false);
+        if has_files {
+            event.prevent_default();
+        }
+    });
+    let _ = window.add_event_listener_with_callback("dragover", dragover.as_ref().unchecked_ref());
+    dragover.forget();
+
+    let drop = Closure::<dyn FnMut(DragEvent)>::new(move |event: DragEvent| {
+        let Some(data) = event.data_transfer() else {
+            return;
+        };
+        let has_files = data
+            .types()
+            .iter()
+            .any(|value| value.as_string().as_deref() == Some("Files"));
+        if !has_files {
+            return;
+        }
+        event.prevent_default();
+        let Some(files) = data.files() else {
+            return;
+        };
+        let Some(file) = files.get(0) else {
+            return;
+        };
+        spawn_local(async move {
+            if let Err(error) = state::open_upload_file(studio, file).await {
+                state::toast(studio, error, "bad");
+            }
+        });
+    });
+    let _ = window.add_event_listener_with_callback("drop", drop.as_ref().unchecked_ref());
+    drop.forget();
 }

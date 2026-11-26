@@ -27,7 +27,8 @@ directory:
 ```sh
 (cd crates/soma-studio-ui && trunk build --release)
 SOMA_FONT_DIR=/path/to/fonts bash scripts/local-assets.sh
-bash scripts/studio.sh
+bash scripts/studio.sh    # development host: S1-S11
+bash scripts/static.sh    # public static bundle: zero /api, S1/S3-S10/S12
 ```
 
 ## License

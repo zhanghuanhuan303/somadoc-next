@@ -51,7 +51,7 @@ async fn run(studio: Studio, only: Option<String>) {
             click_selector(&document, "[aria-label='排版助手']");
             TimeoutFuture::new(120).await;
         }
-        lines.push(s1(&document));
+        lines.push(s1(&document, studio));
         emit(&document, &lines);
         lines.push(s3(&document, studio).await);
         emit(&document, &lines);
@@ -71,6 +71,8 @@ async fn run(studio: Studio, only: Option<String>) {
         emit(&document, &lines);
         if studio.local {
             lines.push(s12(studio).await);
+            emit(&document, &lines);
+            lines.push(s13(studio).await);
             emit(&document, &lines);
         } else {
             lines.push(s2(&document, studio).await);
@@ -221,7 +223,7 @@ fn shadow_host(document: &Document, page: usize) -> Option<web_sys::ShadowRoot> 
 
 /* ---------------------------------------------------------------------- S1 */
 
-fn s1(document: &Document) -> String {
+fn s1(document: &Document, studio: Studio) -> String {
     let Some(titlebar) = query(document, ".titlebar") else {
         return result("S1", false, "缺少 titlebar");
     };
@@ -260,12 +262,17 @@ fn s1(document: &Document) -> String {
         && query(document, "#proof-pane")
             .map(|element| !element.has_attribute("hidden"))
             .unwrap_or(false);
+    let verify_label = if studio.local {
+        "wasm"
+    } else {
+        "wasm = native"
+    };
     let verify_ok = query(document, "#verify-chip")
-        .map(|element| !element.has_attribute("hidden") && text(&element).contains("wasm = native"))
+        .map(|element| !element.has_attribute("hidden") && text(&element).contains(verify_label))
         .unwrap_or(false);
 
     let detail = format!(
-        "chrome {:.0}/{:.0}/{:.0} · 30px 同底 {chrome_ok} · 状态栏全宽 {full_width} · 导航树 {navs} · 默认分栏 {split_ok} · 校验徽标 {verify_ok}",
+        "chrome {:.0}/{:.0}/{:.0} · 30px 同底 {chrome_ok} · 状态栏全宽 {full_width} · 导航树 {navs} · 默认分栏 {split_ok} · 校验徽标 {verify_label} {verify_ok}",
         heights.0, heights.1, heights.2
     );
     result(
@@ -1008,6 +1015,56 @@ async fn s10(document: &Document, studio: Studio) -> String {
         "S10",
         replied && sanitized && local_badge && remote_disabled,
         detail,
+    )
+}
+
+/// Static mode: a browser File opens as a tab, parses with its own frontend,
+/// builds in wasm, and closes without a server request.
+async fn s13(studio: Studio) -> String {
+    let html = b"<h1>\xe4\xb8\x8a\xe4\xbc\xa0\xe6\xb5\x8b\xe8\xaf\x95</h1><p>local file</p>";
+    let bytes = js_sys::Uint8Array::from(&html[..]);
+    let parts = js_sys::Array::new();
+    parts.push(&bytes);
+    let bits: wasm_bindgen::JsValue = parts.into();
+    let file = match web_sys::File::new_with_buffer_source_sequence(&bits, "upload.html") {
+        Ok(file) => file,
+        Err(_) => return result("S13", false, "无法构造 File"),
+    };
+    if let Err(error) = state::open_upload_file(studio, file).await {
+        return result("S13", false, error);
+    }
+    let opened = wait_for(
+        || {
+            studio
+                .tabs
+                .with_untracked(|tabs| tabs.iter().any(|tab| tab.path == "upload.html"))
+        },
+        40,
+    )
+    .await;
+    let built = wait_for(
+        || !studio.building.get_untracked() && studio.build_error.get_untracked().is_none(),
+        80,
+    )
+    .await;
+    let source_ok = studio.source.get_untracked().contains("上传测试");
+    let format_ok = studio.tabs.with_untracked(|tabs| {
+        tabs.iter()
+            .find(|tab| tab.path == "upload.html")
+            .map(|tab| tab.format == SourceFormat::Html)
+            .unwrap_or(false)
+    });
+    let index = studio
+        .tabs
+        .with_untracked(|tabs| tabs.iter().position(|tab| tab.path == "upload.html"));
+    if let Some(index) = index {
+        state::close_tab(studio, index);
+        TimeoutFuture::new(200).await;
+    }
+    result(
+        "S13",
+        opened && built && source_ok && format_ok,
+        format!("打开 {opened} · 构建 {built} · 源文 {source_ok} · 格式 {format_ok}"),
     )
 }
 

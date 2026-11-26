@@ -135,7 +135,7 @@ pub fn ProofPane() -> impl IntoView {
                         view! {
                             {move || studio.build_error.get().map(|error| view! {
                                 <div class="banner bad" id="build-diagnostic" style="margin:12px 0;max-width:760px">
-                                    <span class="fill">{format!("服务端构建失败；校样保留上一版。{error}")}</span>
+                                    <span class="fill">{format!("构建失败；校样保留上一版。{error}")}</span>
                                 </div>
                             })}
                             <For
