@@ -67,6 +67,7 @@ LATIN='U+0020-007E,U+00A0-00FF,U+2010-2027,U+2030-205E,U+20AC,U+2116,U+2122,U+22
 # shellcheck disable=SC2086
 "$PYFTSUBSET" "$MONO_BOLD" --unicodes="$LATIN" $SUBSET --output-file="$DIST/fonts/v2/NotoSansMono-Bold.ttf"
 cp "$MATH" "$DIST/fonts/v2/NewCMMath-Regular.otf"
+cp examples/book/welcome.md "$DIST/welcome.md"
 
 du -sh "$DIST/fonts/v2"
 ls -lh "$DIST/fonts/v2"
