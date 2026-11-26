@@ -69,9 +69,14 @@ async fn run(studio: Studio, only: Option<String>) {
         emit(&document, &lines);
         lines.push(s10(&document, studio).await);
         emit(&document, &lines);
-        lines.push(s2(&document, studio).await);
-        emit(&document, &lines);
-        lines.push(s11(&document, studio).await);
+        if studio.local {
+            lines.push(s12(studio).await);
+            emit(&document, &lines);
+        } else {
+            lines.push(s2(&document, studio).await);
+            emit(&document, &lines);
+            lines.push(s11(&document, studio).await);
+        }
     } else if only == "s9font" {
         if !wait_for(|| studio.build.with(|build| build.is_some()), 160).await {
             lines.push(result("S0", false, "构建未完成"));
@@ -1004,6 +1009,26 @@ async fn s10(document: &Document, studio: Studio) -> String {
         replied && sanitized && local_badge && remote_disabled,
         detail,
     )
+}
+
+/// Local mode: the PDF must be written by wasm, not by Axum. Runs before S2
+/// closes every tab, so a build is still available.
+async fn s12(studio: Studio) -> String {
+    match crate::local::pdf(studio).await {
+        Ok(bytes) => {
+            let ok = bytes.len() > 1024 && bytes.starts_with(b"%PDF-");
+            result(
+                "S12",
+                ok,
+                format!(
+                    "本地 PDF {} KB · {}",
+                    bytes.len().div_ceil(1024),
+                    if ok { "%PDF" } else { "bad header" }
+                ),
+            )
+        }
+        Err(error) => result("S12", false, error),
+    }
 }
 
 /* --------------------------------------------------------------------- S11 */

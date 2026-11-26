@@ -6,6 +6,7 @@ pub mod api;
 pub mod app;
 pub mod engine;
 pub mod inspect;
+pub mod local;
 pub mod probe;
 pub mod proof;
 pub mod selftest;

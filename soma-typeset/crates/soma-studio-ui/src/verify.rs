@@ -15,9 +15,13 @@ pub fn VerifyPane() -> impl IntoView {
 
     view! {
         <section class="doc-page" hidden=move || { studio.mode.get() != crate::state::Mode::Verify }>
-            <h1>"校验：wasm vs native"</h1>
+            <h1>{if studio.local { "本地校验（wasm）" } else { "校验：wasm vs native" }}</h1>
             <p class="lead">
-                "同一份源文、模板与引擎参数，分别在浏览器里和 Axum 里排版。canonical 哈希、页数与每页行数必须一致。"
+                {if studio.local {
+                    "整份文档在浏览器 wasm 内解析、断行、分页与校样；下面记录这次构建的 canonical 哈希、页数与每页行数。"
+                } else {
+                    "同一份源文、模板与引擎参数，分别在浏览器里和 Axum 里排版。canonical 哈希、页数与每页行数必须一致。"
+                }}
             </p>
 
             {move || {
@@ -56,7 +60,13 @@ pub fn VerifyPane() -> impl IntoView {
                     view! {
                         <div class="banner ok">
                             <span class="pill ok">"一致"</span>
-                            <span class="fill">"wasm 与 native 的 canonical 哈希、参数、页数与每页行数全部相等。"</span>
+                            <span class="fill">
+                                {if studio.local {
+                                    "本地构建的 canonical 哈希、参数、页数与每页行数已记录。"
+                                } else {
+                                    "wasm 与 native 的 canonical 哈希、参数、页数与每页行数全部相等。"
+                                }}
+                            </span>
                         </div>
                     }.into_any()
                 } else {
@@ -75,7 +85,7 @@ pub fn VerifyPane() -> impl IntoView {
                             <Summary title="wasm（浏览器）" summary=wasm.clone() other=Some(native.clone())/>
                         </div>
                         <div style="flex:1;min-width:0">
-                            <Summary title="native（Axum）" summary=native.clone() other=Some(wasm.clone())/>
+                            <Summary title=if studio.local { "本地摘要（同一构建）" } else { "native（Axum）" } summary=native.clone() other=Some(wasm.clone())/>
                         </div>
                     </div>
                     <div class="panel">

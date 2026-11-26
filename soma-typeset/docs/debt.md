@@ -135,6 +135,8 @@
 | D114 | ~~行内代码无空格且无分隔符时不可断~~ | **已关闭（ADR-0112）**：无空格、无分隔符的长代码串（base64、超长驼峰标识符）先按驼峰/`_`/`.` 接缝切开；仍无接缝且超过 12 字符时逐字符给断点（`INTRUSIVE_BREAK_PENALTY = 2000`），文本拼接仍等于原文 | 单个字形比版心还宽时仍会 overfull（字形本身的属性） | ✅ 已关闭 | 否 |
 | D115 | ~~单字行（非末行）不计费~~ | **已关闭（ADR-0112）**：`short_score` 现在对每条齐行行计费（同一 `short_last_threshold`/`short_last_scale`），末行仍走 `ParagraphEnd` 分支；`ForcedEnd` 行按作者意图豁免 | 非末行孤字不再免费，emergency 阶段会优先把它放到代价最小的位置 | ✅ 已关闭 | 否 |
 | D116 | 图边标签可能与箭头/节点重叠 | 边标签居中在边的中点，没有避让；TACTUS 页 7 的 `render plan` 与箭头相撞 | 复杂流程图的可读性下降 | 给边标签留避让通道或垂直偏移 | 否 |
+| D117 | 本地模式只打开内置 `full.tex` | `local` 模式的树只有内嵌文档；打开任意本地文件/写回原文件要用 File System Access API，尚未接线。`?server=1` 仍保留服务端文件树 | 公共演示不能直接编辑用户自己的文件；可把内容粘贴进源文面板 | 需要“打开本地文件”时加 `<input type=file>` + File System Access，并保持确定性输入 | 否 |
+| D118 | 本地 PDF 在子集覆盖不足时回退完整字体 | 演示文档与模板字符串覆盖时用 `/fonts/v1/pdf-subset/`（约 0.9 MB）；用户新增字符超出覆盖集时回退 `/fonts/v1/` 的完整字体（约 19 MB，首次下载） | 首次导出在极少数新字符下可能等待完整字体 | 需要时在浏览器内检测 cmap，或按文档动态请求服务端子集 | 否 |
 | D106 | Ghostscript 渲染 CJK TrueType 子集时字形错位 | Firefox/pdf.js 与 Poppler（`pdftoppm`/`pdftotext`）渲染正确，`gs` 会把正文 CJK 换成别的字形（标题粗体正常）。用整字体替换子集、加 `cmap`/`name`/`post`、写显式 `CIDToGIDMap` 均未改变结果，倾向是 Ghostscript 对保留 GID 空洞的 CIDFontType2 子集的解释差异 | 用 Ghostscript 打印或某些基于 gs 的查看器会看到错字 | 需要时改为紧凑 CID + 重排 GID 的子集格式，并加 gs 渲染回归 | 否 |
 
 ## 3. 非目标（不是债务）
@@ -183,4 +185,4 @@
 | Web Studio | **已完成（ADR-0093/0094）**：`soma-studio-core/-ui/-` 三个 crate、S1–S10、字体探针、SSE 重载、CSP；关闭 D95，新增 D101–D105 |
 | 流程图 | **已完成（ADR-0102）**：`Block::Diagram`、Mermaid/DOT frontend、确定性分层布局、三种渲染器零改动、TikZ 导出；新增 D107 |
 | 混合语法 | **已完成（ADR-0104）**：Markdown 复用 `soma-html`/`soma-latex`，支持行内/行间数学、LaTeX 命令与环境、语义 HTML 与 HTML 块；新增 D109 |
-| 未排期 | D01、D32、D51、D60、D61、D62、D63、D65、D66、D67、D97、D98、D99、D100、D101、D102、D103、D104、D105、D106、D107、D108、D109、D111、D112、D113、D116、N3–N6 |
+| 未排期 | D01、D32、D51、D60、D61、D62、D63、D65、D66、D67、D97、D98、D99、D100、D101、D102、D103、D104、D105、D106、D107、D108、D109、D111、D112、D113、D116、D117、D118、N3–N6 |

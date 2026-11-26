@@ -1860,6 +1860,7 @@ dependencies = [
  "soma-doc",
  "soma-layout",
  "soma-render-html",
+ "soma-render-pdf",
  "soma-render-svg",
  "soma-studio-core",
  "soma-template",

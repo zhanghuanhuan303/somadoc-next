@@ -45,6 +45,9 @@ struct Options {
     hyphenation: Option<PathBuf>,
     host: String,
     port: u16,
+    /// Public authorities (host or host:port) accepted as same-origin when a
+    /// reverse proxy terminates TLS in front of the Studio.
+    origins: Vec<String>,
     dist: PathBuf,
     open: bool,
     watch: bool,
@@ -202,6 +205,7 @@ usage:
               [--font-mono <file[#index]>] [--font-mono-bold <file[#index]>]
               [--font-math <file[#index]>] [--font-fallback <file[#index]>]
               [--host 127.0.0.1] [--port 7070] [--dist <dir>]
+              [--allow-origin <host[:port]>]...
               [--open] [--no-watch] [--no-auto-font]
 
 The UI is built with `trunk build` in crates/soma-studio-ui; Axum serves dist/.
@@ -215,6 +219,7 @@ fn parse_args(args: Vec<String>) -> Result<(Options, FontSpecs), String> {
     let mut hyphenation = None;
     let mut host = String::from("127.0.0.1");
     let mut port = 7070u16;
+    let mut origins = Vec::new();
     let mut dist = None;
     let mut open = false;
     let mut watch = true;
@@ -255,6 +260,16 @@ fn parse_args(args: Vec<String>) -> Result<(Options, FontSpecs), String> {
                 port = value()?
                     .parse()
                     .map_err(|_| String::from("--port must be a number"))?
+            }
+            "--allow-origin" => {
+                let parsed = value()?;
+                let parsed = parsed.trim();
+                if parsed.is_empty() || parsed.contains("://") || parsed.contains('/') {
+                    return Err(String::from(
+                        "--allow-origin takes a host or host:port, not a URL",
+                    ));
+                }
+                origins.push(parsed.to_string());
             }
             "--dist" => dist = Some(PathBuf::from(value()?)),
             "--open" => open = true,
@@ -302,6 +317,7 @@ fn parse_args(args: Vec<String>) -> Result<(Options, FontSpecs), String> {
         hyphenation,
         host,
         port,
+        origins,
         dist,
         open,
         watch,
@@ -1098,7 +1114,17 @@ fn origin_allowed(
     configured_host: &str,
     port: u16,
     request_host: Option<&str>,
+    allowed_origins: &[String],
 ) -> bool {
+    // A reverse proxy (Apache/nginx) terminates TLS and forwards the public
+    // Host, so the browser's origin is `https://<public host>`. Only hosts the
+    // operator names explicitly are accepted; the default stays loopback-only.
+    if allowed_origins
+        .iter()
+        .any(|host| origin == format!("http://{host}") || origin == format!("https://{host}"))
+    {
+        return true;
+    }
     if origin == format!("http://{}", authority("127.0.0.1", port))
         || origin == format!("http://{}", authority("localhost", port))
         || origin == format!("http://{}", authority("::1", port))
@@ -1119,7 +1145,8 @@ async fn check_origin(
     request: Request,
     next: Next,
 ) -> Response {
-    if request.uri().path().starts_with("/api") {
+    let path = request.uri().path().to_string();
+    if path.starts_with("/api") {
         if let Some(origin) = request
             .headers()
             .get(header::ORIGIN)
@@ -1129,7 +1156,13 @@ async fn check_origin(
                 .headers()
                 .get(header::HOST)
                 .and_then(|value| value.to_str().ok());
-            if !origin_allowed(origin, &state.options.host, state.options.port, host_header) {
+            if !origin_allowed(
+                origin,
+                &state.options.host,
+                state.options.port,
+                host_header,
+                &state.options.origins,
+            ) {
                 return (StatusCode::FORBIDDEN, "cross-origin request refused").into_response();
             }
         }
@@ -1162,6 +1195,19 @@ async fn check_origin(
     );
     // `trunk` writes fixed asset names; revalidate so a rebuilt UI is never
     // masked by a stale wasm module. API responses already say `no-store`.
+    // Fonts live under a versioned path and never change in place; the wasm
+    // bundle keeps a short TTL until trunk hashes its names.
+    if path.starts_with("/fonts/") {
+        headers.insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=31536000, immutable"),
+        );
+    } else if path.ends_with(".wasm") || path.ends_with(".js") || path.ends_with(".css") {
+        headers.insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=3600"),
+        );
+    }
     headers
         .entry(header::CACHE_CONTROL)
         .or_insert(HeaderValue::from_static("no-cache"));
@@ -1196,26 +1242,36 @@ mod tests {
             "http://127.0.0.1:7070",
             "127.0.0.1",
             7070,
-            None
+            None,
+            &[]
         ));
         assert!(origin_allowed(
             "http://localhost:7070",
             "127.0.0.1",
             7070,
-            None
+            None,
+            &[]
         ));
-        assert!(origin_allowed("http://[::1]:7070", "127.0.0.1", 7070, None));
+        assert!(origin_allowed(
+            "http://[::1]:7070",
+            "127.0.0.1",
+            7070,
+            None,
+            &[]
+        ));
         assert!(!origin_allowed(
             "http://10.0.0.6:7070",
             "127.0.0.1",
             7070,
-            Some("10.0.0.6:7070")
+            Some("10.0.0.6:7070"),
+            &[]
         ));
         assert!(!origin_allowed(
             "http://127.0.0.1:7070",
             "127.0.0.1",
             7091,
-            None
+            None,
+            &[]
         ));
     }
 
@@ -1225,25 +1281,29 @@ mod tests {
             "http://10.0.0.6:7070",
             "10.0.0.6",
             7070,
-            None
+            None,
+            &[]
         ));
         assert!(origin_allowed(
             "http://127.0.0.1:7070",
             "10.0.0.6",
             7070,
-            None
+            None,
+            &[]
         ));
         assert!(!origin_allowed(
             "http://10.0.0.7:7070",
             "10.0.0.6",
             7070,
-            Some("10.0.0.7:7070")
+            Some("10.0.0.7:7070"),
+            &[]
         ));
         assert!(!origin_allowed(
             "http://evil.example:7070",
             "10.0.0.6",
             7070,
-            None
+            None,
+            &[]
         ));
     }
 
@@ -1253,19 +1313,62 @@ mod tests {
             "http://10.0.0.6:7070",
             "0.0.0.0",
             7070,
-            Some("10.0.0.6:7070")
+            Some("10.0.0.6:7070"),
+            &[]
         ));
         assert!(!origin_allowed(
             "http://evil.example:7070",
             "0.0.0.0",
             7070,
-            Some("10.0.0.6:7070")
+            Some("10.0.0.6:7070"),
+            &[]
         ));
         assert!(!origin_allowed(
             "http://10.0.0.6:7070",
             "0.0.0.0",
             7070,
-            None
+            None,
+            &[]
+        ));
+    }
+
+    #[test]
+    fn origin_allowed_accepts_named_https_proxy_origins() {
+        let origins = vec![String::from("somadoc.art"), String::from("www.somadoc.art")];
+        assert!(origin_allowed(
+            "https://somadoc.art",
+            "127.0.0.1",
+            7070,
+            Some("somadoc.art"),
+            &origins
+        ));
+        assert!(origin_allowed(
+            "https://www.somadoc.art",
+            "127.0.0.1",
+            7070,
+            Some("www.somadoc.art"),
+            &origins
+        ));
+        assert!(origin_allowed(
+            "http://somadoc.art",
+            "127.0.0.1",
+            7070,
+            None,
+            &origins
+        ));
+        assert!(!origin_allowed(
+            "https://evil.example",
+            "127.0.0.1",
+            7070,
+            Some("somadoc.art"),
+            &origins
+        ));
+        assert!(!origin_allowed(
+            "https://somadoc.art.evil.example",
+            "127.0.0.1",
+            7070,
+            None,
+            &origins
         ));
     }
 
@@ -1274,12 +1377,13 @@ mod tests {
         assert_eq!(authority("::1", 7070), "[::1]:7070");
         assert_eq!(authority("[::1]", 7070), "[::1]:7070");
         assert_eq!(authority("10.0.0.6", 7070), "10.0.0.6:7070");
-        assert!(origin_allowed("http://[::1]:7070", "::1", 7070, None));
+        assert!(origin_allowed("http://[::1]:7070", "::1", 7070, None, &[]));
         assert!(origin_allowed(
             "http://[fd00::6]:7070",
             "fd00::6",
             7070,
-            None
+            None,
+            &[]
         ));
     }
 
@@ -1301,6 +1405,29 @@ mod tests {
             String::from(input),
             String::from("--host"),
             String::new(),
+        ];
+        assert!(parse_args(args).is_err());
+    }
+
+    #[test]
+    fn parse_args_collects_repeated_allow_origin_hosts() {
+        let input = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+        let args = vec![
+            String::from("--input"),
+            String::from(input),
+            String::from("--allow-origin"),
+            String::from("somadoc.art"),
+            String::from("--allow-origin"),
+            String::from("www.somadoc.art"),
+        ];
+        let (options, _) = parse_args(args).expect("args should parse");
+        assert_eq!(options.origins, vec!["somadoc.art", "www.somadoc.art"]);
+
+        let args = vec![
+            String::from("--input"),
+            String::from(input),
+            String::from("--allow-origin"),
+            String::from("https://somadoc.art"),
         ];
         assert!(parse_args(args).is_err());
     }

@@ -1,6 +1,9 @@
 //! Shared UI state and the two actions that talk to the engine/server:
 //! `rebuild_now` (wasm) and `verify_now` (native).
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -159,6 +162,11 @@ pub struct Studio {
     pub split: RwSignal<f64>,
     pub font_probe: RwSignal<Option<ProbeReport>>,
     pub probe_seq: RwSignal<u64>,
+    /// True when the engine runs entirely in wasm; the Axum API is not used
+    /// for verification, PDF or TikZ.
+    pub local: bool,
+    /// Raw PDF faces, fetched once from `/fonts/` on the first export.
+    pub pdf_fonts: RwSignal<Option<Arc<BTreeMap<String, Vec<u8>>>>>,
 }
 
 impl Default for Studio {
@@ -210,6 +218,8 @@ impl Studio {
             split: RwSignal::new(0.46),
             font_probe: RwSignal::new(None),
             probe_seq: RwSignal::new(0),
+            local: crate::local::is_local(),
+            pdf_fonts: RwSignal::new(None),
         }
     }
 
@@ -280,10 +290,53 @@ pub fn file_name(path: &str) -> String {
     path.rsplit('/').next().unwrap_or(path).to_string()
 }
 
+/// First paint for a browser-local session. Everything needed to lay out the
+/// default document is embedded in the wasm; only fonts and figures are static
+/// files fetched by the same page.
+///
+/// The function deliberately does not touch `/api`: a failed or slow server
+/// must not be on the editing path.
+pub fn apply_local_project(studio: Studio) {
+    let project = crate::local::project();
+    let source = project.source_text.clone().unwrap_or_default();
+    let tab = DocTab {
+        id: 1,
+        path: project.input_relative.clone(),
+        title: file_name(&project.input_relative),
+        source: source.clone(),
+        format: project.format,
+        dirty: false,
+    };
+    studio.tabs.set(vec![tab]);
+    studio.active.set(0);
+    studio.source.set(source);
+    studio.template.set(project.template.clone());
+    studio.engine_text.set(project.engine.clone());
+    studio.docx_bytes.set(None);
+    studio
+        .metrics_bytes
+        .set(Some(crate::local::METRICS.to_vec()));
+    studio
+        .hyphenation
+        .set(Some(crate::local::HYPHENATION.to_string()));
+    studio.aux.set(None);
+    studio.page.set(0);
+    studio.selection.set(Selection::default());
+    install_fonts(&project);
+    studio.project.set(Some(project.clone()));
+    studio.tree.set(crate::local::tree());
+    rebuild_now(studio);
+}
+
 /// Subscribe to the server's file watcher. A successful reload refreshes the
 /// open tab only when it is clean; unsaved local edits always win. A failed
 /// reload keeps the previous build and raises a diagnostic.
 pub fn install_events(studio: Studio) {
+    // Local mode has no watcher to subscribe to; the wasm build is the source
+    // of truth and rebuilds in the same page.
+    if studio.local {
+        return;
+    }
     // The self-test runs headless with `--dump-dom`; a live SSE connection
     // keeps the page from reaching the idle state that command waits for.
     if web_sys::window()
@@ -477,6 +530,7 @@ pub fn rebuild_now(studio: Studio) {
                 engine.as_deref(),
                 metrics.as_deref(),
                 hyphenation.as_deref(),
+                studio.local,
             )
             .await
         } else {
@@ -487,6 +541,7 @@ pub fn rebuild_now(studio: Studio) {
                 engine.as_deref(),
                 metrics.as_deref(),
                 hyphenation.as_deref(),
+                studio.local,
             )
             .await
         };
@@ -496,6 +551,7 @@ pub fn rebuild_now(studio: Studio) {
         studio.building.set(false);
         match result {
             Ok(build) => {
+                let summary = studio.local.then(|| build.build.summary(build.elapsed_ms));
                 studio.build.set(Some(build));
                 studio.build_error.set(None);
                 let pages = studio.build.with(|build| {
@@ -507,7 +563,13 @@ pub fn rebuild_now(studio: Studio) {
                 if studio.page.get_untracked() >= pages as usize {
                     studio.page.set(0);
                 }
-                verify_now(studio);
+                match summary {
+                    Some(summary) => {
+                        studio.verify.set(Some(summary));
+                        studio.verify_error.set(None);
+                    }
+                    None => verify_now(studio),
+                }
             }
             Err(error) => {
                 studio.build_error.set(Some(error));
@@ -519,6 +581,22 @@ pub fn rebuild_now(studio: Studio) {
 /* ------------------------------------------------------------------- verify */
 
 pub fn verify_now(studio: Studio) {
+    if studio.local {
+        studio.verify_seq.update(|seq| *seq += 1);
+        match studio.summary() {
+            Some(summary) => {
+                studio.verify.set(Some(summary));
+                studio.verify_error.set(None);
+            }
+            None => {
+                studio.verify.set(None);
+                studio
+                    .verify_error
+                    .set(Some(String::from("还没有可校验的构建")));
+            }
+        }
+        return;
+    }
     let Some(format) = active_format(studio) else {
         return;
     };
@@ -567,6 +645,29 @@ pub fn open_file(studio: Studio, path: String) {
         return;
     };
     let name = file_name(&path);
+    if studio.local {
+        if path != "full.tex" {
+            toast(studio, "本地模式只内置 full.tex", "warn");
+            return;
+        }
+        let text = crate::local::SOURCE.to_string();
+        let index = studio.tabs.with_untracked(|tabs| tabs.len());
+        studio.tabs.update(|tabs| {
+            tabs.push(DocTab {
+                id: (tabs.len() as u64) + 1,
+                path: path.clone(),
+                title: name,
+                source: text.clone(),
+                format,
+                dirty: false,
+            });
+        });
+        studio.active.set(index);
+        studio.source.set(text);
+        studio.docx_bytes.set(None);
+        rebuild_now(studio);
+        return;
+    }
     spawn_local(async move {
         if format == SourceFormat::Docx {
             let Ok(bytes) = api::asset(&path).await else {
@@ -690,6 +791,21 @@ pub fn save_active(studio: Studio) {
     };
     let text = studio.source.get_untracked();
     let path = tab.path.clone();
+    if studio.local {
+        match api::download(&path, text.as_bytes()) {
+            Ok(()) => {
+                studio.tabs.update(|tabs| {
+                    if let Some(tab) = tabs.get_mut(index) {
+                        tab.source = text;
+                        tab.dirty = false;
+                    }
+                });
+                toast(studio, "已下载", "ok");
+            }
+            Err(error) => toast(studio, error, "bad"),
+        }
+        return;
+    }
     spawn_local(async move {
         match api::save(&path, &text).await {
             Ok(()) => {
@@ -727,6 +843,29 @@ pub fn export_pdf(studio: Studio) {
         toast(studio, "服务端没有配置 PDF 字体", "bad");
         return;
     }
+    if studio.local {
+        spawn_local(async move {
+            match crate::local::pdf(studio).await {
+                Ok(bytes) if bytes.is_empty() => {
+                    toast(studio, "本地生成了空 PDF", "bad");
+                }
+                Ok(bytes) => {
+                    let pages = studio.summary().map(|summary| summary.pages).unwrap_or(0);
+                    let kb = bytes.len().div_ceil(1024);
+                    match api::download("soma-studio.pdf", &bytes) {
+                        Ok(()) => toast(
+                            studio,
+                            format!("PDF 已在浏览器生成 · {pages} 页 · {kb} KB"),
+                            "ok",
+                        ),
+                        Err(error) => toast(studio, error, "bad"),
+                    }
+                }
+                Err(error) => toast(studio, error, "bad"),
+            }
+        });
+        return;
+    }
     let request = BuildRequest {
         source: if format == SourceFormat::Docx {
             None
@@ -761,6 +900,24 @@ pub fn export_tikz(studio: Studio) {
     };
     if studio.build.with_untracked(|build| build.is_none()) {
         toast(studio, "还没有可导出的构建", "bad");
+        return;
+    }
+    if studio.local {
+        spawn_local(async move {
+            match crate::local::tikz(studio) {
+                Ok(text) if text.trim().is_empty() => {
+                    toast(studio, "本地生成了空 TikZ", "bad");
+                }
+                Ok(text) => {
+                    let kb = text.len().div_ceil(1024);
+                    match api::download("soma-diagram.tikz", text.as_bytes()) {
+                        Ok(()) => toast(studio, format!("TikZ 已在浏览器生成 · {kb} KB"), "ok"),
+                        Err(error) => toast(studio, error, "bad"),
+                    }
+                }
+                Err(error) => toast(studio, error, "bad"),
+            }
+        });
         return;
     }
     let request = BuildRequest {

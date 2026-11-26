@@ -17,6 +17,8 @@ pub struct AppBuild {
     /// Canonical DocIR with node spans. Kept beside the layout so source
     /// mapping does not re-serialize on every cursor move.
     pub docir: serde_json::Value,
+    /// Image bytes loaded for the proof; the PDF exporter needs the same map.
+    pub images: ImageBytes,
     pub elapsed_ms: u64,
 }
 
@@ -34,6 +36,7 @@ pub async fn build(
     engine: Option<&str>,
     metrics: Option<&[u8]>,
     hyphenation: Option<&str>,
+    local: bool,
 ) -> Result<AppBuild, String> {
     let started = js_sys::Date::now();
     let bytes: &[u8] = match input {
@@ -52,7 +55,11 @@ pub async fn build(
         if images.get(&src).is_some() {
             continue;
         }
-        if let Ok(bytes) = api::asset(&src).await {
+        if let Ok(bytes) = if local {
+            crate::local::asset(&src).await
+        } else {
+            api::asset(&src).await
+        } {
             images.insert(src, bytes);
         }
     }
@@ -75,6 +82,7 @@ pub async fn build(
         build,
         svg_fragments,
         docir,
+        images,
         elapsed_ms,
     })
 }

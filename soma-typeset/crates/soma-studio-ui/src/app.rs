@@ -34,6 +34,11 @@ pub fn App() -> impl IntoView {
         }
         loaded.set_value(true);
         spawn_local(async move {
+            if studio.local {
+                state::apply_local_project(studio);
+                apply_url_params(studio);
+                return;
+            }
             match api::project().await {
                 Ok(project) => {
                     state::apply_project(studio, project);
