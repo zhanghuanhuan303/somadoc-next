@@ -38,6 +38,8 @@ const HEADER_RULE: i32 = 234;
 const RULE: i32 = 156;
 /// One 10.5pt line at line-height 1.6.
 const LINE: i32 = 6553;
+/// Booktabs-style rule separation: 0.25 em at the 10.5pt body size.
+const SEP: i32 = 1024;
 
 fn cell(value: &str, colspan: u16, rowspan: u16) -> Cell {
     let paragraph = Paragraph::new(NodeMeta::synthesized(), vec![text(value)]);
@@ -107,10 +109,10 @@ fn rules_bracket_every_row_and_repeat_on_continuation_pages() {
             .iter()
             .find(|block| block_text(&layout, block) == "表头")
             .unwrap_or_else(|| panic!("page {page} repeats the header"));
-        assert_eq!(header.y.0, OUTER, "header sits below the outer rule");
+        assert_eq!(header.y.0, OUTER + SEP, "header sits below the outer rule");
 
         let header_rule = rules[1];
-        assert_eq!(header_rule.y.0, OUTER + LINE);
+        assert_eq!(header_rule.y.0, OUTER + SEP + LINE + SEP);
         assert_eq!(header_rule.height.0, HEADER_RULE);
         assert_eq!(header_rule.width.0, content_width);
 
@@ -120,8 +122,8 @@ fn rules_bracket_every_row_and_repeat_on_continuation_pages() {
             .collect();
         assert!(!body.is_empty(), "page {page} has body rows");
         assert!(
-            body[0].y.0 >= OUTER + LINE + HEADER_RULE,
-            "body starts below the header rule"
+            body[0].y.0 >= OUTER + SEP + LINE + SEP + HEADER_RULE + SEP,
+            "body starts below the header rule and its separation"
         );
 
         // Each body row carries its own trailing rule; the last page ends
@@ -171,12 +173,12 @@ fn an_internal_rule_skips_a_spanning_cell() {
     ];
     let table = Table::new(NodeMeta::synthesized(), columns(2), rows);
     let doc = document(vec![Block::Table(table)]);
-    let styled = styled(&doc, RULED);
+    let source = RULED.replace("height: 34mm", "height: 70mm");
+    let styled = styled(&doc, &source);
     let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
 
     assert_eq!(layout.page_count(), 1, "the fixture fits one page");
     let content_width = layout.page.content_width().0;
-    let half = content_width / 2;
     let rules = of_kind(&layout, 0, BoxKind::TableRule);
 
     // outer top, three internal boundaries, outer bottom.
@@ -190,8 +192,14 @@ fn an_internal_rule_skips_a_spanning_cell() {
         1,
         "only the boundary inside the span is split"
     );
-    assert_eq!(partial[0].x.0, half);
-    assert_eq!(partial[0].width.0, content_width - half);
+    // The boundary sits where the right-hand column starts; columns are sized
+    // by content (D90), so it is no longer necessarily the middle.
+    let right = of_kind(&layout, 0, BoxKind::TableCell)
+        .into_iter()
+        .find(|block| block_text(&layout, block) == "右下")
+        .expect("bottom-right cell");
+    assert_eq!(partial[0].x.0, right.x.0);
+    assert_eq!(partial[0].width.0, content_width - right.x.0);
     assert_eq!(partial[0].height.0, RULE);
     for rule in rules.iter().filter(|rule| rule.width.0 == content_width) {
         assert_eq!(rule.x.0, 0);
@@ -218,14 +226,14 @@ fn rules_add_their_own_vertical_space() {
     assert_eq!(rules.len(), 2, "top and bottom outer rules");
     assert_eq!(rules[0].y.0, 0);
     assert_eq!(rules[0].height.0, OUTER);
-    assert_eq!(cells[0].y.0, OUTER);
+    assert_eq!(cells[0].y.0, OUTER + SEP);
 
     let bottom = rules[1];
-    assert_eq!(bottom.y.0, OUTER + cells[0].height.0);
+    assert_eq!(bottom.y.0, OUTER + SEP + cells[0].height.0 + SEP);
     assert_eq!(bottom.height.0, OUTER);
     assert_eq!(
         layout.pages[0].used_height.0,
-        OUTER + cells[0].height.0 + OUTER
+        OUTER + SEP + cells[0].height.0 + SEP + OUTER
     );
 }
 
@@ -298,7 +306,12 @@ fn a_grid_draws_vertical_rules_and_a_frame() {
     let rules = of_kind(&layout, 0, BoxKind::TableRule);
     assert_eq!(rules.len(), 3, "left frame, middle rule, right frame");
     let table_width = layout.page.content_width().0;
-    let column = table_width / 2;
+    let column = of_kind(&layout, 0, BoxKind::TableCell)
+        .into_iter()
+        .find(|block| block_text(&layout, block) == "右下")
+        .expect("bottom-right cell")
+        .x
+        .0;
     let middle = rules
         .iter()
         .find(|rule| rule.x.0 > 0 && rule.x.0 + rule.width.0 < table_width)
@@ -335,7 +348,12 @@ fn a_vertical_rule_skips_a_colspan_cell() {
     let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
 
     let table_width = layout.page.content_width().0;
-    let column = table_width / 2;
+    let column = of_kind(&layout, 0, BoxKind::TableCell)
+        .into_iter()
+        .find(|block| block_text(&layout, block) == "右下")
+        .expect("bottom-right cell")
+        .x
+        .0;
     let middle: Vec<_> = of_kind(&layout, 0, BoxKind::TableRule)
         .into_iter()
         .filter(|rule| rule.x.0 > 0 && rule.x.0 + rule.width.0 < table_width)

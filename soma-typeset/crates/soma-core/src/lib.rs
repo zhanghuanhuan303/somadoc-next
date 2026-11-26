@@ -26,10 +26,12 @@ pub use breaker::{
     GreedyMode, KpTrace, LineTrace, Window,
 };
 pub use ir::{
-    Align, Atom, AtomKind, Boundary, BoundaryKind, BoundaryRole, Breakability, Glue, IrError,
-    Paragraph, ParagraphStyle, PunctClass,
+    Align, Atom, AtomKind, Boundary, BoundaryKind, BoundaryRole, Breakability, Decorations, Glue,
+    IrError, Paragraph, ParagraphStyle, PunctClass, SyntaxClass,
 };
-pub use metrics::{GlyphMetrics, LineMetrics, Metrics, StyleId, SyntheticMetrics};
+pub use metrics::{
+    GlyphMetrics, LineMetrics, MathParam, MathVariant, Metrics, StyleId, SyntheticMetrics,
+};
 pub use params::{
     BreakParams, CostParams, FallbackParams, FeatureFlags, ParamError, ParamHash, ParamSet,
     Permille, PresetId, TieBreak, TrimPriority, Weight,

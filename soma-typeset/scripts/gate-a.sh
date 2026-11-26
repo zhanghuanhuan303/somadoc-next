@@ -58,26 +58,30 @@ check_deps() {
     done
 }
 
-check_deps soma-layout "soma-layout soma-core soma-doc soma-math soma-metrics soma-rules soma-template"
-check_deps soma-md "soma-md soma-doc"
+check_deps soma-layout "soma-collate soma-hyphen soma-highlight soma-layout soma-core soma-doc soma-math soma-metrics soma-rules soma-template soma-tikz soma-diagram"
+check_deps soma-md "soma-md soma-doc soma-html soma-latex"
 check_deps soma-html "soma-html soma-doc"
 check_deps soma-latex "soma-latex soma-doc"
 check_deps soma-math "soma-math soma-core"
 check_deps soma-engine "soma-engine soma-core"
 check_deps soma-metrics "soma-metrics"
+check_deps soma-highlight "soma-highlight soma-core"
+check_deps soma-tikz "soma-tikz soma-core soma-math"
+check_deps soma-diagram "soma-diagram soma-core soma-doc soma-math soma-tikz"
 check_deps soma-render-html "soma-render-html soma-core soma-layout soma-template"
 check_deps soma-render-svg "soma-render-svg soma-core soma-layout soma-template"
 check_deps soma-render-pdf "soma-render-pdf soma-core soma-layout soma-template"
-check_deps soma-cli "soma-cli soma-core soma-doc soma-engine soma-html soma-latex soma-layout soma-md soma-metrics soma-render-html soma-render-svg soma-render-pdf soma-template"
+check_deps soma-cli "soma-cli soma-core soma-doc soma-docx soma-engine soma-html soma-hyphen soma-latex soma-layout soma-diagram soma-md soma-metrics soma-render-html soma-render-svg soma-render-pdf soma-template"
+check_deps soma-docx "soma-docx soma-doc"
 
-for crate in soma-engine soma-layout soma-md soma-html soma-latex soma-math soma-metrics soma-render-html soma-render-svg soma-render-pdf; do
+for crate in soma-engine soma-layout soma-highlight soma-tikz soma-diagram soma-md soma-html soma-latex soma-math soma-metrics soma-render-html soma-render-svg soma-render-pdf soma-docx soma-hyphen; do
     if grep -q 'extern crate std' "crates/$crate/src/lib.rs"; then
         echo "$crate must stay no_std" >&2
         exit 1
     fi
 done
 
-if grep -REn '\b(f32|f64)\b' crates/soma-layout/src crates/soma-md/src crates/soma-html/src crates/soma-latex/src crates/soma-math/src crates/soma-metrics/src crates/soma-render-html/src crates/soma-render-svg/src crates/soma-render-pdf/src crates/soma-engine/src \
+if grep -REn '\b(f32|f64)\b' crates/soma-layout/src crates/soma-highlight/src crates/soma-tikz/src crates/soma-diagram/src crates/soma-md/src crates/soma-html/src crates/soma-latex/src crates/soma-math/src crates/soma-metrics/src crates/soma-render-html/src crates/soma-render-svg/src crates/soma-render-pdf/src crates/soma-engine/src \
     --include='*.rs' | grep -vE ':[0-9]+:[[:space:]]*//'; then
     echo "layout, markdown, metrics, render, and engine must stay integer-only" >&2
     exit 1
@@ -107,12 +111,12 @@ fi
 
 echo "== gate A: layer schema versions are declared =="
 grep -q 'pub const SCHEMA: ' crates/soma-doc/src/doc.rs
-grep -q '"soma.doc/2"' crates/soma-doc/src/doc.rs
-grep -q 'pub const DOC_IR_VERSION: u16 = 2' crates/soma-doc/src/doc.rs
+grep -q '"soma.doc/3"' crates/soma-doc/src/doc.rs
+grep -q 'pub const DOC_IR_VERSION: u16 = 3' crates/soma-doc/src/doc.rs
 grep -q 'soma.layout/6' crates/soma-core/src/result.rs
 grep -q '"soma.template/9"' crates/soma-template/src/template.rs
 grep -q '"soma.styles/7"' crates/soma-template/src/canonical.rs
-grep -q '"soma.pages/9"' crates/soma-layout/src/canonical.rs
+grep -q '"soma.pages/11"' crates/soma-layout/src/canonical.rs
 grep -q '"soma.engine/1"' crates/soma-engine/src/lib.rs
 
 echo "== gate A: DocIR and templates carry no physical style in content =="

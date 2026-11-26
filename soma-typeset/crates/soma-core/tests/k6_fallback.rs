@@ -7,8 +7,8 @@
 
 use soma_core::{
     break_paragraph, Align, Atom, AtomKind, Boundary, BoundaryKind, BoundaryRole, BreakConfig,
-    BreakError, Breakability, FallbackStage, Glue, Paragraph, ParagraphStyle, ParamSet, PunctClass,
-    StyleId, SyntheticMetrics, Width,
+    BreakError, Breakability, Decorations, FallbackStage, Glue, Paragraph, ParagraphStyle,
+    ParamSet, PunctClass, StyleId, SyntheticMetrics, Width,
 };
 
 fn atom(text: &str) -> Atom {
@@ -17,6 +17,8 @@ fn atom(text: &str) -> Atom {
         kind: AtomKind::Cjk,
         class: PunctClass::None,
         style: StyleId(0),
+        decor: Decorations::NONE,
+        link: None,
         compress_left: Width::ZERO,
         compress_right: Width::ZERO,
     }
@@ -37,6 +39,8 @@ fn rescue_paragraph() -> Paragraph {
         style: ParagraphStyle {
             width: Width::from_em(2),
             first_indent: Width::ZERO,
+            hang: Width::ZERO,
+            tracking: Width::ZERO,
             line_height: Width::from_em_frac(3, 2),
             align: Align::Justify,
         },
@@ -96,6 +100,8 @@ fn normal_stage_never_violates_forbidden_boundaries() {
         style: ParagraphStyle {
             width: Width::from_em(4),
             first_indent: Width::ZERO,
+            hang: Width::ZERO,
+            tracking: Width::ZERO,
             line_height: Width::from_em_frac(3, 2),
             align: Align::Justify,
         },
@@ -126,6 +132,8 @@ fn emergency_stage_reports_its_lines() {
         style: ParagraphStyle {
             width: Width::from_em(2),
             first_indent: Width::ZERO,
+            hang: Width::ZERO,
+            tracking: Width::ZERO,
             line_height: Width::from_em_frac(3, 2),
             align: Align::Justify,
         },
@@ -134,6 +142,8 @@ fn emergency_stage_reports_its_lines() {
             kind: AtomKind::LatinRun,
             class: PunctClass::None,
             style: StyleId(0),
+            decor: Decorations::NONE,
+            link: None,
             compress_left: Width::ZERO,
             compress_right: Width::ZERO,
         }],

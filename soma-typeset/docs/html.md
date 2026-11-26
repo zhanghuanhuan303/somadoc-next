@@ -1,6 +1,6 @@
 # HTML 前端（`soma-html`）
 
-状态：**v1 已落地**（schema 不变：输出 `soma.doc/2`）。
+状态：**v1 已落地**（schema 不变：输出 `soma.doc/3`）。
 代码是权威；本文说明支持的语义、降级方式和限制。
 
 参考：`docs/architecture-v2.md` §3、ADR-0004（语法前端）、ADR-0009（语义/呈现边界）、
@@ -28,6 +28,7 @@ let document = parse_html("<h1>标题</h1><p>正文 <strong>重点</strong>。</
 | `h1`–`h6` | `Block::Heading(level)` |
 | `p` | `Block::Paragraph` |
 | `ul` / `ol`（`start`） | `Block::List(ordered, start)` |
+| `dl` / `dt` / `dd` | `Block::List`（无序；`dt`/`dd` 按源顺序扁平为条目） |
 | `li` | `ListItem`（可含多个块） |
 | `blockquote` | `Block::BlockQuote` |
 | `pre`（`class="language-x"`） | `Block::CodeBlock(lang)` |
@@ -35,7 +36,9 @@ let document = parse_html("<h1>标题</h1><p>正文 <strong>重点</strong>。</
 | `table` / `thead` / `tbody` / `tr` / `th` / `td` | `Block::Table`（`colspan`/`rowspan`，表头前缀） |
 | `figure` + `img` + `figcaption` | `Block::Figure` + caption |
 | `div`/`section`/`article`/`main`/`header`/`footer`/`nav`/`aside` | 透明容器（子节点成为块） |
-| `strong`/`b`、`em`/`i`、`u`、`s`/`del`/`strike` | 行内容器 |
+| `details` | 透明容器；PDF/HTML 校样都展开显示 |
+| `summary` | `Block::Paragraph` + `Inline::Strong`（折叠块的标题行） |
+| `strong`/`b`、`em`/`i`、`u`/`ins`、`s`/`del`/`strike` | 行内容器 |
 | `code`/`kbd`/`samp`/`var` | `Inline::Code` |
 | `a[href]` | `Inline::Link` |
 | `img[src,alt]` | `Inline::Image` 或 `Figure` |
@@ -66,7 +69,8 @@ let document = parse_html("<h1>标题</h1><p>正文 <strong>重点</strong>。</
 ## 5. 限制（见 `docs/debt.md` D69）
 
 - 不执行 CSS、脚本、表单、框架；`style` 属性不进入 DocIR。
-- 不映射 `<caption>`、`<colgroup>`、`<col>`、脚注标记、`<math>`。
+- `<details>` 在静态 PDF 中不能真正折叠，按“展开”排：`summary` 是加粗首行，正文照常参与分页。
+- `<caption>` 成为表题；`<colgroup>`/`<col>` 的 `width`/`span` 成为列的相对宽度（ADR-0065）。不映射脚注标记、`<math>`。
 - 实体只覆盖常见集合，完整 HTML5 实体表未做。
 - 不保留源位置（`SourceSpan` 为空），错误诊断只有“能解析/不能解析”。
 

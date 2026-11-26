@@ -16,6 +16,60 @@ impl MathMetrics for TestMetrics {
     fn descent(&self, size: Width) -> Width {
         Width(size.0 / 4)
     }
+    fn has(&self, character: char) -> bool {
+        // This face has no Mathematical Italic block, so variables stay
+        // upright and the assertions below can name the letters they wrote.
+        (character as u32) < 0x1_0000
+    }
+}
+
+/// A face that carries the Mathematical Italic block, like a real math font.
+struct ItalicMetrics;
+
+impl MathMetrics for ItalicMetrics {
+    fn has(&self, _character: char) -> bool {
+        true
+    }
+    fn advance(&self, text: &str, size: Width) -> Width {
+        Width(text.chars().count() as i32 * size.0 / 2)
+    }
+    fn ascent(&self, size: Width) -> Width {
+        Width(size.0 * 3 / 4)
+    }
+    fn descent(&self, size: Width) -> Width {
+        Width(size.0 / 4)
+    }
+}
+
+#[test]
+fn a_variable_is_set_italic_when_the_face_has_the_glyph() {
+    let upright = layout("x", &MathStyle::default(), &TestMetrics).expect("layout");
+    let italic = layout("x", &MathStyle::default(), &ItalicMetrics).expect("layout");
+    assert_eq!(upright.items[0].text, "x");
+    assert_eq!(
+        italic.items[0].text, "\u{1d465}",
+        "a variable becomes U+1D465 MATHEMATICAL ITALIC SMALL X"
+    );
+}
+
+#[test]
+fn function_names_and_text_stay_upright() {
+    let result = layout(
+        "\\sin x + \\text{if}",
+        &MathStyle::default(),
+        &ItalicMetrics,
+    )
+    .expect("layout");
+    let texts: Vec<&str> = result.items.iter().map(|item| item.text.as_str()).collect();
+    assert!(
+        texts.contains(&"sin"),
+        "a function name is a word: {texts:?}"
+    );
+    assert!(texts.contains(&"if"), "\\text stays upright: {texts:?}");
+    assert!(
+        texts.contains(&"\u{1d465}"),
+        "the variable is italic: {texts:?}"
+    );
 }
 
 fn formula(source: &str) -> soma_math::MathLayout {
@@ -34,6 +88,44 @@ fn superscripts_are_smaller_and_above_the_baseline() {
     assert!(sup.y.0 < 0, "a superscript sits above the baseline");
     assert!(sup.x.0 >= base.x.0 + TestMetrics.advance("x", base.size).0);
     assert!(result.width.0 > TestMetrics.advance("x", base.size).0);
+}
+
+#[test]
+fn a_superscript_is_lifted_by_rule_18_not_by_its_height() {
+    // TeX rule 18: the superscript baseline is `sup_shift` above the base's,
+    // but never more than `sup_drop` below the base's top, and never closer
+    // than `sup_bottom_min` to the baseline. With a real ink box, a lowercase
+    // `x` is short enough that `sup_shift` alone wins.
+    struct InkMetrics;
+    impl MathMetrics for InkMetrics {
+        fn advance(&self, text: &str, size: Width) -> Width {
+            Width(text.chars().count() as i32 * size.0 / 2)
+        }
+        fn ascent(&self, size: Width) -> Width {
+            Width(size.0 * 3 / 4)
+        }
+        fn descent(&self, size: Width) -> Width {
+            Width(size.0 / 4)
+        }
+        fn ink(&self, text: &str, size: Width) -> Option<(Width, Width)> {
+            let (above, below) = match text.chars().next() {
+                Some('x') => (450, 0),
+                Some('2') => (640, 0),
+                _ => (750, 250),
+            };
+            Some((Width(size.0 * above / 1000), Width(size.0 * below / 1000)))
+        }
+        fn has(&self, _character: char) -> bool {
+            // Keep letters upright so the test can name the glyph it measured.
+            false
+        }
+    }
+
+    let result = layout("x^2", &MathStyle::default(), &InkMetrics).expect("layout");
+    let sup = &result.items[1];
+    let style = MathStyle::default();
+    let shift = i64::from(result.items[0].size.0) * i64::from(style.sup_shift) / 1000;
+    assert_eq!(i64::from(-sup.y.0), shift);
 }
 
 #[test]
@@ -132,8 +224,15 @@ fn a_radical_draws_a_bar_over_its_body() {
         bar.x.0 >= glyph.x.0 + TestMetrics.advance("√", glyph.size).0 - 1,
         "the bar starts after the radical glyph"
     );
-    // The bar sits at the top of the body and the glyph is stretched.
-    assert!(bar.y.0 <= -TestMetrics.ascent(glyph.size).0 + bar.thickness.0);
+    // The bar sits on the body's ink top, one rule below it. The surd is
+    // chosen to cover the body and may rise above the bar.
+    assert!(
+        bar.y.0 <= -TestMetrics.ascent(Width::EM).0 + bar.thickness.0,
+        "bar {} body ascent {} thickness {}",
+        bar.y.0,
+        TestMetrics.ascent(Width::EM).0,
+        bar.thickness.0
+    );
     assert!(glyph.size.0 >= Width::EM.0, "the radical covers the body");
     assert!(result.total_height().0 >= bar.thickness.0);
 }
@@ -488,4 +587,694 @@ fn an_unbalanced_environment_is_an_error() {
         parse(r"\left( x"),
         Err(MathError::UnbalancedDelimiter)
     ));
+}
+
+#[test]
+fn a_radical_inside_a_fraction_keeps_its_own_baseline() {
+    // `\frac{\sqrt{\pi}}{2}`: the radical used to ignore the baseline its
+    // parent gave it, so the numerator collapsed onto the bar. Every numerator
+    // glyph must sit above the fraction rule, every denominator glyph below.
+    let result = formula("\\frac{\\sqrt{\\pi}}{2}");
+    let rules = &result.rules;
+    assert_eq!(rules.len(), 2, "the radical bar and the fraction bar");
+    let fraction = rules
+        .iter()
+        .max_by_key(|rule| rule.width.0)
+        .expect("fraction rule");
+    let radical = rules
+        .iter()
+        .min_by_key(|rule| rule.width.0)
+        .expect("radical bar");
+
+    let pi = result
+        .items
+        .iter()
+        .find(|item| item.text == "π")
+        .expect("radicand");
+    let two = result
+        .items
+        .iter()
+        .find(|item| item.text == "2")
+        .expect("denominator");
+
+    assert!(
+        radical.y.0 < pi.y.0,
+        "the radical bar sits above its radicand ({} vs {})",
+        radical.y.0,
+        pi.y.0
+    );
+    assert!(
+        pi.y.0 < fraction.y.0,
+        "the numerator sits above the fraction bar ({} vs {})",
+        pi.y.0,
+        fraction.y.0
+    );
+    assert!(
+        two.y.0 > fraction.y.0,
+        "the denominator sits below the fraction bar ({} vs {})",
+        two.y.0,
+        fraction.y.0
+    );
+}
+
+#[test]
+fn array_takes_its_column_alignment_from_the_format() {
+    // Column 0 is `l`, column 2 is `r`; the test face is half an em per
+    // character, so `ddd` makes each column wider than its short cell.
+    let result = formula("\\begin{array}{lcr}a&b&c\\\\ddd&e&fff\\end{array}");
+    let at = |text: &str, nth: usize| {
+        result
+            .items
+            .iter()
+            .filter(|item| item.text == text)
+            .nth(nth)
+            .map(|item| item.x.0)
+            .expect(text)
+    };
+    assert_eq!(
+        at("a", 0),
+        at("d", 0),
+        "a left-aligned cell starts at the column edge in both rows"
+    );
+    let cell = result.items[0].size.0 / 2;
+    assert_eq!(
+        at("c", 0),
+        at("f", 0) + cell * 2,
+        "a right-aligned cell ends at the column edge"
+    );
+}
+
+#[test]
+fn substack_stacks_its_lines() {
+    let result = formula("\\sum_{\\substack{i=1\\\\j=2}} a");
+    let first = result
+        .items
+        .iter()
+        .find(|item| item.text == "i")
+        .expect("first line");
+    let second = result
+        .items
+        .iter()
+        .find(|item| item.text == "j")
+        .expect("second line");
+    assert!(second.y.0 > first.y.0, "the second line sits lower");
+    assert!(
+        (first.x.0 - second.x.0).abs() <= first.size.0,
+        "the lines are centred on each other"
+    );
+}
+
+#[test]
+fn overbrace_stretches_over_its_body() {
+    let result = formula("\\overbrace{abc}");
+    let brace = result
+        .items
+        .iter()
+        .find(|item| item.text == "\u{23de}")
+        .expect("the brace glyph");
+    assert!(brace.stretch > 1000, "the brace spans the body");
+    // The glyph carries its ink well above its own baseline, so the baseline
+    // is no longer a useful reference: check where the ink lands.
+    let (_, ink_bottom) = soma_math::brace_ink(&brace.text).expect("ink band");
+    let bottom = brace.y.0 - ink_bottom * brace.size.0 / 1000;
+    assert!(
+        bottom < 0,
+        "its ink sits above the body's baseline: {bottom}"
+    );
+    for item in &result.items {
+        if item.text != "\u{23de}" {
+            assert!(item.y.0 > bottom, "the body sits below the brace");
+        }
+    }
+}
+
+#[test]
+fn an_overbrace_label_sits_centered_above_the_brace() {
+    let result = formula("\\overbrace{abc}^{n}");
+    let brace = result
+        .items
+        .iter()
+        .find(|item| item.text == "\u{23de}")
+        .expect("the brace glyph");
+    let label = result
+        .items
+        .iter()
+        .find(|item| item.text == "n")
+        .expect("the label");
+
+    let (ink_top, _) = soma_math::brace_ink("\u{23de}").expect("ink band");
+    let top = brace.y.0 - ink_top * brace.size.0 / 1000;
+    assert!(label.y.0 < top, "the label clears the brace's ink");
+
+    let width = brace.size.0 * i32::from(brace.stretch) / 1000;
+    assert!(
+        label.x.0 > brace.x.0 && label.x.0 < brace.x.0 + width,
+        "the label is centred on the brace"
+    );
+}
+
+#[test]
+fn color_applies_to_the_rest_of_its_group() {
+    let result = formula("{\\color{red} a+b}+c");
+    let red = result
+        .items
+        .iter()
+        .filter(|item| item.color == Some(0xcc0000))
+        .map(|item| item.text.as_str())
+        .collect::<Vec<_>>();
+    let plain = result
+        .items
+        .iter()
+        .filter(|item| item.color.is_none())
+        .map(|item| item.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(red, vec!["a", "+", "b"], "the group's content is red");
+    assert_eq!(plain, vec!["+", "c"], "outside the group stays unset");
+}
+
+#[test]
+fn text_mode_still_sets_the_math_inside_it() {
+    let result = layout(
+        "\\text{if $x>0$ then}",
+        &MathStyle::default(),
+        &ItalicMetrics,
+    )
+    .expect("layout");
+    let texts: Vec<&str> = result.items.iter().map(|item| item.text.as_str()).collect();
+    assert!(texts.contains(&"if "), "the words stay text: {texts:?}");
+    assert!(
+        texts.contains(&"\u{1d465}"),
+        "the variable inside the dollars is math: {texts:?}"
+    );
+    assert!(
+        texts.contains(&" then"),
+        "text resumes after the formula: {texts:?}"
+    );
+}
+
+#[test]
+fn a_tag_names_the_row_instead_of_numbering_it() {
+    let result = formula("\\begin{align}a&=1\\tag{A}\\\\b&=2\\notag\\end{align}");
+    assert_eq!(result.rows.len(), 2);
+    assert_eq!(
+        result.rows[0].number,
+        soma_math::RowNumber::Tag {
+            text: String::from("A"),
+            bare: false
+        }
+    );
+    assert_eq!(result.rows[1].number, soma_math::RowNumber::Suppressed);
+}
+
+#[test]
+fn a_starred_tag_drops_its_parentheses() {
+    let result = formula("\\begin{equation}x\\tag*{$\\ast$}\\end{equation}");
+    assert_eq!(
+        result.rows[0].number,
+        soma_math::RowNumber::Tag {
+            text: String::from("$\\ast$"),
+            bare: true
+        }
+    );
+}
+
+#[test]
+fn a_nested_aligned_block_adds_no_rows() {
+    // The `equation` owns the row; the `aligned` inside it is decoration and
+    // must not turn one numbered formula into two.
+    let result =
+        formula("\\begin{equation}\\begin{aligned}a&=1\\\\b&=2\\end{aligned}\\end{equation}");
+    assert_eq!(result.rows.len(), 1, "one row, one number");
+}
+
+#[test]
+fn a_brace_inside_a_fraction_rides_its_own_baseline() {
+    let brace_y = |layout: &soma_math::MathLayout| {
+        layout
+            .items
+            .iter()
+            .find(|item| item.text == "\u{23de}")
+            .map(|item| item.y.0)
+            .expect("the brace glyph")
+    };
+    let alone = brace_y(&formula("\\overbrace{ab}"));
+    let nested = brace_y(&formula("\\frac{\\overbrace{ab}}{2}"));
+    assert!(
+        nested < alone,
+        "inside a numerator the brace sits above the formula baseline: {nested} vs {alone}"
+    );
+}
+
+#[test]
+fn a_wide_brace_is_assembled_from_rules() {
+    let result = formula("\\overbrace{abcdefghij}");
+    assert!(
+        result.rules.len() > 8,
+        "hooks and cusp are drawn as rules: {}",
+        result.rules.len()
+    );
+    assert!(
+        result.items.iter().all(|item| item.text != "\u{23de}"),
+        "the glyph is not used when it would be flattened"
+    );
+    // The brace must clear the body: every segment sits above the baseline.
+    assert!(
+        result.rules.iter().all(|rule| rule.y.0 < 0),
+        "the brace is above the body"
+    );
+}
+
+#[test]
+fn a_narrow_brace_keeps_the_glyph() {
+    let result = formula("\\overbrace{ab}");
+    assert!(
+        result.items.iter().any(|item| item.text == "\u{23de}"),
+        "a narrow brace is the designed glyph"
+    );
+    assert!(result.rules.is_empty(), "and it needs no rules");
+}
+
+#[test]
+fn an_unknown_colour_is_refused() {
+    let error =
+        layout("\\color{chartreuse} x", &MathStyle::default(), &TestMetrics).expect_err("rejected");
+    assert!(format!("{error:?}").contains("chartreuse"), "{error:?}");
+}
+
+// ---------------------------------------------------------------------------
+// Math v2: classes, TeX spacing, style levels
+// ---------------------------------------------------------------------------
+
+fn at(result: &soma_math::MathLayout, text: &str) -> soma_math::MathItem {
+    result
+        .items
+        .iter()
+        .find(|item| item.text == text)
+        .unwrap_or_else(|| panic!("no item {text:?} in {:?}", result.items))
+        .clone()
+}
+
+#[test]
+fn a_function_name_takes_a_thin_space_before_its_argument() {
+    let result = formula("\\sin x");
+    let sin = at(&result, "sin");
+    let x = at(&result, "x");
+    let name_width = TestMetrics.advance("sin", sin.size).0;
+    let thin = Width::EM.0 * 167 / 1000;
+    assert_eq!(
+        x.x.0,
+        sin.x.0 + name_width + thin,
+        "Op-Ord is 3mu: {:?}",
+        result.items
+    );
+}
+
+#[test]
+fn a_comma_is_followed_by_a_thin_space() {
+    let result = formula("a,b");
+    let a = at(&result, "a");
+    let comma = at(&result, ",");
+    let b = at(&result, "b");
+    let thin = Width::EM.0 * 167 / 1000;
+    assert_eq!(
+        b.x.0,
+        a.x.0 + TestMetrics.advance("a", a.size).0 + TestMetrics.advance(",", comma.size).0 + thin
+    );
+}
+
+#[test]
+fn a_binary_after_a_relation_becomes_an_ord() {
+    let result = formula("x=-1");
+    let eq = at(&result, "=");
+    let minus = at(&result, "-");
+    let one = at(&result, "1");
+    // Rel-Ord is thick (5mu); the Bin is an Ord here, so no medium space.
+    let thick = Width::EM.0 * 278 / 1000;
+    assert_eq!(
+        minus.x.0,
+        eq.x.0 + TestMetrics.advance("=", eq.size).0 + thick,
+        "items: {:?}",
+        result.items
+    );
+    assert_eq!(one.x.0, minus.x.0 + TestMetrics.advance("-", minus.size).0);
+}
+
+#[test]
+fn nested_scripts_stop_at_scriptscript() {
+    let result = formula("x^{y^{z^{w}}}");
+    let mut sizes: Vec<i32> = result.items.iter().map(|item| item.size.0).collect();
+    sizes.dedup();
+    assert_eq!(sizes.len(), 3, "base, script, scriptscript: {sizes:?}");
+    assert!(sizes[1] < sizes[0]);
+    assert!(sizes[2] < sizes[1]);
+    assert!(
+        result.items.last().unwrap().size.0 >= sizes[2],
+        "the fourth level does not shrink again"
+    );
+}
+
+#[test]
+fn a_large_operator_has_a_thin_space_before_its_operand() {
+    let result = formula("\\sum a");
+    let sum = at(&result, "∑");
+    let a = at(&result, "a");
+    let thin = Width::EM.0 * 167 / 1000;
+    assert_eq!(a.x.0, sum.x.0 + TestMetrics.advance("∑", sum.size).0 + thin);
+}
+
+#[test]
+fn a_hat_sits_above_its_body() {
+    let result = formula("\\hat{x}");
+    // The math face's combining circumflex, aligned by its attachment.
+    let hat = at(&result, "\u{302}");
+    let x = at(&result, "x");
+    assert!(hat.y.0 < 0, "the accent is above the baseline");
+    assert!(hat.x.0 >= x.x.0);
+}
+
+#[test]
+fn binom_draws_fences_without_a_rule() {
+    let result = formula("\\binom{n}{k}");
+    assert!(result.rules.is_empty(), "a binomial has no fraction bar");
+    assert!(result.items.iter().any(|item| item.text == "("));
+    assert!(result.items.iter().any(|item| item.text == ")"));
+}
+
+#[test]
+fn operatorname_is_an_operator_for_spacing() {
+    let result = formula("\\operatorname{rank} A");
+    let rank = at(&result, "rank");
+    let a = at(&result, "A");
+    let thin = Width::EM.0 * 167 / 1000;
+    assert_eq!(
+        a.x.0,
+        rank.x.0 + TestMetrics.advance("rank", rank.size).0 + thin
+    );
+}
+
+#[test]
+fn overline_draws_one_rule_above_the_body() {
+    let result = formula("\\overline{x}");
+    assert_eq!(result.rules.len(), 1);
+    assert!(result.rules[0].y.0 < 0);
+}
+
+#[test]
+fn nolimits_keeps_them_beside_the_operator() {
+    let stacked = formula("\\sum_{i=1}^{n}");
+    let side = formula("\\sum\\nolimits_{i=1}^{n}");
+    let stacked_n = at(&stacked, "n");
+    let side_n = at(&side, "n");
+    assert!(stacked_n.y.0 < 0 && stacked_n.x.0 < 2000, "limits stack");
+    assert!(side_n.x.0 > 2000, "nolimits puts them to the right");
+}
+
+#[test]
+fn style_commands_change_the_size_of_the_rest() {
+    let result = formula("\\scriptstyle x");
+    let x = at(&result, "x");
+    assert_eq!(x.size.0, Width::EM.0 * 700 / 1000);
+}
+
+// ---------------------------------------------------------------------------
+// Math design variants (ADR-0075)
+// ---------------------------------------------------------------------------
+
+/// A face with vertical design variants, like every OpenType math font.
+struct VariantMetrics;
+
+impl VariantMetrics {
+    fn count(text: &str) -> u16 {
+        match text {
+            "∑" => 3,
+            "√" => 4,
+            _ => 0,
+        }
+    }
+
+    fn variant(text: &str, index: u16, size: Width) -> Option<soma_math::VerticalVariant> {
+        let count = Self::count(text);
+        if count == 0 || index >= count {
+            return None;
+        }
+        // Design heights: 0.8, 1.6, 2.4, 3.2 em.
+        let height = (i32::from(index) + 1) * 8 * size.0 / 10;
+        Some(soma_math::VerticalVariant {
+            advance: Width(size.0 / 2 + i32::from(index) * size.0 / 4),
+            above: Width(height * 3 / 4),
+            below: Width(height / 4),
+            right_gap: Width(size.0 / 8),
+        })
+    }
+}
+
+impl MathMetrics for VariantMetrics {
+    fn advance(&self, text: &str, size: Width) -> Width {
+        Width(text.chars().count() as i32 * size.0 / 2)
+    }
+    fn ascent(&self, size: Width) -> Width {
+        Width(size.0 * 3 / 4)
+    }
+    fn descent(&self, size: Width) -> Width {
+        Width(size.0 / 4)
+    }
+    fn ink(&self, _text: &str, size: Width) -> Option<(Width, Width)> {
+        Some((Width(size.0 * 3 / 4), Width(size.0 / 4)))
+    }
+    fn vertical_variant_count(&self, text: &str) -> u16 {
+        Self::count(text)
+    }
+    fn vertical_variant(
+        &self,
+        text: &str,
+        index: u16,
+        size: Width,
+    ) -> Option<soma_math::VerticalVariant> {
+        Self::variant(text, index, size)
+    }
+}
+
+#[test]
+fn a_display_operator_uses_the_smallest_covering_design_variant() {
+    let result = layout("\\sum_{i=1}^{n}", &MathStyle::default(), &VariantMetrics).expect("layout");
+    let sum = at(&result, "∑");
+    assert_eq!(sum.variant(), Some(1), "0.8 em is too short, 1.6 em fits");
+    assert_eq!(
+        sum.design,
+        Width::EM,
+        "a variant is drawn at the design size"
+    );
+    assert_eq!(
+        sum.size.0,
+        Width::EM.0 * 16 / 10,
+        "a text renderer draws the base glyph at the variant's height"
+    );
+    assert!(sum.size.0 > sum.design.0);
+}
+
+#[test]
+fn a_text_style_operator_keeps_its_base_glyph() {
+    let style = MathStyle {
+        display: false,
+        ..MathStyle::default()
+    };
+    let result = layout("\\sum_{i=1}^{n}", &style, &VariantMetrics).expect("layout");
+    let sum = at(&result, "∑");
+    assert_eq!(sum.variant(), None);
+    assert_eq!(sum.size, sum.design);
+}
+
+#[test]
+fn an_impossible_target_uses_the_tallest_variant_without_scaling() {
+    let style = MathStyle {
+        display_operator_min: 5000,
+        ..MathStyle::default()
+    };
+    let result = layout("\\sum", &style, &VariantMetrics).expect("layout");
+    let sum = at(&result, "∑");
+    assert_eq!(
+        sum.variant(),
+        Some(2),
+        "the last variant, not an enlarged base"
+    );
+    assert_eq!(sum.design, Width::EM);
+}
+
+#[test]
+fn a_radical_uses_a_variant_and_starts_the_bar_at_its_ink() {
+    let result = layout(
+        r"\sqrt{\frac{a}{b}}",
+        &MathStyle::default(),
+        &VariantMetrics,
+    )
+    .expect("layout");
+    let surd = at(&result, "√");
+    let index = surd.variant().expect("a tall radicand selects a variant");
+    let variant = VariantMetrics::variant("√", index, Width::EM).expect("variant");
+    assert_eq!(surd.design, Width::EM);
+    assert!(surd.size.0 > surd.design.0, "the fallback is larger");
+    assert!(
+        surd.text_scale_x < 1000,
+        "the tall variant is narrower than the uniformly scaled fallback"
+    );
+    let bar = result.rules.last().expect("vinculum");
+    let rule = bar.thickness.0;
+    assert_eq!(
+        bar.x.0,
+        surd.x.0 + variant.advance.0 - variant.right_gap.0 - rule,
+        "the vinculum starts at the hook's ink, not at the advance: surd {:?} variant {:?} bar {:?}",
+        surd, variant, bar
+    );
+    assert!(bar.x.0 < surd.x.0 + variant.advance.0);
+}
+
+#[test]
+fn a_radical_degree_sits_in_the_nook() {
+    let result = layout(r"\sqrt[3]{x}", &MathStyle::default(), &VariantMetrics).expect("layout");
+    let surd = at(&result, "√");
+    let degree = at(&result, "3");
+    let index = surd.variant().expect("a variant");
+    let variant = VariantMetrics::variant("√", index, Width::EM).expect("variant");
+    assert!(
+        degree.y.0 > surd.y.0 - variant.above.0,
+        "the degree's baseline is below the surd's ink top: degree {:?} surd {:?}",
+        degree,
+        surd
+    );
+    assert!(degree.y.0 < surd.y.0, "and inside the radical's height");
+    assert!(degree.x.0 < surd.x.0);
+}
+
+#[test]
+fn a_fence_uses_a_variant_centred_on_the_body() {
+    // `(` has no variants in VariantMetrics, so this pins the fallback; the
+    // variant path is exercised by the radical and the operator above.
+    let result = layout(r"\left(x\right)", &MathStyle::default(), &VariantMetrics).expect("layout");
+    let open = at(&result, "(");
+    assert_eq!(open.variant(), None);
+    assert_eq!(open.size, open.design);
+}
+
+#[test]
+fn a_negative_degree_kern_does_not_move_a_plain_radical() {
+    let style = MathStyle {
+        radical_kern_before: 40,
+        radical_kern_after: -526,
+        ..MathStyle::default()
+    };
+    let plain = layout(r"\sqrt{x}", &style, &VariantMetrics).expect("layout");
+    assert_eq!(
+        at(&plain, "√").x,
+        Width::ZERO,
+        "without a degree nothing may hang left of the cursor"
+    );
+
+    let cubed = layout(r"\sqrt[3]{x}", &style, &VariantMetrics).expect("layout");
+    let surd = at(&cubed, "√");
+    let degree = at(&cubed, "3");
+    assert_eq!(
+        surd.x,
+        Width::ZERO,
+        "a negative degree kern may tuck the degree into the surd, never move \
+         the surd left of the cursor"
+    );
+    assert!(degree.x.0 > 0 && degree.x.0 < surd.x.0 + 2000);
+    assert!(
+        degree.x.0 + VariantMetrics.advance("3", degree.size).0 > surd.x.0,
+        "the degree overlaps the surd's left arm"
+    );
+
+    // With a non-negative offset the surd starts after the degree instead.
+    let wide = MathStyle {
+        radical_kern_before: 40,
+        radical_kern_after: 0,
+        ..MathStyle::default()
+    };
+    let cubed = layout(r"\sqrt[3]{x}", &wide, &VariantMetrics).expect("layout");
+    let surd = at(&cubed, "√");
+    let degree = at(&cubed, "3");
+    assert_eq!(degree.x, Width(163));
+    assert_eq!(surd.x.0, 163 + VariantMetrics.advance("3", degree.size).0);
+}
+
+// ---------------------------------------------------------------------------
+// Accent attachments (ADR-0076)
+// ---------------------------------------------------------------------------
+
+struct AccentMetrics;
+
+impl MathMetrics for AccentMetrics {
+    fn advance(&self, text: &str, size: Width) -> Width {
+        Width(text.chars().count() as i32 * size.0 / 2)
+    }
+    fn ascent(&self, size: Width) -> Width {
+        Width(size.0 * 3 / 4)
+    }
+    fn descent(&self, size: Width) -> Width {
+        Width(size.0 / 4)
+    }
+    fn ink(&self, _text: &str, size: Width) -> Option<(Width, Width)> {
+        Some((Width(size.0 * 3 / 4), Width(size.0 / 4)))
+    }
+    fn math_has(&self, character: char) -> bool {
+        matches!(character, '\u{302}' | '\u{303}' | '\u{304}' | '\u{20d7}')
+    }
+    fn top_accent(&self, text: &str, size: Width) -> Option<Width> {
+        match text.chars().next()? {
+            'x' => Some(Width(size.0 / 4)),
+            '\u{302}' => Some(Width(size.0 / 8)),
+            '\u{20d7}' => Some(Width(size.0 / 8)),
+            _ => None,
+        }
+    }
+    fn accent_bottom(&self, text: &str, size: Width) -> Option<Width> {
+        match text.chars().next()? {
+            '\u{302}' | '\u{20d7}' => Some(Width(-size.0 * 3 / 5)),
+            _ => Some(Width(size.0 / 4)),
+        }
+    }
+}
+
+#[test]
+fn a_hat_uses_the_combining_mark_and_its_attachment() {
+    let result = layout(r"\hat{x}", &MathStyle::default(), &AccentMetrics).expect("layout");
+    let hat = at(&result, "\u{302}");
+    let x = at(&result, "x");
+    assert_eq!(
+        hat.x.0,
+        x.x.0 + Width::EM.0 / 4 - Width::EM.0 / 8,
+        "the accent's attachment meets the base's"
+    );
+    // The accent's ink bottom (origin + signed bottom) sits just above the
+    // base's ink top, not a whole accent-height above it.
+    assert!(hat.y.0 > -Width::EM.0);
+    assert!(hat.y.0 + Width::EM.0 * 3 / 5 < Width::EM.0 * 3 / 4);
+}
+
+#[test]
+fn font_commands_are_transparent_to_the_matrix_body() {
+    let result = formula(r"\mathbf{A} = \begin{pmatrix}1 & 2 \\ 3 & 4\end{pmatrix}");
+    assert!(result.items.iter().any(|item| item.text == "A"));
+    assert!(result.items.iter().any(|item| item.text == "1"));
+    assert!(result.items.iter().any(|item| item.text == "4"));
+}
+
+#[test]
+fn latex_and_tex_are_text_symbols() {
+    let result = formula(r"\LaTeX + \TeX");
+    assert!(result.items.iter().any(|item| item.text == "LaTeX"));
+    assert!(result.items.iter().any(|item| item.text == "TeX"));
+}
+
+#[test]
+fn varepsilon_is_an_epsilon() {
+    let result = formula(r"\varepsilon_0");
+    assert!(result.items.iter().any(|item| item.text == "ε"));
+}
+
+#[test]
+fn an_accent_falls_back_to_a_drawn_arrow_only_when_the_face_lacks_it() {
+    let result = layout(r"\vec{v}", &MathStyle::default(), &AccentMetrics).expect("layout");
+    assert!(result.items.iter().any(|item| item.text == "\u{20d7}"));
+    assert!(!result.items.iter().any(|item| item.text == "→"));
 }

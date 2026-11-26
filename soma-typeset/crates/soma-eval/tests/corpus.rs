@@ -32,6 +32,25 @@ fn corpus_evaluation_is_deterministic() {
 }
 
 #[test]
+fn the_corpus_reports_fitness_jumps() {
+    let report = evaluate_all(&repository_dir(), &ParamSet::publish_v1()).expect("evaluate");
+    // ADR-0042: the column exists to notice a rise. It was 3 while the embedded
+    // metrics table had no ink at all and every line end used the rule
+    // constants. With exact punctuation ink (ADR-0073/ADR-0074) a line ending on
+    // a full-width mark gives back its real side bearing — 0.82 em for `，`
+    // instead of the 0.5 em constant — so those lines sit further into the
+    // stretch range and a few adjacent pairs cross a fitness boundary. The
+    // aggregate `jitter_p95` is unchanged at 377‰ (one document improved, three
+    // rose slightly) and no break moved at all, so the new floor is 8.
+    assert!(
+        report.metrics.fitness_jumps <= 8,
+        "{} class jumps: the corpus grew avoidable ones (ADR-0042)",
+        report.metrics.fitness_jumps
+    );
+    assert_eq!(report.csv().lines().count(), report.documents.len() + 2);
+}
+
+#[test]
 fn the_corpus_has_no_widows_or_orphans() {
     let report = evaluate_dir(&repository_dir(), &ParamSet::publish_v1()).expect("evaluate");
     assert_eq!(report.metrics.widow_violations, 0);

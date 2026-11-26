@@ -7,9 +7,9 @@
 # committed; rerun this after changing the engine, the template, or the source.
 #
 # When a TrueType font is available every format is laid out with a metrics
-# table generated from that same face, so HTML, SVG, JSON and PDF share one set
-# of coordinates and the same punctuation ink (ADR-0037). Without a font the
-# embedded Noto table is used.
+# table generated from that same face, so HTML, SVG, JSON and PDF share one
+# set of coordinates and the same punctuation ink (ADR-0037). Without a font
+# the embedded table is used.
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -22,7 +22,7 @@ pdf_font=${SOMA_PDF_FONT:-}
 if [ -z "$pdf_font" ]; then
     for candidate in \
         /usr/share/fonts/misan/MiSans-Normal.ttf \
-        /home/badleric/.fonts/IBMPlexSansSC_Text.ttf \
+        "$HOME/.fonts/IBMPlexSansSC_Text.ttf" \
         /usr/share/fonts/TTF/LXGWWenKai-Regular.ttf; do
         if [ -f "$candidate" ]; then
             pdf_font=$candidate
@@ -31,7 +31,7 @@ if [ -z "$pdf_font" ]; then
     done
 fi
 pdf_bold=${SOMA_PDF_FONT_BOLD:-}
-pdf_math=${SOMA_PDF_MATH:-/usr/share/fonts/noto/NotoSansMath-Regular.ttf}
+pdf_math=${SOMA_PDF_MATH:-$(sh scripts/math-face.sh)}
 
 pdf_metrics=${SOMA_PDF_METRICS:-}
 if [ -z "$pdf_metrics" ] && [ -n "$pdf_font" ] && [ -f "$pdf_font" ]; then

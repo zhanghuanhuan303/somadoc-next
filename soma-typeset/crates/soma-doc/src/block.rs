@@ -20,6 +20,10 @@ pub enum Block {
     BlockQuote(BlockQuote),
     CodeBlock(CodeBlock),
     MathBlock(MathBlock),
+    /// A diagram source (Mermaid flowchart or Graphviz DOT). The semantic
+    /// layer keeps the source and the dialect; layout decides whether it can
+    /// be drawn as vectors and falls back to code when it cannot (ADR-0102).
+    Diagram(DiagramBlock),
     Figure(Figure),
     Table(Table),
     ThematicBreak(ThematicBreak),
@@ -40,6 +44,7 @@ impl Block {
             Self::BlockQuote(node) => &node.meta,
             Self::CodeBlock(node) => &node.meta,
             Self::MathBlock(node) => &node.meta,
+            Self::Diagram(node) => &node.meta,
             Self::Figure(node) => &node.meta,
             Self::Table(node) => &node.meta,
             Self::ThematicBreak(node) => &node.meta,
@@ -58,6 +63,7 @@ impl Block {
             Self::BlockQuote(node) => &mut node.meta,
             Self::CodeBlock(node) => &mut node.meta,
             Self::MathBlock(node) => &mut node.meta,
+            Self::Diagram(node) => &mut node.meta,
             Self::Figure(node) => &mut node.meta,
             Self::Table(node) => &mut node.meta,
             Self::ThematicBreak(node) => &mut node.meta,
@@ -77,6 +83,7 @@ impl Block {
             Self::BlockQuote(_) => "blockQuote",
             Self::CodeBlock(_) => "codeBlock",
             Self::MathBlock(_) => "mathBlock",
+            Self::Diagram(_) => "diagram",
             Self::Figure(_) => "figure",
             Self::Table(_) => "table",
             Self::ThematicBreak(_) => "thematicBreak",
@@ -208,6 +215,97 @@ impl MathBlock {
     }
 }
 
+/// Diagram source is a document input, not a general program: 256 KiB is
+/// already far beyond a hand-written or model-generated flowchart.
+pub const MAX_DIAGRAM_SOURCE: usize = 256 * 1024;
+
+/// A diagram language accepted by the vector diagram compiler.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiagramDialect {
+    Mermaid,
+    Graphviz,
+}
+
+impl DiagramDialect {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Mermaid => "mermaid",
+            Self::Graphviz => "dot",
+        }
+    }
+
+    pub fn from_tag(value: &str) -> Option<Self> {
+        match value {
+            "mermaid" | "mmd" | "flowchart" => Some(Self::Mermaid),
+            "dot" | "graphviz" => Some(Self::Graphviz),
+            _ => None,
+        }
+    }
+
+    /// The fence language that forces this source to stay code.
+    pub fn source_language(self) -> &'static str {
+        match self {
+            Self::Mermaid => "mermaid",
+            Self::Graphviz => "dot",
+        }
+    }
+
+    /// Recognise a fenced block. An explicit diagram language always wins;
+    /// an untagged fence is sniffed only when its first meaningful line is a
+    /// diagram header. `text`, `plain`, `code` and the `*-source` spellings
+    /// are explicit escape hatches and never become diagrams.
+    pub fn detect(lang: Option<&str>, source: &str) -> Option<Self> {
+        if let Some(lang) = lang {
+            let lang = lang.trim();
+            if matches!(
+                lang,
+                "text" | "plain" | "code" | "none" | "mermaid-source" | "dot-source"
+            ) {
+                return None;
+            }
+            return Self::from_tag(&lang.to_ascii_lowercase());
+        }
+        let first = source
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty() && !line.starts_with("%%") && *line != "---")?;
+        let lower = first.to_ascii_lowercase();
+        if lower.starts_with("flowchart ") || lower.starts_with("graph ") {
+            return Some(Self::Mermaid);
+        }
+        if lower == "digraph"
+            || lower.starts_with("digraph ")
+            || lower.starts_with("digraph{")
+            || lower == "graph"
+            || lower.starts_with("graph ")
+            || lower.starts_with("graph{")
+            || lower.starts_with("strict digraph")
+            || lower.starts_with("strict graph")
+        {
+            return Some(Self::Graphviz);
+        }
+        None
+    }
+}
+
+/// Diagram source plus its dialect.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiagramBlock {
+    pub meta: NodeMeta,
+    pub dialect: DiagramDialect,
+    pub source: String,
+}
+
+impl DiagramBlock {
+    pub fn new(meta: NodeMeta, dialect: DiagramDialect, source: impl Into<String>) -> Self {
+        Self {
+            meta,
+            dialect,
+            source: source.into(),
+        }
+    }
+}
+
 /// Figure with an image and a caption.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Figure {
@@ -280,11 +378,28 @@ impl CellAlign {
 pub struct Column {
     pub meta: NodeMeta,
     pub align: CellAlign,
+    /// Relative width hint in per-mille, `0` for "size from content".
+    ///
+    /// This is a share, not a length: DocIR stays free of physical units
+    /// (ADR-0009). A justified table reads it as per-mille of the measure; a
+    /// natural table distributes its measured total by it. An HTML
+    /// `<colgroup>`, a Word grid, or a GFM delimiter row may supply it; every
+    /// other front end leaves it zero.
+    pub share: u16,
 }
 
 impl Column {
     pub fn new(meta: NodeMeta, align: CellAlign) -> Self {
-        Self { meta, align }
+        Self {
+            meta,
+            align,
+            share: 0,
+        }
+    }
+
+    pub fn with_share(mut self, share: u16) -> Self {
+        self.share = share;
+        self
     }
 }
 

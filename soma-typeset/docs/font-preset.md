@@ -131,10 +131,11 @@ extends the range to every glyph the face has, in the same compact form. A
 which is enough for the width model but not for exact trim. Both are integers
 and hashable.
 
-For CFF faces there is no outline data, so `derived: false`: the breaker keeps
-today's constants and the line is measured by advance. A font without outlines
-simply has no profile — and `docs/mixed-font.md` already excludes CFF faces from
-rescue duty for the same reason.
+For CFF faces there is no `glyf` outline data in the audit, so `derived:
+false`: the breaker keeps today's constants and the line is measured by advance.
+A font without `glyf` simply has no ink profile. It can still be embedded as a
+CID-keyed CFF (ADR-0039), so it can serve as a rescue face — the trim just falls
+back to the class constants on the lines that end in its glyphs.
 
 ## 6. Staging
 

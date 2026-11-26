@@ -17,9 +17,11 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use alloc::sync::Arc;
+
 use soma_core::{
-    Align, Atom, AtomKind, Boundary, BoundaryKind, BoundaryRole, Breakability, Glue, Paragraph,
-    ParagraphStyle, PunctClass, StyleId, Width,
+    Align, Atom, AtomKind, Boundary, BoundaryKind, BoundaryRole, Breakability, Decorations, Glue,
+    Paragraph, ParagraphStyle, PunctClass, StyleId, Width,
 };
 
 /// Stretch/shrink for a boundary between two CJK atoms.
@@ -139,10 +141,15 @@ pub const RULES: &[RuleInfo] = &[
 
 /// Side-bearing trims applied when a punctuation atom sits at a line edge.
 ///
-/// These are Tier B rule parameters in base em. A caller that knows the real
-/// font size may scale them before building the IR; the breaker only reads the
-/// resulting widths. Values follow [`params.md`](../../../docs/params.md)
-/// section 10.3 and are still `Tbd` against a cited `clreq` table.
+/// These are Tier B rule parameters in base em, and they are a *budget*, not a
+/// measurement: the amount an atom may be pulled in when a line has nowhere
+/// else to go. `docs/trim-calibration.md` measures the empty space each mark
+/// actually leaves (0.627 em outside an opening mark, 0.184 em inside a middle
+/// one), and setting the budget to those numbers made the corpus worse — two
+/// avoidable fitness jumps appeared and ratio jitter rose — so the shipped
+/// values stay (ADR-0051). A face whose metrics table carries outline ink gets
+/// the exact gap per glyph anyway (ADR-0037), which is what keeps a glyph from
+/// moving.
 pub const OPEN_TRIM_LEFT: Width = Width::from_em_frac(1, 2);
 pub const CLOSE_TRIM_RIGHT: Width = Width::from_em_frac(1, 2);
 pub const MIDDLE_TRIM_LEFT: Width = Width::from_em_frac(1, 2);
@@ -156,6 +163,30 @@ pub const LATIN_TRIM: Width = Width::from_em_frac(1, 8);
 /// Extra left-side compression for a punctuation mark that directly follows
 /// another punctuation mark (`。」`, `），`, `？！」`).
 pub const PAIR_TRIM: Width = Width::from_em_frac(1, 4);
+
+/// Break penalty on a hyphenation point, in the kernel's penalty units. A
+/// space has none, so the breaker only hyphenates when a line would otherwise
+/// be badly loose or overfull.
+const HYPHEN_PENALTY: i32 = 100;
+/// A break inside inline code: at one of its spaces, or after one of its
+/// separators. It is a last resort like a hyphenation point; a code run with
+/// neither cannot be split.
+const CODE_BREAK_PENALTY: i32 = 100;
+/// A break after `-` or `/` inside a Latin run (`metronome-rs`,
+/// `tactus-time/core`). A space is free, so this is priced high enough that
+/// an identifier or URL stays whole unless the token itself is wider than the
+/// line: badness at the tolerance ceiling is only a few hundred, so 3000 is
+/// outside the normal search (D114 follow-up, ADR-0115).
+const WORD_BREAK_PENALTY: i32 = 3_000;
+/// A break inside a long code run that has no space and no separator
+/// (`a1b2c3d4e5f6a7b8`, a base64 token). The run is split per character and
+/// the break is priced far above a separator break, so it only happens when
+/// the line cannot fit the run any other way (D114).
+const INTRUSIVE_BREAK_PENALTY: i32 = 8_000;
+/// A code segment longer than this many characters is split per character.
+/// Shorter segments stay one atom: a normal code word must not litter the
+/// paragraph with price-only break points.
+const CODE_INTRUSIVE_MIN_CHARS: usize = 12;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuleError {
@@ -185,17 +216,67 @@ pub fn paragraph_from_text(
     builder.finish(style)
 }
 
+/// Compile one source line of a code block.
+///
+/// Whitespace becomes real atoms here: a command copied out of the page has to
+/// keep its indentation and its argument spacing, so runs of spaces are not
+/// collapsed and a leading run is not dropped.
+pub fn paragraph_from_code_line(
+    text: &str,
+    style: ParagraphStyle,
+    style_id: StyleId,
+) -> Result<Paragraph, RuleError> {
+    let mut builder = Builder::new();
+    let mut run = String::new();
+    for character in text.chars() {
+        if character.is_whitespace() {
+            if !run.is_empty() {
+                builder.push_text(&run, style_id);
+                run.clear();
+            }
+            builder.push_atom(
+                String::from(" "),
+                AtomKind::Other,
+                PunctClass::None,
+                style_id,
+            );
+        } else {
+            run.push(character);
+        }
+    }
+    if !run.is_empty() {
+        builder.push_text(&run, style_id);
+    }
+    builder.finish(style)
+}
+
 /// What one inline span represents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SpanKind {
     /// Segmented by the normal rules; spaces collapse across spans.
     Text,
-    /// One unbreakable atom (inline code).
+    /// Inline code: unbreakable within an identifier, but a line may wrap at
+    /// the whitespace inside it (ADR-0111).
     Code,
     /// One unbreakable atom (replaced object: image, math fallback).
     Object,
+    /// One unbreakable atom that must stay attached to the atom on its left:
+    /// a footnote reference. A break before it would start a line with a
+    /// superscript number, and the CJK/Latin gap would open a hole before it.
+    Footnote,
+    /// One unbreakable atom: a ruby base. The annotation travels beside it in
+    /// the layout block, not in the atom text, so line breaking only sees the
+    /// base width.
+    Ruby,
     /// A forced break between the previous and the next atom.
     HardBreak,
+    /// A continuation piece of a hyphenated word: this span starts at a
+    /// hyphenation point, so a line may break before it and draw a hyphen.
+    Hyphen,
+    /// A break opportunity inside inline math, with the math spacing that the
+    /// boundary carries. `InlineSpan::width` and `::penalty` give the glue and
+    /// the TeX penalty (`\relpenalty`/`\binoppenalty`).
+    MathBreak,
 }
 
 /// One styled run of inline content.
@@ -204,6 +285,14 @@ pub struct InlineSpan<'a> {
     pub text: &'a str,
     pub style: StyleId,
     pub kind: SpanKind,
+    /// Underline and friends, carried to the renderers (ADR-0044).
+    pub decor: Decorations,
+    /// Link target, carried to the renderers.
+    pub link: Option<&'a str>,
+    /// Glue width for `SpanKind::MathBreak` (zero otherwise).
+    pub width: Width,
+    /// Break penalty for `SpanKind::MathBreak` (zero otherwise).
+    pub penalty: i32,
 }
 
 impl<'a> InlineSpan<'a> {
@@ -212,6 +301,10 @@ impl<'a> InlineSpan<'a> {
             text,
             style,
             kind: SpanKind::Text,
+            decor: Decorations::NONE,
+            link: None,
+            width: Width::ZERO,
+            penalty: 0,
         }
     }
 
@@ -220,6 +313,10 @@ impl<'a> InlineSpan<'a> {
             text,
             style,
             kind: SpanKind::Code,
+            decor: Decorations::NONE,
+            link: None,
+            width: Width::ZERO,
+            penalty: 0,
         }
     }
 
@@ -228,6 +325,22 @@ impl<'a> InlineSpan<'a> {
             text,
             style,
             kind: SpanKind::Object,
+            decor: Decorations::NONE,
+            link: None,
+            width: Width::ZERO,
+            penalty: 0,
+        }
+    }
+
+    pub const fn footnote(text: &'a str, style: StyleId) -> Self {
+        Self {
+            text,
+            style,
+            kind: SpanKind::Footnote,
+            decor: Decorations::NONE,
+            link: None,
+            width: Width::ZERO,
+            penalty: 0,
         }
     }
 
@@ -236,6 +349,10 @@ impl<'a> InlineSpan<'a> {
             text: "",
             style,
             kind: SpanKind::HardBreak,
+            decor: Decorations::NONE,
+            link: None,
+            width: Width::ZERO,
+            penalty: 0,
         }
     }
 }
@@ -248,6 +365,8 @@ pub fn paragraph_from_spans(
 ) -> Result<Paragraph, RuleError> {
     let mut builder = Builder::new();
     for span in spans {
+        builder.decor = span.decor;
+        builder.link = span.link;
         match span.kind {
             SpanKind::Text => builder.push_text(span.text, span.style),
             SpanKind::Code => {
@@ -255,8 +374,57 @@ pub fn paragraph_from_spans(
                 if trimmed.is_empty() {
                     continue;
                 }
-                let text = String::from(trimmed);
-                builder.push_atom(text, AtomKind::Other, PunctClass::None, span.style);
+                // Inline code breaks at its own spaces and, at a price, after
+                // `-`, `/`, `_` or `.`, and at camelCase seams: a long
+                // expression such as `round(tick * tempo_num / den)` may wrap
+                // after `tick`, and a URL may wrap after a path separator,
+                // while `metronome-rs` stays whole unless the line cannot
+                // afford it. A run with none of those (a hash, a base64 token)
+                // is split per character behind a much higher penalty so it
+                // can wrap at all (D114). White space stays at the tail of the
+                // piece before it, so text copied out of the page keeps its
+                // exact spacing (ADR-0111, ADR-0112).
+                let mut first = true;
+                for piece in code_pieces(trimmed) {
+                    for (index, segment) in code_segments(&piece).into_iter().enumerate() {
+                        let join = if index == 0 {
+                            Join::Code
+                        } else {
+                            Join::WordBreak
+                        };
+                        if segment.chars().count() > CODE_INTRUSIVE_MIN_CHARS {
+                            for (char_index, piece) in
+                                intrusive_pieces(segment).into_iter().enumerate()
+                            {
+                                if !first {
+                                    builder.join = if char_index == 0 {
+                                        join
+                                    } else {
+                                        Join::Intrusive
+                                    };
+                                }
+                                builder.push_atom(
+                                    piece,
+                                    AtomKind::Other,
+                                    PunctClass::None,
+                                    span.style,
+                                );
+                                first = false;
+                            }
+                        } else {
+                            if !first {
+                                builder.join = join;
+                            }
+                            builder.push_atom(
+                                String::from(segment),
+                                AtomKind::Other,
+                                PunctClass::None,
+                                span.style,
+                            );
+                            first = false;
+                        }
+                    }
+                }
             }
             SpanKind::Object => {
                 if span.text.is_empty() {
@@ -265,34 +433,167 @@ pub fn paragraph_from_spans(
                 let text = String::from(span.text);
                 builder.push_atom(text, AtomKind::InlineObject, PunctClass::None, span.style);
             }
+            SpanKind::Footnote => {
+                if span.text.is_empty() {
+                    continue;
+                }
+                let text = String::from(span.text);
+                builder.join = Join::Attach;
+                builder.push_atom(text, AtomKind::InlineObject, PunctClass::None, span.style);
+            }
+            SpanKind::Ruby => {
+                let trimmed = span.text.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let text = String::from(trimmed);
+                builder.push_atom(text, AtomKind::Ruby, PunctClass::None, span.style);
+            }
+            SpanKind::Hyphen => {
+                if span.text.is_empty() {
+                    continue;
+                }
+                builder.join = Join::Hyphen;
+                builder.push_text(span.text, span.style);
+            }
+            SpanKind::MathBreak => builder.math_break(span.width, span.penalty),
             SpanKind::HardBreak => builder.hard_break(),
         }
     }
     builder.finish(style)
 }
 
+/// Split inline code into pieces that each end at a run of whitespace. The
+/// pieces concatenate back to `text`, so text copied out of the page is the
+/// exact source; the trailing space is what makes the boundary measurable
+/// without a font in the rules layer.
+fn code_pieces(text: &str) -> Vec<String> {
+    let mut pieces: Vec<String> = Vec::new();
+    for part in text.split_inclusive(char::is_whitespace) {
+        if part.chars().all(char::is_whitespace) {
+            if let Some(previous) = pieces.last_mut() {
+                previous.push_str(part);
+                continue;
+            }
+        }
+        pieces.push(String::from(part));
+    }
+    pieces
+}
+
+/// Split one code piece after a separator or at a camelCase seam, keeping the
+/// separator at the end of the segment before it. A separator next to a space
+/// is left alone: the space is the better break, and a segment that begins
+/// with one is never a legal line start.
+///
+/// `-`, `/` and `_` always open a seam; `.` does so only between word
+/// characters and not between two digits (`1.5` is one token). A lower→upper
+/// or acronym→word transition (`someName`, `HTTPServer`) opens a seam as well,
+/// because long identifiers are otherwise unbreakable (D114).
+fn code_segments(piece: &str) -> Vec<&str> {
+    let chars: Vec<(usize, char)> = piece.char_indices().collect();
+    let mut segments = Vec::new();
+    let mut start = 0usize;
+    for index in 0..chars.len() {
+        let (offset, character) = chars[index];
+        let end = offset + character.len_utf8();
+        let Some((_, next)) = chars.get(index + 1) else {
+            break;
+        };
+        if next.is_whitespace() {
+            continue;
+        }
+        let previous = index.checked_sub(1).map(|previous| chars[previous].1);
+        let split = match character {
+            '-' | '/' | '_' => true,
+            '.' => {
+                previous.is_some_and(|previous| previous.is_ascii_alphanumeric())
+                    && next.is_ascii_alphanumeric()
+                    && !(previous.is_some_and(|previous| previous.is_ascii_digit())
+                        && next.is_ascii_digit())
+            }
+            _ => {
+                (next.is_ascii_uppercase()
+                    && (character.is_ascii_lowercase() || character.is_ascii_digit()))
+                    || (character.is_ascii_uppercase()
+                        && next.is_ascii_uppercase()
+                        && chars
+                            .get(index + 2)
+                            .is_some_and(|(_, lower)| lower.is_ascii_lowercase()))
+            }
+        };
+        if split {
+            segments.push(&piece[start..end]);
+            start = end;
+        }
+    }
+    segments.push(&piece[start..]);
+    segments
+}
+
+/// One atom per character for a long code segment. Whitespace (which can only
+/// sit at the tail of a segment) is glued to the atom before it, so a line
+/// never starts with an invisible space atom.
+fn intrusive_pieces(segment: &str) -> Vec<String> {
+    let mut pieces: Vec<String> = Vec::new();
+    for character in segment.chars() {
+        if character.is_whitespace() {
+            if let Some(previous) = pieces.last_mut() {
+                previous.push(character);
+                continue;
+            }
+        }
+        pieces.push(single_char(character));
+    }
+    pieces
+}
+
 /// Shared state for both entry points. `pending_space` lives here so it carries
 /// across spans: a trailing space in one run produces the same glue as a space
 /// inside one run.
-struct Builder {
+struct Builder<'a> {
     atoms: Vec<Atom>,
     boundaries: Vec<Boundary>,
     join: Join,
+    /// Decorations and link of the span currently being pushed.
+    decor: Decorations,
+    link: Option<&'a str>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Join {
     Normal,
     Space,
     Forced,
+    /// Attach this atom to the previous one: no break, no gap. Used by a
+    /// footnote reference, which belongs to the character before it.
+    Attach,
+    /// Start of a continuation piece of a hyphenated word.
+    Hyphen,
+    /// A break opportunity inside inline math with its glue and penalty.
+    Math(Width, i32),
+    /// A break after a space inside inline code. The space is kept in the
+    /// preceding atom, so copying the code still yields the exact source.
+    Code,
+    /// A break after a hyphen or a slash inside a Latin run or a code piece.
+    /// The break is allowed — a long URL or identifier must be able to wrap —
+    /// but it carries a penalty, so a word stays whole whenever the line can
+    /// afford it.
+    WordBreak,
+    /// A break inside a long code run with no space and no separator. The run
+    /// is split per character; the penalty is high enough that the breaker
+    /// only reaches for it when the run cannot fit on the line at all.
+    Intrusive,
 }
 
-impl Builder {
+impl<'a> Builder<'a> {
     fn new() -> Self {
         Self {
             atoms: Vec::new(),
             boundaries: Vec::new(),
             join: Join::Normal,
+            decor: Decorations::NONE,
+            link: None,
         }
     }
 
@@ -303,6 +604,12 @@ impl Builder {
     fn hard_break(&mut self) {
         if !self.atoms.is_empty() {
             self.join = Join::Forced;
+        }
+    }
+
+    fn math_break(&mut self, width: Width, penalty: i32) {
+        if !self.atoms.is_empty() {
+            self.join = Join::Math(width, penalty);
         }
     }
 
@@ -320,6 +627,8 @@ impl Builder {
             class,
             style,
             join,
+            self.decor,
+            self.link,
         );
         self.join = Join::Normal;
     }
@@ -381,15 +690,23 @@ impl Builder {
                             break;
                         }
                     }
+                    let separated = matches!(value.chars().last(), Some('-' | '/'));
                     self.push_atom(value, AtomKind::LatinRun, PunctClass::None, style_id);
+                    if separated {
+                        self.join = Join::WordBreak;
+                    }
                 }
                 CharKind::Other => {
+                    let separated = matches!(current, '-' | '/');
                     self.push_atom(
                         single_char(current),
                         AtomKind::Other,
                         punct_class(current),
                         style_id,
                     );
+                    if separated {
+                        self.join = Join::WordBreak;
+                    }
                     index += 1;
                 }
             }
@@ -442,6 +759,7 @@ pub fn paragraph_from_lines(
     merged.ok_or(RuleError::EmptyText)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_atom(
     atoms: &mut Vec<Atom>,
     boundaries: &mut Vec<Boundary>,
@@ -450,6 +768,8 @@ fn push_atom(
     class: PunctClass,
     style: StyleId,
     join: Join,
+    decor: Decorations,
+    link: Option<&str>,
 ) {
     let full_width = text.chars().next().is_some_and(is_full_width_punct);
     let (mut compress_left, compress_right) = trim_caps(class, full_width);
@@ -467,6 +787,8 @@ fn push_atom(
         kind,
         class,
         style,
+        decor,
+        link: link.map(Arc::from),
         compress_left,
         compress_right,
     };
@@ -482,6 +804,59 @@ fn push_atom(
                 glue: Glue::default(),
                 penalty: 0,
             },
+            Join::Attach => Boundary {
+                breakable: Breakability::Forbidden,
+                kind: BoundaryKind::Normal,
+                role: BoundaryRole::Plain,
+                glue: Glue::default(),
+                penalty: 0,
+            },
+            Join::Hyphen => Boundary {
+                breakable: Breakability::Allowed,
+                kind: BoundaryKind::Hyphen,
+                role: BoundaryRole::Plain,
+                glue: Glue::default(),
+                // Lower than a space but not free: a break inside a word is a
+                // last resort before overfull, not a preferred break.
+                penalty: HYPHEN_PENALTY,
+            },
+            Join::Math(width, penalty) => Boundary {
+                breakable: Breakability::Allowed,
+                kind: BoundaryKind::Normal,
+                role: BoundaryRole::Plain,
+                glue: Glue {
+                    width,
+                    ..Glue::default()
+                },
+                penalty,
+            },
+            Join::Code => {
+                let mut boundary = normal_boundary(previous, &atom);
+                if boundary.breakable == Breakability::Allowed {
+                    boundary.penalty = CODE_BREAK_PENALTY;
+                }
+                boundary
+            }
+            // Keep the ordinary mixed-script glue and the forbidden checks
+            // (never start a line with a comma or a slash) and only raise the
+            // price of breaking (ADR-0111).
+            Join::WordBreak => {
+                let mut boundary = normal_boundary(previous, &atom);
+                if boundary.breakable == Breakability::Allowed {
+                    boundary.penalty = WORD_BREAK_PENALTY;
+                }
+                boundary
+            }
+            // A character split inside a long code run: allowed only through
+            // the fallback ladder's last resort, priced above every ordinary
+            // break so a token that fits is never cut (D114).
+            Join::Intrusive => {
+                let mut boundary = normal_boundary(previous, &atom);
+                if boundary.breakable == Breakability::Allowed {
+                    boundary.penalty = INTRUSIVE_BREAK_PENALTY;
+                }
+                boundary
+            }
         };
         boundaries.push(boundary);
     }
@@ -495,6 +870,7 @@ fn trim_caps(class: PunctClass, full_width: bool) -> (Width, Width) {
             PunctClass::Open => (LATIN_TRIM, Width::ZERO),
             PunctClass::Close => (Width::ZERO, LATIN_TRIM),
             PunctClass::Middle => (LATIN_TRIM, LATIN_TRIM),
+            PunctClass::Dash => (Width::ZERO, Width::ZERO),
             PunctClass::None => (Width::ZERO, Width::ZERO),
         };
     }
@@ -502,6 +878,7 @@ fn trim_caps(class: PunctClass, full_width: bool) -> (Width, Width) {
         PunctClass::Open => (OPEN_TRIM_LEFT, Width::ZERO),
         PunctClass::Close => (Width::ZERO, CLOSE_TRIM_RIGHT),
         PunctClass::Middle => (MIDDLE_TRIM_LEFT, MIDDLE_TRIM_RIGHT),
+        PunctClass::Dash => (Width::ZERO, Width::ZERO),
         PunctClass::None => (Width::ZERO, Width::ZERO),
     }
 }
@@ -514,12 +891,15 @@ pub fn is_full_width_punct(c: char) -> bool {
 
 fn normal_boundary(previous: &Atom, next: &Atom) -> Boundary {
     let break_opportunity = is_break_opportunity(previous);
-    let forbidden = !break_opportunity
-        && (previous.class == PunctClass::Open
-            || next.class == PunctClass::Close
-            || next.class == PunctClass::Middle
-            || next.text == "/"
-            || (is_word_like(previous.kind) && is_word_like(next.kind)));
+    // Kinsoku (禁则) checks are independent of a break opportunity: `well-，`
+    // may not start a line with the comma even though `-` is a natural
+    // place to break. The opportunity only relaxes the word-like rule.
+    let forbidden = previous.class == PunctClass::Open
+        || next.class == PunctClass::Close
+        || next.class == PunctClass::Middle
+        || next.class == PunctClass::Dash
+        || starts_with_separator(next)
+        || (!break_opportunity && is_word_like(previous.kind) && is_word_like(next.kind));
 
     // A forbidden boundary is still internal when the line does not break
     // there. Do not add a CJK/Latin gap before a comma or after an opening
@@ -567,7 +947,8 @@ fn normal_boundary(previous: &Atom, next: &Atom) -> Boundary {
 fn space_boundary(previous: &Atom, next: &Atom) -> Boundary {
     let forbidden = previous.class == PunctClass::Open
         || next.class == PunctClass::Close
-        || next.class == PunctClass::Middle;
+        || next.class == PunctClass::Middle
+        || next.class == PunctClass::Dash;
 
     Boundary {
         breakable: if forbidden {
@@ -607,7 +988,10 @@ fn char_kind(c: char) -> CharKind {
 }
 
 fn is_latin_run_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '\''
+    // A slash inside a run stays with the piece before it, so `time/core`
+    // yields `time/` + `core`: a break after it is a priced word break, not
+    // a free break around a stray `/` atom (ADR-0111).
+    c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '/' || c == '\''
 }
 
 /// True when a break after this atom is a natural mixed-script opportunity:
@@ -618,6 +1002,16 @@ fn is_break_opportunity(atom: &Atom) -> bool {
         .last()
         .map(|c| matches!(c, '-' | '/' | '\u{00b7}' | '\u{200b}'))
         .unwrap_or(false)
+}
+
+/// A line may not begin with a separator or a binary operator. An inline-code
+/// piece keeps its trailing space, so the test is on the first character, not
+/// equality (`/ ` must be caught as well as a lone `/`). Keeping `*`/`+`/`=`
+/// off the line start makes a wrapped code expression read as a continuation
+/// (`tick *` at the end, `60 * …` below) instead of a stray operator
+/// (ADR-0115).
+fn starts_with_separator(atom: &Atom) -> bool {
+    matches!(atom.text.chars().next(), Some('/' | '-' | '*' | '+' | '='))
 }
 
 fn is_word_like(kind: AtomKind) -> bool {
@@ -647,8 +1041,12 @@ pub fn punct_class(c: char) -> PunctClass {
         '）' | '】' | '》' | '〉' | '」' | '』' | '”' | '’' | ')' | ']' | '}' => {
             PunctClass::Close
         }
-        '，' | '。' | '、' | '；' | '：' | '！' | '？' | '…' | ',' | '.' | ';' | ':' | '!'
-        | '?' => PunctClass::Middle,
+        '，' | '。' | '、' | '；' | '：' | '！' | '？' | ',' | '.' | ';' | ':' | '!' | '?' => {
+            PunctClass::Middle
+        }
+        // The ellipsis, the dashes and the middle dot carry their own space:
+        // they belong at neither edge of a line and must not be squeezed.
+        '…' | '—' | '–' | '·' => PunctClass::Dash,
         _ => PunctClass::None,
     }
 }
@@ -673,6 +1071,8 @@ pub fn justified_style(width: Width) -> ParagraphStyle {
     ParagraphStyle {
         width,
         first_indent: Width::ZERO,
+        hang: Width::ZERO,
+        tracking: Width::ZERO,
         line_height: Width::from_em_frac(3, 2),
         align: Align::Justify,
     }
@@ -706,6 +1106,49 @@ mod tests {
     }
 
     #[test]
+    fn a_hyphen_or_slash_break_carries_a_penalty() {
+        let paragraph = compile("metronome-rs 与 tactus-time/core");
+        let texts: Vec<&str> = paragraph
+            .atoms
+            .iter()
+            .map(|atom| atom.text.as_str())
+            .collect();
+        assert_eq!(
+            texts,
+            ["metronome-", "rs", "与", "tactus-", "time/", "core"]
+        );
+
+        // Splitting an identifier stays possible, but only when the line
+        // cannot afford to keep it whole (ADR-0111).
+        assert_eq!(paragraph.boundaries[0].breakable, Breakability::Allowed);
+        assert_eq!(paragraph.boundaries[0].penalty, WORD_BREAK_PENALTY);
+        assert_eq!(paragraph.boundaries[3].penalty, WORD_BREAK_PENALTY);
+        assert_eq!(paragraph.boundaries[4].penalty, WORD_BREAK_PENALTY);
+        assert_eq!(paragraph.boundaries[0].glue.width, Width::ZERO);
+        assert_eq!(paragraph.boundaries[0].glue.stretch, Width::ZERO);
+        // A space is still a free break.
+        assert_eq!(paragraph.boundaries[1].penalty, 0);
+    }
+
+    #[test]
+    fn a_break_after_a_hyphen_keeps_the_mixed_script_gap() {
+        let paragraph = compile("foo-中文");
+        let boundary = paragraph.boundaries[0];
+        assert_eq!(boundary.breakable, Breakability::Allowed);
+        assert_eq!(boundary.role, BoundaryRole::CjkLatin);
+        assert_eq!(boundary.glue.width, CJK_LATIN_GAP);
+        assert_eq!(boundary.penalty, WORD_BREAK_PENALTY);
+    }
+
+    #[test]
+    fn a_hyphen_never_opens_a_break_before_punctuation() {
+        let paragraph = compile("well-，好");
+        // `well-` is followed by a comma: the boundary stays forbidden.
+        assert_eq!(paragraph.boundaries[0].breakable, Breakability::Forbidden);
+        assert_eq!(paragraph.boundaries[0].penalty, 0);
+    }
+
+    #[test]
     fn cjk_latin_without_space_gets_ideal_gap() {
         let paragraph = compile("中文English");
         let boundary = paragraph.boundaries[1];
@@ -736,6 +1179,43 @@ mod tests {
         assert_eq!(paragraph.atoms.len(), 2);
         assert_eq!(paragraph.boundaries[0].kind, BoundaryKind::Space);
         assert_eq!(paragraph.boundaries[0].breakable, Breakability::Forbidden);
+    }
+
+    #[test]
+    fn a_dash_keeps_its_width_and_never_starts_a_line() {
+        // `——` and `……` are two full-width marks; trimming half an em off each
+        // side would close the run up (D83).
+        for mark in ['—', '–', '…', '·'] {
+            assert_eq!(punct_class(mark), PunctClass::Dash, "{mark}");
+        }
+        let paragraph = compile("甲——乙");
+        let dash = &paragraph.atoms[1];
+        assert_eq!(dash.class, PunctClass::Dash);
+        assert_eq!(dash.compress_left, Width::ZERO);
+        assert_eq!(dash.compress_right, Width::ZERO);
+        assert_eq!(
+            paragraph.boundaries[0].breakable,
+            Breakability::Forbidden,
+            "a line may not start with a dash"
+        );
+        assert_eq!(
+            paragraph.boundaries[2].breakable,
+            Breakability::Allowed,
+            "but a line may break after the run"
+        );
+    }
+
+    #[test]
+    fn a_code_line_keeps_its_spaces() {
+        let paragraph =
+            paragraph_from_code_line("  a b", justified_style(Width::from_em(10)), StyleId(0))
+                .expect("a code line");
+        let texts: Vec<&str> = paragraph
+            .atoms
+            .iter()
+            .map(|atom| atom.text.as_str())
+            .collect();
+        assert_eq!(texts, [" ", " ", "a", " ", "b"]);
     }
 
     #[test]
@@ -834,14 +1314,29 @@ mod tests {
             Breakability::Allowed,
             "a break after a hyphen must be allowed"
         );
-        let slash = texts.iter().position(|text| *text == "/").expect("slash");
+        let slash = texts
+            .iter()
+            .position(|text| *text == "path/")
+            .expect("slash");
         assert_eq!(
             paragraph.boundaries[slash].breakable,
             Breakability::Allowed,
             "a break after a slash must be allowed"
         );
         assert_eq!(
-            paragraph.boundaries[slash - 1].breakable,
+            paragraph.boundaries[slash].penalty, WORD_BREAK_PENALTY,
+            "but it is priced above a space"
+        );
+        // A standalone slash is still its own atom, and a line may not start
+        // with one.
+        let spaced = compile("中文/abc");
+        let standalone = spaced
+            .atoms
+            .iter()
+            .position(|atom| atom.text == "/")
+            .expect("standalone slash");
+        assert_eq!(
+            spaced.boundaries[standalone - 1].breakable,
             Breakability::Forbidden,
             "a line must not start with a slash"
         );

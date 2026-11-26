@@ -84,7 +84,6 @@ pub enum TieBreak {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BreakParams {
     pub tolerance: Permille,
-    pub emergency_stretch: Width,
     pub emergency_tolerance: Permille,
     pub max_lines: Option<u32>,
     pub max_kp_atoms: Option<u32>,
@@ -123,12 +122,14 @@ impl ParamSet {
     pub fn default_v1() -> Self {
         Self {
             preset: PresetId("default-v1"),
-            model_version: 1,
-            rules_version: 1,
+            // 4: the short-line term also charges a short non-final line
+            // (D115). 2: ADR-0111/0112 changed code segmentation and the
+            // separator penalties.
+            model_version: 4,
+            rules_version: 2,
             metrics_version: 0,
             break_params: BreakParams {
                 tolerance: Permille(3000),
-                emergency_stretch: Width::ZERO,
                 emergency_tolerance: Permille(10_000),
                 max_lines: None,
                 max_kp_atoms: None,
@@ -174,6 +175,53 @@ impl ParamSet {
         let mut params = Self::default_v1();
         params.preset = PresetId("publish-v1");
         params.break_params.tolerance = Permille(1_500);
+        params
+    }
+
+    /// Chinese book defaults: `publish-v1` plus a larger short-last-line
+    /// threshold, so a two-character tail is charged like the widow it is.
+    pub fn book_v1() -> Self {
+        let mut params = Self::publish_v1();
+        params.preset = PresetId("book-v1");
+        params.break_params.costs.short_last_threshold = Width::from_em(3);
+        params
+    }
+
+    /// The proposal preset: `book-v1` with a five-character short-tail
+    /// threshold and a doubled charge. A proposal's last line should reach
+    /// into the measure; a 4–5 character tail is a visible orphan even though
+    /// a book would tolerate it. The Studio uses this preset; the command line
+    /// keeps `latex-v1` (ADR-0115).
+    pub fn proposal_v1() -> Self {
+        let mut params = Self::book_v1();
+        params.preset = PresetId("proposal-v1");
+        params.break_params.costs.short_last_threshold = Width::from_em(8);
+        params.break_params.costs.short_last_scale = Weight(2_000_000);
+        params
+    }
+
+    /// LaTeX article defaults: `\tolerance=200` (badness, which is
+    /// `100 * |r|^3` here, so `|r| <= 2^(1/3) ~= 1.26`), and no
+    /// short-last-line penalty (TeX leaves the last line ragged).
+    ///
+    /// TeX's own `\emergencystretch` is `0pt`; the rescue pass still uses the
+    /// engine's 3em, because TeX would emit an overfull box there while we
+    /// prefer one very loose line. The rescue is not part of the normal path.
+    pub fn latex_v1() -> Self {
+        let mut params = Self::default_v1();
+        params.preset = PresetId("latex-v1");
+        params.break_params.tolerance = Permille(1_260);
+        params.break_params.costs.short_last_scale = Weight(0);
+        params
+    }
+
+    /// `publish-v1` plus K7: adjacent justified lines may not jump more than
+    /// one looseness class for free. One class costs one line's worth.
+    pub fn rhythm_v1() -> Self {
+        let mut params = Self::publish_v1();
+        params.preset = PresetId("rhythm-v1");
+        params.break_params.costs.fitness = Weight(10);
+        params.features.fitness = true;
         params
     }
 
@@ -260,11 +308,11 @@ impl ParamSet {
             }
         }
         if costs.short_last_threshold < Width::ZERO
-            || costs.short_last_threshold > Width::from_em(5)
+            || costs.short_last_threshold > Width::from_em(8)
         {
             return Err(ParamError {
                 path: "break_params.costs.short_last_threshold",
-                reason: "must be in 0..=5em",
+                reason: "must be in 0..=8em",
             });
         }
         if let Some(threshold) = costs.height_threshold {
@@ -280,14 +328,6 @@ impl ParamSet {
                     reason: "must be > 0 when height_scale > 0",
                 });
             }
-        }
-        if break_params.emergency_stretch < Width::ZERO
-            || break_params.emergency_stretch > Width::from_em(10)
-        {
-            return Err(ParamError {
-                path: "break_params.emergency_stretch",
-                reason: "must be in 0..=10em",
-            });
         }
         if break_params.fallback.allow_forbidden && !break_params.fallback.allow_emergency {
             return Err(ParamError {
@@ -314,7 +354,6 @@ impl ParamSet {
         let costs = params.costs;
 
         hasher.write_u64(params.tolerance.0 as u64);
-        hasher.write_i64(params.emergency_stretch.0 as i64);
         hasher.write_u64(params.emergency_tolerance.0 as u64);
         hasher.write_option_u32(params.max_lines);
         hasher.write_option_u32(params.max_kp_atoms);
@@ -433,8 +472,57 @@ mod tests {
             base.break_params.costs.badness_scale
         );
         assert_eq!(publish.break_params.fallback, base.break_params.fallback);
-        assert_eq!(publish.rules_version, 1, "the trim table changed");
+        assert_eq!(publish.rules_version, 2, "ADR-0111/0112 changed the rules");
         publish.validate().expect("publish-v1 must be valid");
         assert_ne!(publish.param_hash(), base.param_hash());
+    }
+
+    #[test]
+    fn proposal_v1_charges_a_longer_tail_harder() {
+        let book = ParamSet::book_v1();
+        let proposal = ParamSet::proposal_v1();
+        assert_eq!(proposal.preset.0, "proposal-v1");
+        assert_eq!(
+            proposal.break_params.costs.short_last_threshold,
+            Width::from_em(8)
+        );
+        assert_eq!(
+            proposal.break_params.costs.short_last_scale,
+            Weight(2_000_000)
+        );
+        // Only the short-tail knobs move; the rest is `book-v1`.
+        assert_eq!(
+            proposal.break_params.costs.line,
+            book.break_params.costs.line
+        );
+        assert_eq!(proposal.break_params.tolerance, book.break_params.tolerance);
+        proposal.validate().expect("proposal-v1 must be valid");
+        assert_ne!(proposal.param_hash(), book.param_hash());
+    }
+
+    #[test]
+    fn latex_v1_matches_tex_tolerance_and_leaves_the_last_line_ragged() {
+        let base = ParamSet::default_v1();
+        let latex = ParamSet::latex_v1();
+        assert_eq!(latex.preset.0, "latex-v1");
+        // TeX's \tolerance=200 is a badness limit; badness = 100 * |r|^3, so
+        // |r| <= 2^(1/3), which is 1.26 in per-mille.
+        assert_eq!(latex.break_params.tolerance, Permille(1_260));
+        assert_eq!(latex.break_params.costs.short_last_scale, Weight(0));
+        // Only the two TeX-specific knobs move: the cost model is unchanged.
+        assert_eq!(latex.model_version, base.model_version);
+        assert_eq!(latex.break_params.costs.line, base.break_params.costs.line);
+        assert_eq!(
+            latex.break_params.costs.badness_scale,
+            base.break_params.costs.badness_scale
+        );
+        assert_eq!(latex.break_params.fallback, base.break_params.fallback);
+        latex.validate().expect("latex-v1 must be valid");
+        assert_ne!(latex.param_hash(), base.param_hash());
+        assert_ne!(
+            latex.param_hash(),
+            ParamSet::publish_v1().param_hash(),
+            "a distinct preset must not collide with publish-v1"
+        );
     }
 }

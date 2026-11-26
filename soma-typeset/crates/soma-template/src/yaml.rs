@@ -8,6 +8,8 @@
 //! - block sequences (`- value`, `- key: value`) nested by indentation;
 //! - plain scalars, single-quoted scalars (`''` for a quote), double-quoted
 //!   scalars (`\"`, `\\`, `\n`, `\t`);
+//! - flow sequences (`[a, b]`) and flow mappings (`{a: b}`) on one line; they
+//!   may nest, and may appear wherever a block scalar or block collection may;
 //! - `#` comments outside quotes;
 //! - empty values (a nested block, or null).
 //!
@@ -15,9 +17,9 @@
 //! can convert them exactly, without floating point. `true`/`false` are decoded
 //! where a boolean is expected.
 //!
-//! Not supported (explicit error or treated as text): flow collections
-//! (`[a, b]`, `{a: b}`), anchors/aliases, tags, multi-line scalars, documents
-//! (`---`), tabs for indentation.
+//! Not supported (explicit error or treated as text): anchors/aliases, tags,
+//! multi-line scalars, multi-line flow collections, documents (`---`), tabs for
+//! indentation.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -228,7 +230,7 @@ fn parse_entry(
     let text = current.text.clone();
     *index += 1;
 
-    let (name, rest) = split_key(&text).ok_or_else(|| {
+    let (name, rest, value_offset) = split_key(&text).ok_or_else(|| {
         TemplateError::new(line, (indent + 1) as u32, "", "expected `key: value`")
     })?;
     if name.is_empty() {
@@ -249,6 +251,7 @@ fn parse_entry(
     }
 
     let column = (indent + 1) as u32;
+    let value_column = (indent + 1 + text[..value_offset].chars().count()) as u32;
     let value = if rest.is_empty() {
         if *index < lines.len() && lines[*index].indent > indent {
             let child_indent = lines[*index].indent;
@@ -256,8 +259,10 @@ fn parse_entry(
         } else {
             Value::null(line, column)
         }
+    } else if starts_flow(rest) {
+        parse_flow(rest, line, value_column)?
     } else {
-        Value::scalar(rest, line, column)
+        Value::scalar(rest, line, value_column)
     };
 
     entries.push((
@@ -295,9 +300,16 @@ fn parse_seq(lines: &[Line], index: &mut usize, indent: usize) -> Result<Value, 
             continue;
         }
 
+        // A flow collection is a complete item on one line; check it before
+        // `split_key` so a colon inside `{a: b}` is not read as a block key.
+        if starts_flow(&rest) {
+            items.push(parse_flow(&rest, item_line, (indent + 3) as u32)?);
+            continue;
+        }
+
         // `- key: value` starts a mapping whose remaining keys align two columns
         // past the dash.
-        if let Some((name, value_text)) = split_key(&rest) {
+        if let Some((name, value_text, value_offset)) = split_key(&rest) {
             let map_indent = indent + 2;
             let entry_column = (indent + 3) as u32;
             let mut entries: Vec<(Key, Value)> = Vec::new();
@@ -308,6 +320,12 @@ fn parse_seq(lines: &[Line], index: &mut usize, indent: usize) -> Result<Value, 
                 } else {
                     Value::null(item_line, entry_column)
                 }
+            } else if starts_flow(value_text) {
+                parse_flow(
+                    value_text,
+                    item_line,
+                    entry_column + rest[..value_offset].chars().count() as u32,
+                )?
             } else {
                 Value::scalar(value_text, item_line, entry_column)
             };
@@ -338,8 +356,9 @@ fn parse_seq(lines: &[Line], index: &mut usize, indent: usize) -> Result<Value, 
 }
 
 /// Split `key: value` at the first unquoted `:` that is followed by a space or
-/// the end of the line. Returns unquoted, trimmed key and value.
-fn split_key(text: &str) -> Option<(&str, &str)> {
+/// the end of the line. Returns the trimmed key, the trimmed value, and the
+/// value's byte offset in `text` (for diagnostics).
+fn split_key(text: &str) -> Option<(&str, &str, usize)> {
     let mut quote: Option<char> = None;
     let mut escaped = false;
     for (offset, character) in text.char_indices() {
@@ -361,8 +380,9 @@ fn split_key(text: &str) -> Option<(&str, &str)> {
                     let after = &text[offset + 1..];
                     if after.is_empty() || after.starts_with(' ') {
                         let key = text[..offset].trim();
-                        let value = after.trim_start();
-                        return Some((key, value));
+                        let trimmed = after.trim_start();
+                        let value_offset = offset + 1 + (after.len() - trimmed.len());
+                        return Some((key, trimmed, value_offset));
                     }
                 }
                 _ => {}
@@ -370,6 +390,237 @@ fn split_key(text: &str) -> Option<(&str, &str)> {
         }
     }
     None
+}
+
+/// True when a value begins a one-line flow collection.
+fn starts_flow(value: &str) -> bool {
+    matches!(value.chars().next(), Some('[') | Some('{'))
+}
+
+/// Parse one flow collection. The text must contain exactly the collection
+/// (trailing spaces are fine); anything after the closing bracket is an error.
+fn parse_flow(text: &str, line: u32, column: u32) -> Result<Value, TemplateError> {
+    let mut parser = FlowParser {
+        text,
+        offset: 0,
+        line,
+        base_column: column,
+    };
+    let value = parser.parse_value()?;
+    parser.skip_space();
+    if parser.offset < text.len() {
+        return Err(parser.error("unexpected text after flow collection"));
+    }
+    Ok(value)
+}
+
+/// Recursive one-line flow collection parser. Positions are derived from the
+/// line the collection started on and the column of its first character.
+struct FlowParser<'a> {
+    text: &'a str,
+    offset: usize,
+    line: u32,
+    base_column: u32,
+}
+
+impl<'a> FlowParser<'a> {
+    fn column(&self) -> u32 {
+        self.base_column + self.text[..self.offset].chars().count() as u32
+    }
+
+    fn error(&self, reason: &'static str) -> TemplateError {
+        TemplateError::new(self.line, self.column(), "", reason)
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.text[self.offset..].chars().next()
+    }
+
+    fn bump(&mut self) -> Option<char> {
+        let character = self.peek()?;
+        self.offset += character.len_utf8();
+        Some(character)
+    }
+
+    fn skip_space(&mut self) {
+        while matches!(self.peek(), Some(' ') | Some('\t')) {
+            self.offset += 1;
+        }
+    }
+
+    fn parse_value(&mut self) -> Result<Value, TemplateError> {
+        self.skip_space();
+        let line = self.line;
+        let column = self.column();
+        match self.peek() {
+            Some('[') => self.parse_seq(),
+            Some('{') => self.parse_map(),
+            Some('\'') | Some('"') => {
+                let text = self.take_quoted()?;
+                Ok(Value::scalar(&text, line, column))
+            }
+            Some(_) => {
+                let text = self.take_plain(&[',', ']', '}']);
+                if text.is_empty() {
+                    return Err(self.error("expected a value"));
+                }
+                Ok(Value::scalar(text, line, column))
+            }
+            None => Err(self.error("expected a value")),
+        }
+    }
+
+    fn parse_seq(&mut self) -> Result<Value, TemplateError> {
+        let line = self.line;
+        let column = self.column();
+        self.bump();
+        let mut items = Vec::new();
+        loop {
+            self.skip_space();
+            match self.peek() {
+                Some(']') => {
+                    self.bump();
+                    break;
+                }
+                None => return Err(self.error("unterminated flow sequence")),
+                _ => {}
+            }
+            items.push(self.parse_value()?);
+            self.skip_space();
+            match self.peek() {
+                Some(',') => {
+                    self.bump();
+                }
+                Some(']') => {
+                    self.bump();
+                    break;
+                }
+                Some(_) => return Err(self.error("expected `,` or `]` in flow sequence")),
+                None => return Err(self.error("unterminated flow sequence")),
+            }
+        }
+        Ok(Value::seq(items, line, column))
+    }
+
+    fn parse_map(&mut self) -> Result<Value, TemplateError> {
+        let line = self.line;
+        let column = self.column();
+        self.bump();
+        let mut entries: Vec<(Key, Value)> = Vec::new();
+        loop {
+            self.skip_space();
+            match self.peek() {
+                Some('}') => {
+                    self.bump();
+                    break;
+                }
+                None => return Err(self.error("unterminated flow mapping")),
+                _ => {}
+            }
+
+            let key_line = self.line;
+            let key_column = self.column();
+            let key = match self.peek() {
+                Some('\'') | Some('"') => self.take_quoted()?,
+                _ => {
+                    let text = self.take_plain(&[':']);
+                    if text.is_empty() {
+                        return Err(self.error("empty mapping key"));
+                    }
+                    String::from(text)
+                }
+            };
+            if entries.iter().any(|(seen, _)| seen.name == key) {
+                return Err(TemplateError::new(
+                    key_line,
+                    key_column,
+                    "",
+                    "duplicate key",
+                ));
+            }
+
+            self.skip_space();
+            if self.peek() != Some(':') {
+                return Err(self.error("expected `:` in flow mapping"));
+            }
+            self.bump();
+            self.skip_space();
+            let value = if matches!(self.peek(), Some(',') | Some('}')) {
+                Value::null(key_line, self.column())
+            } else {
+                self.parse_value()?
+            };
+            entries.push((
+                Key {
+                    name: key,
+                    line: key_line,
+                    column: key_column,
+                },
+                value,
+            ));
+
+            self.skip_space();
+            match self.peek() {
+                Some(',') => {
+                    self.bump();
+                }
+                Some('}') => {
+                    self.bump();
+                    break;
+                }
+                Some(_) => return Err(self.error("expected `,` or `}` in flow mapping")),
+                None => return Err(self.error("unterminated flow mapping")),
+            }
+        }
+        Ok(Value::map(entries, line, column))
+    }
+
+    /// Consume a quoted scalar (including both quotes) and decode it.
+    fn take_quoted(&mut self) -> Result<String, TemplateError> {
+        let start = self.offset;
+        let column = self.column();
+        let quote = self.bump().ok_or_else(|| {
+            TemplateError::new(self.line, column, "", "unterminated quoted scalar")
+        })?;
+        let mut escaped = false;
+        loop {
+            let Some(character) = self.bump() else {
+                return Err(TemplateError::new(
+                    self.line,
+                    column,
+                    "",
+                    "unterminated quoted scalar",
+                ));
+            };
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if quote == '"' && character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == quote {
+                if quote == '\'' && self.peek() == Some('\'') {
+                    self.bump();
+                    continue;
+                }
+                break;
+            }
+        }
+        Ok(scalar_text(&self.text[start..self.offset]))
+    }
+
+    fn take_plain(&mut self, stops: &[char]) -> &'a str {
+        let start = self.offset;
+        while let Some(character) = self.peek() {
+            if stops.contains(&character) {
+                break;
+            }
+            self.offset += character.len_utf8();
+        }
+        self.text[start..self.offset].trim()
+    }
 }
 
 /// Decode a scalar: quoted forms are unescaped, everything else is returned

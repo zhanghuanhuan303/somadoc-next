@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SOMA ATLAS · 中文优先排版引擎研究图集</title>
+<style>
+:root{
+  --bg:#fbfaf4;
+  --ink:#18201d;
+  --ink-soft:#3b4642;
+  --muted:#6d7772;
+  --rule:#d9d6c7;
+  --rule-soft:#eae7da;
+  --rule-strong:#18201d;
+  --accent:#2f5d50;
+  --accent-soft:#7ba193;
+  --blue:#1f4e79;
+  --blue-lt:#9db6cc;
+  --amber:#8a5a1f;
+  --panel:#f3f1e6;
+  --text:40rem;
+  --note:13.25rem;
+  --ngap:1.75rem;
+  --float:calc(var(--note) + var(--ngap));
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font-family:Palatino,"Palatino Linotype","Book Antiqua","Source Han Serif SC","Noto Serif CJK SC","Songti SC",Georgia,serif;
+  font-size:17px;line-height:1.68;font-kerning:normal;
+}
+.classbar{
+  background:#1f3d36;color:#eef3ea;
+  font-family:"SFMono-Regular",Menlo,Consolas,monospace;
+  font-size:.72rem;letter-spacing:.06em;
+  padding:.42rem 1.4rem;display:flex;flex-wrap:wrap;gap:.4rem 1.6rem;align-items:center;
+}
+.classbar .cls{font-weight:700;letter-spacing:.18em;border:1px solid #eef3ea;padding:.05rem .45rem;border-radius:2px}
+.classbar .push{margin-left:auto;opacity:.82}
+.page{max-width:61rem;margin:0 auto;padding:0 2.5rem 6rem}
+article > *{max-width:var(--text)}
+article > header.title-block, article > h2{max-width:calc(var(--text) + var(--float))}
+.title-block{margin:3.6rem 0 2rem;padding-bottom:1.4rem;border-bottom:2.5px solid var(--rule-strong)}
+.title-block .kicker{font-family:"SFMono-Regular",Menlo,Consolas,monospace;font-size:.72rem;letter-spacing:.22em;color:var(--accent);text-transform:uppercase}
+h1{font-size:2.7rem;line-height:1.1;font-weight:400;letter-spacing:-.005em;margin:.7rem 0 .5rem}
+.title-block .sub{font-size:1.06rem;color:var(--ink-soft);font-style:italic;margin:0 0 1.4rem;max-width:38rem}
+.title-block dl.meta{margin:0;font-size:.79rem;color:var(--muted);line-height:1.75}
+.title-block dl.meta div{display:flex;gap:.6rem}
+.title-block dl.meta dt{min-width:5.2rem;color:var(--ink-soft)}
+.title-block dl.meta dd{margin:0}
+h2{font-size:1.26rem;font-weight:400;margin:4.2rem 0 1.1rem;padding-top:.75rem;border-top:1.5px solid var(--rule-strong);letter-spacing:.01em}
+h2 .num{font-family:"SFMono-Regular",Menlo,Consolas,monospace;font-size:.82em;color:var(--accent);margin-right:.6em;letter-spacing:.02em}
+h3{font-size:1.04rem;font-weight:600;margin:2.3rem 0 .55rem}
+h4{font-size:.95rem;font-weight:600;margin:1.6rem 0 .4rem}
+p{margin:0 0 1.05rem}
+a{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(47,93,80,.3)}
+a:hover{border-bottom-color:var(--accent)}
+strong{font-weight:600}
+code{font-family:"SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;font-size:.86em;background:var(--panel);padding:.08em .3em;border-radius:2px}
+small{font-size:.82em;color:var(--muted)}
+ul,ol{margin:0 0 1.05rem;padding-left:1.35rem}
+li{margin:.28rem 0}
+article{counter-reset:sidenote-counter}
+input.margin-toggle{display:none}
+label.margin-toggle{display:none}
+label.sidenote-number{display:inline;counter-increment:sidenote-counter;cursor:pointer}
+label.sidenote-number::after{content:counter(sidenote-counter);font-family:"SFMono-Regular",Menlo,Consolas,monospace;font-size:.62em;color:var(--accent);vertical-align:super;line-height:0;margin-left:.18em}
+.sidenote,.marginnote{float:right;clear:right;width:var(--note);margin:.4rem calc(-1 * var(--float)) 1.15rem var(--ngap);font-size:.775rem;line-height:1.52;color:#5c665f}
+.sidenote::before{content:counter(sidenote-counter) " · "}
+figure{margin:1.8rem 0 2.1rem;padding:1.1rem 1.2rem .9rem;background:#fff;border:1px solid var(--rule)}
+figure.wide{max-width:calc(var(--text) + var(--float));width:calc(var(--text) + var(--float));margin-left:0}
+figure svg{display:block;width:100%;height:auto}
+figcaption{font-size:.79rem;color:var(--muted);line-height:1.55;margin-top:.7rem}
+figcaption b{color:var(--ink-soft)}
+table{width:100%;border-collapse:collapse;font-size:.82rem;line-height:1.5;margin:1.2rem 0 1.8rem}
+caption{caption-side:top;text-align:left;font-size:.78rem;color:var(--muted);padding-bottom:.45rem}
+th,td{text-align:left;vertical-align:top;padding:.42rem .55rem;border-bottom:1px solid var(--rule-soft)}
+thead th{border-bottom:1.2px solid var(--rule-strong);font-weight:600;font-size:.78rem;color:var(--ink-soft);white-space:nowrap}
+tbody tr:last-child td{border-bottom:1px solid var(--rule)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tbody td:first-child{white-space:nowrap}
+.callout{background:var(--panel);border-left:3px solid var(--accent);padding:.9rem 1.1rem .2rem;margin:1.4rem 0 1.8rem;font-size:.9rem}
+.callout p:last-child{margin-bottom:.8rem}
+.tag{display:inline-block;font-family:"SFMono-Regular",Menlo,Consolas,monospace;font-size:.68rem;letter-spacing:.04em;padding:.06rem .38rem;border:1px solid var(--rule);border-radius:2px;color:var(--ink-soft);background:#fff;white-space:nowrap}
+.tag.ok{border-color:#9fbfb2;color:#2f5d50;background:#f2f8f5}
+.tag.wip{border-color:#d8c49a;color:#7a5a20;background:#fbf7ec}
+.tag.limit{border-color:#c8b3b3;color:#7a3b3b;background:#fbf2f2}
+.mono{font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+.kv{display:grid;grid-template-columns:8.2rem 1fr;gap:.2rem .9rem;font-size:.84rem;margin:.4rem 0 1.2rem}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0}
+.counters{display:grid;grid-template-columns:repeat(4,1fr);gap:.9rem;margin:1.6rem 0 1.8rem}
+.counter{background:#fff;border:1px solid var(--rule);padding:.8rem .9rem}
+.counter b{display:block;font-family:"SFMono-Regular",Menlo,Consolas,monospace;font-size:1.5rem;font-weight:600;color:var(--accent);line-height:1.2}
+.counter span{font-size:.74rem;color:var(--muted);letter-spacing:.02em}
+footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8rem;font-family:"SFMono-Regular",Menlo,Consolas,monospace;font-size:.68rem;color:var(--muted);display:flex;gap:1.4rem;flex-wrap:wrap}
+@media (max-width:58rem){
+  .page{padding:0 1.2rem 4rem}
+  .sidenote,.marginnote{float:none;width:auto;margin:.6rem 0 .8rem 1.2rem;padding-left:1rem;border-left:2px solid var(--rule-soft)}
+  figure.wide{width:100%;max-width:100%}
+  .counters{grid-template-columns:repeat(2,1fr)}
+}
+</style>
+</head>
+<body>
+
+<div class="classbar">
+  <span class="cls">研究档案</span>
+  <span>SOMA ATLAS · 中文优先排版引擎 · 公开研究记录</span>
+  <span class="push">v1.1 · 2026-11-26 · c5948a1</span>
+</div>
+
+<div class="page">
+<article>
+
+<header class="title-block">
+  <div class="kicker">纯 Rust 排版引擎 · 研究图集 · 浏览器本地续篇</div>
+  <h1>SOMA ATLAS</h1>
+  <p class="sub">一个中文优先、全局优化（Knuth–Plass）、跨端字节可复现的排版引擎。
+  本图集不是发布说明，而是<strong>当期状态的可追溯切片</strong>：每个数字都有出处，
+  每个优势都带边界，每个未完成项都显式登记。</p>
+  <dl class="meta">
+    <div><dt>构建</dt><dd><code>main@c5948a1</code>（数据快照：浏览器本地 Studio、GB2312 子集与内容哈希已并入）</dd></div>
+    <div><dt>日期</dt><dd>2026-11-26</dd></div>
+    <div><dt>规模</dt><dd>28 个 crate · 92,527 行 Rust · 120 份 ADR · 1,006 个测试（另 1 个 ignored）</dd></div>
+    <div><dt>环境</dt><dd>Linux x86_64 · Rust 1.99 · <code>wasm32-wasip1</code> · <code>wasm32-unknown-unknown</code> · A4 / 10pt 基准</dd></div>
+    <div><dt>字体</dt><dd>默认模板 IBM Plex Sans SC（正文/标题/代码）· 数学 New Computer Modern Math · 浏览器校样/PDF 用 GB2312 一、二级子集（7,199 字）</dd></div>
+    <div><dt>数据源</dt><dd><code>docs/*.md</code> · <code>docs/adr/0001–0120</code> · <code>scripts/gates.sh</code> · <code>scripts/studio.sh</code> · <code>scripts/local-assets.sh</code> · <code>corpus/zh</code></dd></div>
+  </dl>
+</header>
+
+<section id="s0">
+<h2><span class="num">§0</span>摘要 · 当期状态一页</h2>
+
+<p><strong>一句话</strong>：把「中文排版难做」拆成可验证的工程问题——两级 IR、规则与算法分离、
+六层参数、整数定点、跨端同哈希——然后把每一层都做到能被门禁重跑。
+排版质量用<strong>自己的代价模型</strong>与<strong>暴力参考解</strong>对齐，而不是拿别人的引擎当 oracle。<label for="mn0" class="margin-toggle">⊕</label><input type="checkbox" id="mn0" class="margin-toggle"><span class="marginnote">本图集沿用「图集」而不是「报告」的写法：先给数字与图，再给口径与出处；读者可以从任一数据点回到对应的脚本、ADR 或语料行。</span></p>
+
+<div class="callout">
+<p><b>2026-11-26 增补：浏览器本地 Studio。</b>同一套引擎已链入 <code>soma-studio-ui</code> 的 wasm：
+线上 <code>somadoc.art</code> 默认在浏览器内完成解析、断行、分页、校样、TikZ 与 PDF；
+编辑器只打开一份 <code>welcome.md</code>，字体是 GB2312 一、二级子集，校样与 PDF 共用同一套文件。
+单篇 welcome 文档的本地 PDF 实测 <b>224 KB / 约 50 ms</b>，编辑与导出路径不再发 <code>/api</code> 请求。
+架构与边界见 §3.4、§4.6、§10，剩余字集边界见 §7 的 D119。</p>
+</div>
+
+<div class="counters">
+  <div class="counter"><b>1,006</b><span>测试 / 0 失败</span></div>
+  <div class="counter"><b>12 + S</b><span>门禁检查 / 全绿</span></div>
+  <div class="counter"><b>120</b><span>ADR / 冻结架构</span></div>
+  <div class="counter"><b>28</b><span>crate / 92,527 行</span></div>
+</div>
+
+<table>
+  <caption>表 0 · 当期关键数字（口径见各节；数据源见 §9）</caption>
+  <thead><tr><th>维度</th><th>当期</th><th>口径 / 参照</th></tr></thead>
+  <tbody>
+    <tr><td>行内断行</td><td><b>K-P 全局最优</b>；代价 = 行数 + badness + 边界偏差 + 裁剪 + 短末行 + 高度</td><td>加法权重，每项先归一化；暴力枚举（n≤16）为最优性参考；<code>K-P ≤ Greedy-C</code> 为硬不变量</td></tr>
+    <tr><td>分页</td><td>逐行垂直 K-P，脚注参与页面高度迭代，<code>keep-with-next</code> 为硬约束</td><td>末页免费；贪心保留为显式策略与回退</td></tr>
+    <tr><td>中文规则</td><td>禁则/挤压/悬挂、标点类、行边裁剪上限、连字符断词、注音</td><td>规则表带 <code>ruleId</code>；未核实规则只能产生软约束</td></tr>
+    <tr><td>数学</td><td>TeX 8 类原子与间距表；字体 MATH 常数 + 字形墨迹 + 纵向变体</td><td><code>soma.metrics/7</code>；41 个常数、4,283 个数学字形、490 条纵向变体（New Computer Modern Math）</td></tr>
+    <tr><td>确定性</td><td>全整数（1/4096 em），canonical JSON，native 与 <code>wasm32-wasip1</code> / <code>wasm32-unknown-unknown</code> 同哈希</td><td>无 <code>f32</code>；哈希覆盖 param/rules/metrics/template/engine；Studio S5/S12</td></tr>
+    <tr><td>语料基线</td><td><span class="mono">ALL,48,599,1213,0,0,3,0,0,6,809,1404,428,0</span></td><td>Gate Q′；12 份中文文档；0 过度压缩、0 紧急回退、3 处续排、0 孤行/寡行</td></tr>
+    <tr><td>K-P 性能</td><td>混排 2000 atoms p95 <b>1.12 ms</b>；4000 atoms <b>2.26 ms</b>；纯中文 2000 atoms 0.22 ms</td><td>本机 release，预算 ≤2000 atoms 20 ms、≤4000 atoms 80 ms，<code>bench --check</code> PASS</td></tr>
+    <tr><td>浏览器 Studio</td><td>整个引擎链入 wasm；校样、校验、TikZ、PDF 全在本地；线上默认单文件 <code>welcome.md</code></td><td><code>soma-studio-ui</code> 4,136,582 B 原始 / 1,566,467 B gzip / 1,004,135 B brotli；S1–S10 + S12</td></tr>
+    <tr><td>浏览器字体</td><td>GB2312 一、二级子集 7,199 字，校样与 PDF 共用同一套 TTF/OTF；数学面保留完整</td><td>5 个文件共 4,568,940 B；无需覆盖检查，无 19 MB 回退；边界 D119</td></tr>
+    <tr><td>本地 PDF</td><td><code>soma-render-pdf</code> 在 wasm 内运行，直接下载 Blob</td><td>welcome 文档 224 KB / 约 50 ms（S12）；教材/书稿仍由 CLI 生成</td></tr>
+    <tr><td>线上部署</td><td><code>somadoc.art</code>：默认浏览器本地；<code>?server=1</code> 保留服务端文件树与 native 对照</td><td>16 MB 解包 / 7.5 MB 压缩包；HTTPS + HTTP/2；编辑与导出路径无 <code>/api</code></td></tr>
+    <tr><td>成品</td><td>math-v2 2 页 · article 5 页 · full 14 页 · brief 12 页 · song 13 页 · welcome.md 3 页</td><td>同一份 <code>examples/book</code> 源码 + 一份纯 YAML 模板；线上默认稿改为单份 Markdown</td></tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <p><b>三条口径声明（先读）</b></p>
+  <ol>
+    <li><b>「可复现」指同输入同字节</b>：canonical JSON 的字段顺序、整数舍入、迭代顺序都固定；跨目标只比较同一 schema 的字节。</li>
+    <li><b>「优于贪心」是同一代价模型下的最优性</b>：K-P 与 Greedy-C 读同一套代价；我们不拿 TeX/Typst 的输出当 oracle。</li>
+    <li><b>「对标 LaTeX」是版式口径，不是实现移植</b>：默认版式是 Plex v2 参考页（ADR-0114），LaTeX <code>article</code> 归档为可选项；数学按 TeXbook 附录 G 与字体 MATH 表实现，clean-room。</li>
+  </ol>
+</div>
+</section>
+
+<section id="s1">
+<h2><span class="num">§1</span>缘起 · 三个研究问题</h2>
+<ol>
+  <li><b>中文优先能不能不是「事后补丁」？</b>——把标点、挤压、禁则、行边裁剪做成规则层，
+  断行内核只认宽度与边界属性。代价是规则层与布局层之间要有一条干净的 seam；
+  收益是换字体、换模板、换语言都不用动 DP。<label for="sn1" class="margin-toggle sidenote-number"></label><input type="checkbox" id="sn1" class="margin-toggle"><span class="sidenote">这条 seam 的验收是「breaker 不认识中文规则」：内核只看 <code>Atom</code>/<code>Boundary</code>，规则表只产生 <code>compress_left/right</code> 与可断性。</span></li>
+  <li><b>全局优化能不能做到可解释、可标定？</b>——放弃 TeX 的平方 demerits，用<strong>加法加权</strong>代价，
+  每项先归一化、各有独立权重；再用暴力枚举锁住「我们的最优」。代价是失去 TeX 几十年调参先验，
+  收益是每个决策都能从 trace 读出原因。</li>
+  <li><b>跨端可复现能不能是硬约束？</b>——全整数、固定顺序、canonical 字节、同哈希门禁。
+  代价是所有几何都要在 1/4096 em 网格上做整数运算；收益是 native、wasm、不同宿主的输出可以逐字节对拍。</li>
+</ol>
+<p>押注的结果：一期 8 个阶段（K1–K8）+ 架构 A1–A6 + 能力 E1–Q′ + 字体 F1–F5 + 数学 M1–M7 全部落地。
+这条路径的边界与代价写在 §6/§7。</p>
+</section>
+
+<section id="s2">
+<h2><span class="num">§2</span>能力地图 · 十二个功能域与当前成熟度</h2>
+<p>成熟度是<strong>能力口径</strong>，不是代码行数或性能等价：
+<span class="tag ok">成熟</span> 有门禁与 golden；
+<span class="tag wip">可用</span> 有实现、边界明确；
+<span class="tag limit">边界</span> 已登记、未排期。</p>
+
+<figure class="wide">
+<svg viewBox="0 0 880 430" role="img" aria-label="十二个功能域的成熟度点图">
+  <!-- grid: level 0 at x=232, level 4 at x=760, 132 px per level -->
+  <g font-family="SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#6d7772">
+    <line x1="364" y1="34" x2="364" y2="392" stroke="#e3dfd0" stroke-width="1"/>
+    <line x1="496" y1="34" x2="496" y2="392" stroke="#e3dfd0" stroke-width="1"/>
+    <line x1="628" y1="34" x2="628" y2="392" stroke="#e3dfd0" stroke-width="1"/>
+    <line x1="760" y1="34" x2="760" y2="392" stroke="#d4cfbd" stroke-width="1"/>
+    <text x="364" y="26" text-anchor="middle">可用</text>
+    <text x="496" y="26" text-anchor="middle">成熟</text>
+    <text x="628" y="26" text-anchor="middle">有 golden</text>
+    <text x="760" y="26" text-anchor="middle">全门禁</text>
+  </g>
+  <!-- rows: y = 56 + i*29 -->
+  <g font-family="Palatino,serif" font-size="11" fill="#18201d" text-anchor="end">
+    <text x="218" y="60">语法前端</text>
+    <text x="218" y="89">DocIR</text>
+    <text x="218" y="118">模板 / 样式</text>
+    <text x="218" y="147">盒树 / 行内 K-P</text>
+    <text x="218" y="176">分页 / 脚注</text>
+    <text x="218" y="205">中文规则</text>
+    <text x="218" y="234">数学</text>
+    <text x="218" y="263">字体 / 度量</text>
+    <text x="218" y="292">长文档</text>
+    <text x="218" y="321">渲染后端</text>
+    <text x="218" y="350">确定性</text>
+    <text x="218" y="379">工具链 / 门禁</text>
+  </g>
+  <!-- baseline + reached-length stems -->
+  <g stroke="#2f5d50" stroke-width="1.4">
+    <line x1="232" y1="56" x2="720" y2="56"/>
+    <line x1="232" y1="85" x2="760" y2="85"/>
+    <line x1="232" y1="114" x2="760" y2="114"/>
+    <line x1="232" y1="143" x2="747" y2="143"/>
+    <line x1="232" y1="172" x2="707" y2="172"/>
+    <line x1="232" y1="201" x2="654" y2="201"/>
+    <line x1="232" y1="230" x2="720" y2="230"/>
+    <line x1="232" y1="259" x2="734" y2="259"/>
+    <line x1="232" y1="288" x2="707" y2="288"/>
+    <line x1="232" y1="317" x2="734" y2="317"/>
+    <line x1="232" y1="346" x2="760" y2="346"/>
+    <line x1="232" y1="375" x2="760" y2="375"/>
+  </g>
+  <!-- residual to full gates -->
+  <g stroke="#b98b6a" stroke-width="1.4" stroke-dasharray="2 4">
+    <line x1="720" y1="56" x2="760" y2="56"/>
+    <line x1="747" y1="143" x2="760" y2="143"/>
+    <line x1="707" y1="172" x2="760" y2="172"/>
+    <line x1="654" y1="201" x2="760" y2="201"/>
+    <line x1="720" y1="230" x2="760" y2="230"/>
+    <line x1="734" y1="259" x2="760" y2="259"/>
+    <line x1="707" y1="288" x2="760" y2="288"/>
+    <line x1="734" y1="317" x2="760" y2="317"/>
+  </g>
+  <!-- level dots -->
+  <g fill="#2f5d50">
+    <circle cx="720" cy="56" r="4.5"/>
+    <circle cx="760" cy="85" r="4.5"/>
+    <circle cx="760" cy="114" r="4.5"/>
+    <circle cx="747" cy="143" r="4.5"/>
+    <circle cx="707" cy="172" r="4.5"/>
+    <circle cx="654" cy="201" r="4.5"/>
+    <circle cx="720" cy="230" r="4.5"/>
+    <circle cx="734" cy="259" r="4.5"/>
+    <circle cx="707" cy="288" r="4.5"/>
+    <circle cx="734" cy="317" r="4.5"/>
+    <circle cx="760" cy="346" r="4.5"/>
+    <circle cx="760" cy="375" r="4.5"/>
+  </g>
+  <!-- short annotations -->
+  <g font-family="SFMono-Regular,Menlo,monospace" font-size="9" fill="#6d7772">
+    <text x="770" y="60">4 个前端</text>
+    <text x="770" y="89">14 块 / 17 行内</text>
+    <text x="770" y="118">纯 YAML</text>
+    <text x="770" y="147">预算 PASS</text>
+    <text x="770" y="176">D92</text>
+    <text x="770" y="205" fill="#7a5a20">ParamOnly</text>
+    <text x="770" y="234" fill="#7a5a20">D97 / D98</text>
+    <text x="770" y="263">CFF/TTF</text>
+    <text x="770" y="292">目录 / 索引</text>
+    <text x="770" y="321">4 个后端</text>
+    <text x="770" y="350">同哈希</text>
+    <text x="770" y="379">12 + S</text>
+  </g>
+</svg>
+<figcaption><b>图 1 · 能力地图。</b>圆点是能力成熟度（四档：可用 / 成熟 / 有 golden / 全门禁），
+虚线是到「全门禁」的差额；右栏是每域最关键的一条证据或一个未关闭债务。
+两个尚未满档的域是「中文规则」（硬规则 8 条 <code>Verified</code>，行边裁剪比例已按实测复核并维持）
+与「数学」（M1–M7 已落地，装配件/横向变体与重音 kern 留作 D97/D98）；其余域满档，各自的已知债务见 §7。</figcaption>
+</figure>
+
+<table>
+  <caption>表 1 · 功能域与证据</caption>
+  <thead><tr><th>域</th><th>能力</th><th>证据 / 边界</th></tr></thead>
+  <tbody>
+    <tr><td>语法前端</td><td>Markdown（GFM 表格/嵌套列表/setext，并内嵌数学、LaTeX 命令与环境、语义 HTML）、HTML（语义白名单 + colgroup）、LaTeX（宏/计数器/环境子集）、Word（OOXML 读入）</td><td><code>soma-md</code> 复用 <code>soma-html</code>/<code>soma-latex</code>（ADR-0104）；LaTeX 不做参考文献与交叉引用</td></tr>
+    <tr><td>DocIR</td><td>14 块 / 17 行内；语义，无物理样式；<code>soma.doc/3</code></td><td>Gate A 禁止物理样式字段；表格/公式/脚注/索引/注音都有节点</td></tr>
+    <tr><td>模板 / 样式</td><td>纯 YAML；<code>within</code> 选择器；页母版；封面；目录；编号；<code>soma.template/9</code></td><td><code>soma-template</code>；属性白名单在 <code>Property</code>/<code>PROPERTY_ORDER</code></td></tr>
+    <tr><td>盒树 / 行内 K-P</td><td>原子 + 边界；行边裁剪；强制断行；缩放/升部/降部；<code>soma.pages/11</code></td><td>内核冻结（ADR-0007）；只允许默认 0 的扩展</td></tr>
+    <tr><td>分页 / 脚注</td><td>逐行垂直 K-P；脚注迭代；widow/orphan；续排带；章节起始母版</td><td><code>soma-layout</code>；D92 记垂直页 badness 的 body 参照问题</td></tr>
+    <tr><td>中文规则</td><td>标点类、禁则、挤压、悬挂、行边裁剪、连字符、注音、句读</td><td><code>soma-rules</code>；规则表带 <code>ruleId</code> 与来源；未核实规则只能软约束</td></tr>
+    <tr><td>数学</td><td>TeX 8 类 + 8×8 间距；分数/根式/上下标/大算符/定界符/重音；行内 Rel/Bin 断行</td><td>ADR-0070；<code>soma.metrics/7</code>；D97/D98 留装配件/横向变体与重音 kern</td></tr>
+    <tr><td>字体 / 度量</td><td>字体指纹、度量表生成、逐字选面、救援面、CFF/TTF</td><td><code>tools/metrics-gen</code>；<code>soma.metrics/7</code>；CFF 无字形纵向墨迹</td></tr>
+    <tr><td>长文档</td><td>目录/图目录/表目录、拼音索引（子条目、see/see also、页码区间）、PDF 书签、前置页页码</td><td><code>examples/book</code> 11–14 页成品；索引按 Unicode 码位或拼音</td></tr>
+    <tr><td>渲染后端</td><td>PDF（TrueType/CFF 子集、标签树、链接、图片、Bookmarks、PageLabels）、HTML、SVG、JSON</td><td><code>soma-render-*</code>；PDF 不依赖 <code>soma-metrics</code></td></tr>
+    <tr><td>确定性</td><td>1/4096 em 整数；无浮点；canonical JSON；native 与 wasm 同哈希</td><td><code>scripts/wasm-hash.sh</code>；Gate A/C</td></tr>
+    <tr><td>工具链 / 门禁</td><td>12 项核心检查：fmt、clippy、tests、wasm check、wasm hash、demo、依赖边界、clean-room、Gate A/C/V-R/Q′；另有 Studio S1–S12 与 Web W1–W6</td><td><code>scripts/gates.sh</code>、<code>scripts/studio.sh</code>、<code>scripts/web.sh</code>；语料 <code>corpus/zh</code></td></tr>
+    <tr><td>浏览器 Studio（组合产品）</td><td><code>welcome.md</code> 单文件编辑；本地校样/校验/TikZ/PDF；GB2312 子集；内容哈希资源</td><td>ADR-0118/0119/0120；S1–S10 + S12；线上部署见 §10</td></tr>
+  </tbody>
+</table>
+</section>
+
+<section id="s3">
+<h2><span class="num">§3</span>架构总览 · 一条管线、两条 seam</h2>
+
+<p>管线只有一条，每一层只知道下一层的契约。两个 seam 是整个设计的关键：
+<strong>规则层</strong>把「中文」变成原子与边界的属性；<strong>度量层</strong>把「字体」变成宽度与墨迹。
+断行与分页都只读这两层的结果，因此可以独立测试、独立替换、独立复现。</p>
+
+<figure class="wide">
+<svg viewBox="0 0 880 330" role="img" aria-label="管线与分层图">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f5d50"/>
+    </marker>
+  </defs>
+  <!-- boxes row -->
+  <g font-family="Palatino,serif" font-size="11" fill="#18201d">
+    <rect x="18" y="70" width="118" height="52" fill="#fff" stroke="#b9b2a0"/>
+    <text x="77" y="92" text-anchor="middle" font-weight="600">源文件</text>
+    <text x="77" y="108" text-anchor="middle" font-size="8.2" fill="#6d7772" font-family="SFMono-Regular,monospace">md · html · tex · docx</text>
+
+    <rect x="160" y="70" width="118" height="52" fill="#fff" stroke="#b9b2a0"/>
+    <text x="219" y="92" text-anchor="middle" font-weight="600">前端</text>
+    <text x="219" y="108" text-anchor="middle" font-size="9" fill="#6d7772" font-family="SFMono-Regular,monospace">语义白名单</text>
+
+    <rect x="302" y="70" width="118" height="52" fill="#f2f8f5" stroke="#2f5d50"/>
+    <text x="361" y="92" text-anchor="middle" font-weight="600">DocIR</text>
+    <text x="361" y="108" text-anchor="middle" font-size="9" fill="#4c6b60" font-family="SFMono-Regular,monospace">soma.doc/3</text>
+
+    <rect x="444" y="70" width="118" height="52" fill="#fff" stroke="#b9b2a0"/>
+    <text x="503" y="92" text-anchor="middle" font-weight="600">模板 / 样式</text>
+    <text x="503" y="108" text-anchor="middle" font-size="9" fill="#6d7772" font-family="SFMono-Regular,monospace">soma.template/9</text>
+
+    <rect x="586" y="70" width="118" height="52" fill="#f2f8f5" stroke="#2f5d50"/>
+    <text x="645" y="92" text-anchor="middle" font-weight="600">盒树</text>
+    <text x="645" y="108" text-anchor="middle" font-size="9" fill="#4c6b60" font-family="SFMono-Regular,monospace">Atom · Boundary</text>
+
+    <rect x="728" y="70" width="134" height="52" fill="#fff" stroke="#b9b2a0"/>
+    <text x="795" y="92" text-anchor="middle" font-weight="600">渲染</text>
+    <text x="795" y="108" text-anchor="middle" font-size="9" fill="#6d7772" font-family="SFMono-Regular,monospace">pdf · html · svg · json</text>
+  </g>
+  <!-- arrows -->
+  <g stroke="#2f5d50" stroke-width="1.2" fill="none" marker-end="url(#arrow)">
+    <line x1="136" y1="96" x2="156" y2="96"/>
+    <line x1="278" y1="96" x2="298" y2="96"/>
+    <line x1="420" y1="96" x2="440" y2="96"/>
+    <line x1="562" y1="96" x2="582" y2="96"/>
+    <line x1="704" y1="96" x2="724" y2="96"/>
+  </g>
+  <!-- algorithm row -->
+  <g font-family="Palatino,serif" font-size="10.5" fill="#18201d">
+    <rect x="302" y="165" width="402" height="44" fill="#f7f5ec" stroke="#b9b2a0"/>
+    <text x="503" y="184" text-anchor="middle" font-weight="600">断行 K-P（行内） → 分页 K-P（垂直）</text>
+    <text x="503" y="199" text-anchor="middle" font-size="8.8" fill="#6d7772" font-family="SFMono-Regular,monospace">加法代价 · 整数 DP · 固定 tie-break · fallback ladder</text>
+  </g>
+  <g stroke="#2f5d50" stroke-width="1.2" fill="none" marker-end="url(#arrow)">
+    <path d="M 645 122 L 645 161"/>
+  </g>
+  <!-- seams -->
+  <g font-family="Palatino,serif" font-size="10" fill="#18201d">
+    <rect x="160" y="240" width="240" height="44" fill="#f7f5ec" stroke="#b9b2a0"/>
+    <text x="280" y="258" text-anchor="middle" font-weight="600">规则层 seam</text>
+    <text x="280" y="273" text-anchor="middle" font-size="8.8" fill="#6d7772" font-family="SFMono-Regular,monospace">标点类 · 禁则 · 裁剪上限 · ruleId</text>
+
+    <rect x="444" y="240" width="240" height="44" fill="#f7f5ec" stroke="#b9b2a0"/>
+    <text x="564" y="258" text-anchor="middle" font-weight="600">度量层 seam</text>
+    <text x="564" y="273" text-anchor="middle" font-size="8.8" fill="#6d7772" font-family="SFMono-Regular,monospace">宽度 · 墨迹 · MATH 常数 · 面选择</text>
+  </g>
+  <g stroke="#9db6cc" stroke-width="1" stroke-dasharray="4 3" fill="none">
+    <path d="M 280 236 L 280 122"/>
+    <path d="M 564 236 L 564 122"/>
+  </g>
+  <text x="18" y="300" font-family="SFMono-Regular,Menlo,monospace" font-size="9" fill="#6d7772">canonical hash = fnv(doc · template · styles · param · rules · metrics · engine · layout)</text>
+</svg>
+<figcaption><b>图 2 · 管线与 seam。</b>规则层与度量层都不在 DP 内部：前者把中文变成属性，后者把字体变成整数。
+这条约束由 Gate A 的依赖检查与「breaker 不认识中文规则」的架构 ADR 共同保证。</figcaption>
+</figure>
+
+<h3>三条硬纪律</h3>
+<ul>
+  <li><b>内核冻结</b>：行内 K-P 的 DP、代价、tie-break 不再改；只允许默认 0、不改变既有行为的字段扩展（ADR-0007）。</li>
+  <li><b>文档不带物理样式</b>：DocIR 只有语义；字号、行距、缩进、颜色都在模板里（ADR-0009）。</li>
+  <li><b>模板不带引擎参数</b>：preset、搜索窗口、回退阶梯属于 <code>soma.engine/1</code>；模板只描述版面（Gate A 静态检查）。</li>
+</ul>
+
+<h3>3.4 浏览器本地 Studio · 第三条 I/O 边界</h3>
+<p>Studio 没有第二条排版管线：<code>soma-studio-core</code> 把 <code>parse → DocIR → template → layout → pages</code>
+编成浏览器和 Axum 共用的一个构建函数。<code>soma-studio-ui</code> 把整条链和
+<code>soma-render-svg</code>/<code>soma-render-pdf</code> 一起链入 wasm；Axum 只保留文件、字体与
+可选的 native 对照。线上默认本地模式，编辑和导出都不经过 <code>/api</code>。</p>
+
+<table>
+  <caption>表 1b · 浏览器 Studio 的职责切分</caption>
+  <thead><tr><th>层</th><th>位置</th><th>契约 / 证据</th></tr></thead>
+  <tbody>
+    <tr><td>解析 · 规则 · 布局 · 分页</td><td>wasm</td><td><code>soma-studio-core::build</code>；S5/S11/S12 与 native 同哈希</td></tr>
+    <tr><td>SVG 校样 · PDF · TikZ</td><td>wasm</td><td><code>soma-render-svg</code>、<code>soma-render-pdf</code>、<code>diagram_tikz</code></td></tr>
+    <tr><td>项目 · 度量 · 断词 · 字体</td><td>wasm 内嵌 + 同源静态文件</td><td><code>welcome.md</code>、<code>plex.smt</code>、hyphen、<code>/fonts/v2/</code></td></tr>
+    <tr><td>文件树 · native 对照 · SSE</td><td>可选 Axum 路径</td><td><code>?server=1</code>；loopback/LAN 默认走这条路径</td></tr>
+    <tr><td>资源版本</td><td>Trunk 内容哈希 + <code>/fonts/v2/</code></td><td>ADR-0120；旧模块不会配新字体</td></tr>
+  </tbody>
+</table>
+<p class="mono" style="font-size:.78rem;color:var(--muted)">默认：<code>somadoc.art</code> / <code>*.somadoc.art</code> → local；其他主机 <code>?local=1</code>；强制服务端 <code>?server=1</code>。</p>
+</section>
+
+<section id="s4">
+<h2><span class="num">§4</span>质量与性能 · 可重跑的数字</h2>
+
+<h3>4.1 测试分布</h3>
+<p><b>1,006</b> 个测试（另 1 个 ignored）按层分布。布局与内核占大头，因为这两层的失败最难从输出看出来：
+一个错误的 tie-break 只会让某一段的断点不同，不会让 PDF 报错。图 3 的分层条是
+2026-11-25 的 917 个快照；新增约 89 个测试集中在 Studio、字体子集、PDF 导出与部署，
+没有重画分层，总量以 §0 与本节文字为准。</p>
+
+<figure class="wide">
+<svg viewBox="0 0 880 282" role="img" aria-label="测试分布条图">
+  <g font-family="Palatino,serif" font-size="10.5" fill="#18201d" text-anchor="end">
+    <text x="170" y="41">布局 / 分页</text>
+    <text x="170" y="67">引擎 · 模板 · CLI · 评估</text>
+    <text x="170" y="93">前端 md/html/tex/docx</text>
+    <text x="170" y="119">内核 K-P</text>
+    <text x="170" y="145">渲染 PDF/HTML/SVG</text>
+    <text x="170" y="171">数学</text>
+    <text x="170" y="197">文档 IR</text>
+    <text x="170" y="223">度量 / 断词 / 着色 / TikZ</text>
+    <text x="170" y="249">规则层</text>
+  </g>
+  <g fill="#2f5d50">
+    <rect x="182" y="30" width="600" height="14"/>
+    <rect x="182" y="56" width="405" height="14"/>
+    <rect x="182" y="82" width="338" height="14"/>
+    <rect x="182" y="108" width="235" height="14"/>
+    <rect x="182" y="134" width="180" height="14"/>
+    <rect x="182" y="160" width="158" height="14"/>
+    <rect x="182" y="186" width="160" height="14"/>
+    <rect x="182" y="212" width="140" height="14"/>
+    <rect x="182" y="238" width="78" height="14"/>
+  </g>
+  <g font-family="SFMono-Regular,Menlo,monospace" font-size="9" fill="#3b4642">
+    <text x="790" y="41">240</text>
+    <text x="595" y="67">162</text>
+    <text x="528" y="93">135</text>
+    <text x="425" y="119">94</text>
+    <text x="370" y="145">72</text>
+    <text x="348" y="171">63</text>
+    <text x="350" y="197">64</text>
+    <text x="330" y="223">56</text>
+    <text x="268" y="249">31</text>
+  </g>
+  <line x1="182" y1="266" x2="826" y2="266" stroke="#e3dfd0"/>
+  <g font-family="SFMono-Regular,Menlo,monospace" font-size="8" fill="#6d7772">
+    <text x="182" y="276">0</text>
+    <text x="760" y="276">240 测试 / 组</text>
+  </g>
+</svg>
+<figcaption><b>图 3 · 测试分布（2026-11-25 分层快照）。</b>按 crate 单独跑 <code>cargo test -p &lt;crate&gt; --all-targets</code> 汇总得 917 个通过（另有 1 个 ignored），
+当前 <code>cargo test --workspace</code> 报告 <b>1,006 passed / 1 ignored</b>；新增测试集中在 Studio、字体子集与 PDF 导出。
+分布用于看重心，不作门禁。</figcaption>
+</figure>
+
+<h3>4.2 门禁</h3>
+<table>
+  <caption>表 2 · <code>scripts/gates.sh</code> 的 12 项检查</caption>
+  <thead><tr><th>检查</th><th>内容</th><th>失败意味着</th></tr></thead>
+  <tbody>
+    <tr><td>format</td><td><code>cargo fmt --check</code></td><td>代码风格漂移</td></tr>
+    <tr><td>clippy</td><td><code>-D warnings</code></td><td>潜在缺陷或死代码</td></tr>
+    <tr><td>tests</td><td>workspace 全部测试</td><td>行为回归</td></tr>
+    <tr><td>wasm32 check</td><td><code>cargo check --target wasm32-wasip1</code></td><td>核心不再可移植</td></tr>
+    <tr><td>wasm hash</td><td>native 与 wasm fixture 同哈希</td><td>确定性被破坏</td></tr>
+    <tr><td>demo render</td><td><code>soma-demo</code> 生成 HTML</td><td>渲染消费端断裂</td></tr>
+    <tr><td>依赖边界</td><td><code>soma-core</code> 不依赖字体/解析/序列化/wasm</td><td>内核被污染</td></tr>
+    <tr><td>clean-room</td><td>源码与文档不出现受限参考实现</td><td>来源风险</td></tr>
+    <tr><td>Gate A</td><td>schema、无浮点、依赖、模板/引擎字段隔离</td><td>冻结契约被改</td></tr>
+    <tr><td>Gate C</td><td>内容安全（无脚本/外链/URL 泄漏）</td><td>渲染器越权</td></tr>
+    <tr><td>Gate V/R</td><td>SVG 坐标 = 布局坐标；字节视觉锁</td><td>渲染器自行重排</td></tr>
+    <tr><td>Gate Q′</td><td>40 段语料 + 12 份真实中文文档的记分卡</td><td>效果/性能回退</td></tr>
+  </tbody>
+</table>
+
+<p><b>Studio S 门禁。</b><code>scripts/studio.sh</code> 在 loopback 上启动服务端模式，
+覆盖 S1–S11：壳基线、标签页、面板、主题、页槽/页数、实时重建、检视、离线安全、
+字体探针、AI 边界与前端子集。浏览器本地模式另外跑 S12：在 wasm 内生成 PDF 并检查
+<code>%PDF-</code> 头、大小与耗时。S1–S10 + S12 在公网通过；S2/S11 是服务端文件树测试，
+本地模式按设计跳过。</p>
+
+<h3>4.3 语料基线</h3>
+<p>Gate Q′ 的语料基线是一行 CSV，任何排版行为变化都必须先解释它：</p>
+<p class="mono" style="font-size:.8rem;background:var(--panel);padding:.6rem .8rem;border-left:3px solid var(--accent)">
+ALL,48,599,1213,0,0,3,0,0,6,809,1404,428,0
+</p>
+<p>依次是：文档数、页数、段落、行数、过度压缩行、紧急回退行、续排块、widow、orphan、
+行节奏跳变、页内空白 p95、页内空白最大值、行间 ratio 抖动 p95、CjkLatin 偏差估计误差 p95（‰）。
+这是 2026-11-26 的 Gate Q′ 快照：过度压缩与紧急回退仍为 0，续排 3 块，
+页内空白与 ratio 抖动落在既有范围内。浏览器 Studio 不进入 <code>publish-v1</code>
+语料路径，因此不会改动这一行；它另有 S5/S12 的哈希与 PDF 检查。</p>
+
+<h3>4.4 K-P 性能</h3>
+<figure class="wide">
+<svg viewBox="0 0 880 268" role="img" aria-label="K-P 性能条图">
+  <g font-family="Palatino,serif" font-size="10.5" fill="#18201d" text-anchor="end">
+    <text x="170" y="52">纯中文 2k</text>
+    <text x="170" y="92">标点密集 2k</text>
+    <text x="170" y="132">混排 2k</text>
+    <text x="170" y="172">混排 4k</text>
+  </g>
+  <!-- track: 0 … 100% of the row's budget (644 px) -->
+  <g stroke="#eae7da" stroke-width="9" stroke-linecap="butt">
+    <line x1="182" y1="46" x2="826" y2="46"/>
+    <line x1="182" y1="86" x2="826" y2="86"/>
+    <line x1="182" y1="126" x2="826" y2="126"/>
+    <line x1="182" y1="166" x2="826" y2="166"/>
+  </g>
+  <!-- bars: width = time / budget * 644 -->
+  <g fill="#1f4e79">
+    <rect x="182" y="40" width="7" height="12"/>
+    <rect x="182" y="80" width="17" height="12"/>
+    <rect x="182" y="120" width="36" height="12"/>
+    <rect x="182" y="160" width="18" height="12"/>
+  </g>
+  <!-- budget line at 100% -->
+  <line x1="826" y1="30" x2="826" y2="180" stroke="#b98b6a" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <g font-family="SFMono-Regular,Menlo,monospace" font-size="9" fill="#3b4642">
+    <text x="196" y="50">0.22 ms · 1% 预算</text>
+    <text x="206" y="90">0.53 ms · 3%</text>
+    <text x="225" y="130">1.12 ms · 6%</text>
+    <text x="207" y="170">2.26 ms · 3%</text>
+  </g>
+  <text x="826" y="196" text-anchor="end" font-family="SFMono-Regular,Menlo,monospace" font-size="9" fill="#7a5a1b">预算 100%</text>
+  <text x="182" y="222" font-family="SFMono-Regular,Menlo,monospace" font-size="8.5" fill="#6d7772">本机 release · bench --check PASS；预算：≤2000 atoms 20 ms、≤4000 atoms 80 ms</text>
+  <text x="182" y="238" font-family="SFMono-Regular,Menlo,monospace" font-size="8.5" fill="#6d7772">纯中文与标点密集几乎免费；混排 2k 为预算 6%，4k 为 3%</text>
+</svg>
+<figcaption><b>图 4 · 行内 K-P 的实测。</b>每根条是「实测 / 本档预算」，
+所以四档可以同轴比较：纯中文与标点密集几乎免费，混排 2k 为预算的 6%，4k 为 3%。
+D91 已关闭（ADR-0072 候选窗口），<code>bench --check</code> PASS。</figcaption>
+</figure>
+
+<h3>4.5 数学 v2</h3>
+<div class="kv">
+  <dt>度量表</dt><dd><code>soma.metrics/7</code>：41 个 MATH 常数（per-mille）+ 4,283 个数学字形 + 490 条纵向变体 + 斜体修正（New Computer Modern Math）</dd>
+  <dt>间距</dt><dd>TeX 8×8 表：thin 3mu / medium 4mu / thick 5mu；<code>\nonscript</code>；Bin 归一化</dd>
+  <dt>层级</dt><dd>D/T/S/SS + cramped；脚本尺寸按基础字号，不再无限缩小</dd>
+  <dt>几何</dt><dd>分数 num/denom 位移与 gap；根式横线贴墨迹顶；大算符 <code>displayOperatorMinHeight</code>；定界符按墨迹选尺寸</dd>
+  <dt>行内断行</dt><dd>超过半行时在 Rel/Bin <strong>前</strong>拆分，边界带数学间距与 500/700 惩罚</dd>
+  <dt>已知边界</dt><dd>D97/D98：GlyphAssembly/横向变体、MathKernInfo 与扁平重音</dd>
+</div>
+
+<h3>4.6 浏览器本地路径</h3>
+<p>线上 Studio 的整条排版链在 wasm 内完成。下表是 2026-11-26 的公网快照；
+所有数字都能从浏览器 selftest 或构建产物重跑。</p>
+<table>
+  <caption>表 3b · 浏览器本地 Studio 的量级</caption>
+  <thead><tr><th>项目</th><th>数值</th><th>口径 / 出处</th></tr></thead>
+  <tbody>
+    <tr><td>wasm 模块</td><td class="num">4,136,582 B</td><td><code>soma-studio-ui-94336f1c0e7c892d_bg.wasm</code></td></tr>
+    <tr><td>wasm 传输</td><td class="num">1,566,467 B gzip<br>1,004,135 B brotli</td><td>本机构建产物；Trunk <code>filehash=true</code></td></tr>
+    <tr><td>字体 v2</td><td class="num">4,568,940 B / 5 文件</td><td>Plex 正/粗 1.675/1.665 MB；数学 1.187 MB；等宽 20.8/20.6 KB</td></tr>
+    <tr><td>本地 PDF</td><td class="num">224 KB / ~50 ms</td><td>S12；welcome 文档；字体来自同一份缓存</td></tr>
+    <tr><td>部署包</td><td class="num">7.5 MB tar / 16 MB 解包</td><td><code>somadoc.art</code>：单 Markdown + 模板/引擎/度量 + dist</td></tr>
+    <tr><td>编辑路径的 API</td><td class="num">0 次</td><td>本地模式页面只取静态资源；日志 22:14 后仅 favicon 404</td></tr>
+    <tr><td>浏览器门禁</td><td class="num">S1–S10 + S12</td><td>S5 哈希/页数；S9 字体探针；S12 本地 PDF</td></tr>
+  </tbody>
+</table>
+<p>字体策略是<strong>一套文件两处使用</strong>：<code>/fonts/v2/</code> 同时供
+<code>@font-face</code> 与 <code>soma-render-pdf</code>，所以 PDF 导出不再做覆盖检查、
+也不再下载第二套字体。代价是浏览器只覆盖 GB2312 一、二级（7,199 字），
+字集外字符显示空框（D119）；CLI 仍使用完整字体。</p>
+</section>
+
+<section id="s5">
+<h2><span class="num">§5</span>工程方法 · 为什么这些数字可信</h2>
+
+<h3>5.1 ADR 先于代码</h3>
+<p>120 份 ADR 不是事后文档，而是决策记录：每个非平凡选择都先写「Context / Decision /
+Consequences / Alternatives」，再动代码。冻结后的架构只允许由新 ADR 扩展，
+所以「为什么现在不这样做」与「以后怎么做」都能查到。</p>
+
+<h3>5.2 每次行为变化都先解释基线</h3>
+<p>语料基线、Gate V 的 SVG 字节哈希、native/wasm 同哈希、ADRs 里的数字——任何一项变化
+都必须在提交信息里写出原因，并在相应文档里更新解释。这条纪律的价值在数学 v2 中体现得最清楚：
+盒高从 em 盒改成墨迹盒后，所有含公式的页面都重排了，但语料 <code>ALL</code> 行没有动，
+因为数学不在 <code>publish-v1</code> 的语料路径上——这个结论必须被验证，而不是假设。</p>
+
+<h3>5.3 clean-room 与来源</h3>
+<p>核心不读 Typst 断行源码，不复制竞品规则表；规则条目带 <code>ruleId</code> 与来源，
+未核实条目只能产生软约束。数学只依据 OpenType MATH 规范与 TeXbook 附录 G 的规则，
+不移植任何实现。</p>
+
+<h3>5.4 参数分层</h3>
+<table>
+  <caption>表 3 · 参数在哪里</caption>
+  <thead><tr><th>层</th><th>例子</th><th>存放</th><th>进哪个哈希</th></tr></thead>
+  <tbody>
+    <tr><td>字体常数</td><td>axis height、rule thickness、MATH 位移与 gap</td><td><code>.smt</code> math 段</td><td><code>metricsHash</code></td></tr>
+    <tr><td>字形数据</td><td>水平墨迹、纵向墨迹、斜体修正</td><td><code>.smt</code></td><td><code>metricsHash</code></td></tr>
+    <tr><td>算法权重</td><td>line、badness、trim、boundary、short-last</td><td>preset / <code>ParamSet</code></td><td><code>paramHash</code></td></tr>
+    <tr><td>版面</td><td>字号、行距、缩进、跳距、对齐</td><td>模板</td><td><code>templateHash</code></td></tr>
+    <tr><td>引擎</td><td>preset、窗口、回退阶梯、垂直代价</td><td><code>soma.engine/1</code></td><td><code>engineHash</code></td></tr>
+    <tr><td>结构常量</td><td>1/4096 em、DP 递推、tie-break 层数</td><td>代码</td><td><code>modelVersion</code></td></tr>
+  </tbody>
+</table>
+</section>
+
+<section id="s6">
+<h2><span class="num">§6</span>踩坑档案 · 十五则</h2>
+<p>都是实际发生过的：每条都有「现象 → 根因 → 修复」。这一类问题通常不会让程序崩溃，
+只会让输出「看起来不对」，所以只能靠 golden/不变量抓。</p>
+
+<ol>
+  <li><b>页码消失。</b>页脚行把 <code>line_height</code> 设成 0，DocIR 的
+  <code>InvalidLineHeight</code> 让 <code>paragraph_from_text</code> 返回 <code>Err</code>，
+  margin block 返回 <code>None</code>，页码静默不发射。<em>修复</em>：页脚行用自然行盒，
+  band 高度由 block 承担，并为「页脚贴带底」加 golden。</li>
+  <li><b>根号长腿。</b>根式横线按字面 ascent 定位，而 π 的墨迹只有 0.44em。
+  <em>修复</em>：度量表记录每字形纵向墨迹，vinculum 贴墨迹顶；M1–M4。</li>
+  <li><b>数学常数错位。</b>OpenType 的 <code>MathConstants</code> 是 4 个 plain 字段 +
+  51 个 <code>MathValueRecord</code> + 1 个 trailing percent；按「54 个 int16」解析时，
+  overbar 的 rule 变成 350‰。<em>修复</em>：按 4 字节记录解析，并用 HarfBuzz 的枚举顺序核对。</li>
+  <li><b>嵌套上标越缩越小。</b><code>scriptscript_scale</code> 从未被读取，每层都乘 0.7。
+  <em>修复</em>：脚本尺寸按公式基础字号算，S→SS 后不再缩。</li>
+  <li><b><code>\!</code> 是空操作。</b>解析成 <code>Space(0)</code>，而 <code>Space</code> 存不了负数；
+  文档却写着 −167。<em>修复</em>：改用有符号 space。</li>
+  <li><b>Bin 归一化只做了一半。</b><code>x=-1</code> 中 <code>-</code> 的右侧仍按 Bin 加 4mu。
+  <em>修复</em>：左右两遍归一化，单个原子的类同时用于两侧。</li>
+  <li><b>行内公式断了但空了。</b>拆分的边界带了数学间距，若把它当普通空格，断行后行尾会多一段空白。
+  <em>修复</em>：间距作为 boundary 的 glue，断行时自然丢弃。</li>
+  <li><b>SVG 视觉锁误报。</b>页脚从带顶移到带底，SVG 字节变了；但正文坐标没变。
+  <em>修复</em>：哈希注释写明「只有 margin block 位置变化」，而不是盲目更新。</li>
+  <li><b>模板属性静默丢失。</b><code>PROPERTY_ORDER</code> 漏加一个属性，YAML 解析不报错，
+  样式就是不生效。<em>修复</em>：把白名单当契约，属性测试覆盖每个名字。</li>
+  <li><b>表格列宽一律平分。</b>中文「短列 + 长列」被挤成竖条。<em>修复</em>：先量自然宽，
+  再按比例分配，最大余数法保证和等于版心（D90 关闭）。</li>
+  <li><b>续排表头孤行。</b>表头落在页底，正文从下一页开始。<em>修复</em>：表头与首个行带
+  <code>can_break = false</code>，续排页重复表头。</li>
+  <li><b>垂直页坏度的 body 参照取错。</b>用「页首项高度」当归一化基准，页首是图时半页空白只算 86 点坏度，
+  DP 宁愿留洞。<em>现状</em>：D92 已登记，尚未修；修法是把 body 改用正文行高。</li>
+  <li><b>旧 wasm 配新字体 404。</b>浏览器缓存了固定名的旧 wasm，而部署已经把
+  <code>/fonts/v1/</code> 换成 <code>/fonts/v2/</code>；旧模块继续请求已删除的字体与插图，
+  PDF 导出报 404。<em>修复</em>：Trunk <code>filehash=true</code>，<code>index.html</code>
+  revalidate，字体命名空间随字节版本走（ADR-0120）。</li>
+  <li><b>字体接口 <code>no-store</code>。</b><code>/api/font</code> 每次返回 19 MB 且禁止缓存，
+  冷启动等于重新下载整套 CJK。<em>修复</em>：改走同源静态 <code>/fonts/v2/</code>，
+  immutable 缓存，校样与 PDF 共用。</li>
+  <li><b>PDF 子集覆盖检查变成慢路径。</b>按文档字符判断是否回退完整字体，
+  一旦超出就下载 19 MB；导出耗时不可预测。<em>修复</em>：GB2312 一、二级子集
+  固定覆盖常用中文，校样与 PDF 共用，不再做覆盖分支；代价是字集边界 D119。</li>
+</ol>
+</section>
+
+<section id="s7">
+<h2><span class="num">§7</span>余项地图 · 显式边界</h2>
+
+<table>
+  <caption>表 4 · 当期主要未排期项（摘自 <code>docs/debt.md</code>）</caption>
+  <thead><tr><th>ID</th><th>内容</th><th>影响</th><th>对策 / 触发</th></tr></thead>
+  <tbody>
+    <tr><td>D01</td><td>Gate Q 质量宣称</td><td>没有人工评审数据，质量上限未知</td><td>30 段 × 5 评审；采集后决定是否新增 preset</td></tr>
+    <tr><td>D51 / D62 / D66</td><td>嵌套盒树 / 每母版版心 / 页级搜索窗口</td><td>嵌套布局与特殊版心仍受限</td><td>有真实版式需求时按 ADR 扩展</td></tr>
+    <tr><td>D60 / D61 / D63 / D100</td><td>tracking、斜体面、度量覆盖、kerning</td><td>长 run 与拉丁细节仍有差距</td><td>字体/表生成与内核模型一起评估</td></tr>
+    <tr><td>D97 / D98</td><td>数学装配件/横向变体、MathKernInfo 与扁平重音</td><td>超高括号与宽重音和 LaTeX 仍有差距</td><td>有字体提供装配件或视觉需求时，加 <code>soma.metrics/8</code></td></tr>
+    <tr><td>D99</td><td>TikZ 只做核心绘图语言</td><td>库级语法（plot/decorations/matrix/…）走可见源码回退</td><td>有真实文档需求时按 ADR-0092 扩子集</td></tr>
+    <tr><td>D104 / D105</td><td>Studio 构建在主线程；没有单文件离线导出</td><td>超大文档输入可能掉帧；本地模式仍依赖静态资源</td><td>实测超预算时做 Worker；需要离线分享时做单文件打包</td></tr>
+    <tr><td>D116</td><td>图边标签可能与箭头/节点重叠</td><td>复杂流程图可读性下降</td><td>给边标签加避让通道或垂直偏移</td></tr>
+    <tr><td>D119</td><td>浏览器字体只到 GB2312 一、二级</td><td>字集外生僻字在校样/PDF 中显示空框；CLI 仍用完整字体</td><td>需要时加缺字提示，或按文档向服务端请求子集</td></tr>
+    <tr><td>D32</td><td>canonical writer 去重</td><td>两个 writer 目前都有 golden；第三个消费者出现前维护成本可控</td><td>有真实需求时抽公共 crate</td></tr>
+  </tbody>
+</table>
+<p><b>本期关闭：</b>D117（本地模式单文件是有意设计；任意文件走 <code>?server=1</code>）与
+D118（GB2312 子集同时供校样/PDF，不再回退完整字体）已在 ADR-0119 关闭。
+新增 D119：浏览器字体的 GB2312 边界，以及 D104/D105 的 Studio 性能/离线边界。</p>
+
+<h3>明确不做</h3>
+<ul>
+  <li><b>分页的全局最优</b>：垂直 K-P 是逐行的，不做整书级优化。</li>
+  <li><b>竖排、bidi、多栏绕排、真正首字下沉</b>：都需要变行宽或浮动模型，超出当前盒树。</li>
+  <li><b>整书级重排/增量排版</b>：按段落全量重排；增量留给后续性能层。</li>
+  <li><b>第二套数学字体混排</b>：一套数学面；<code>\text{}</code> 仍用正文字体。</li>
+</ul>
+</section>
+
+<section id="s8">
+<h2><span class="num">§8</span>成品 · 一份源码，五种输出</h2>
+
+<table>
+  <caption>表 5 · 当期样张（<code>examples/book</code>）</caption>
+  <thead><tr><th>样张</th><th>页数</th><th>覆盖</th><th>生成</th></tr></thead>
+  <tbody>
+    <tr><td><code>math-v2.pdf</code></td><td class="num">2</td><td>间距、分数/根式、上下标、大算符、定界符、重音、行内断行</td><td><code>scripts/math.sh</code></td></tr>
+    <tr><td><code>latex-default.pdf</code></td><td class="num">5</td><td>默认 article 10pt 版式 + 数学 v2</td><td><code>soma render</code>（缺省模板）</td></tr>
+    <tr><td><code>full.pdf</code></td><td class="num">14</td><td>全部前端与排版能力：注音、断词、嵌套/描述列表、合并单元格、图片、编号公式、宏、脚注、拼音索引</td><td><code>scripts/full.sh</code></td></tr>
+    <tr><td><code>brief.pdf</code></td><td class="num">12</td><td>交付说明：架构、能力、门禁、规模</td><td><code>scripts/brief.sh</code></td></tr>
+    <tr><td><code>song.pdf</code></td><td class="num">13</td><td>宋体样张：正文/标题/标点/插图/表格/公式/脚注/索引</td><td><code>scripts/song.sh</code></td></tr>
+    <tr><td><code>welcome.md</code></td><td class="num">3</td><td>线上默认说明稿：标题、列表、引用、表格、代码、公式、脚注；单文件直接编辑</td><td>浏览器本地；S12 本地 PDF 224 KB / ~50 ms</td></tr>
+  </tbody>
+</table>
+
+<figure class="wide">
+<svg viewBox="0 0 880 160" role="img" aria-label="一份源码到五种输出的流程">
+  <defs>
+    <marker id="arrow-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f5d50"/>
+    </marker>
+  </defs>
+  <g font-family="SFMono-Regular,Menlo,monospace" font-size="9.5" fill="#18201d">
+    <rect x="12" y="52" width="150" height="52" fill="#f2f8f5" stroke="#2f5d50"/>
+    <text x="87" y="72" text-anchor="middle">examples/book</text>
+    <text x="87" y="88" text-anchor="middle" fill="#4c6b60">.tex / .md / .yaml</text>
+
+    <rect x="202" y="52" width="120" height="52" fill="#fff" stroke="#b9b2a0"/>
+    <text x="262" y="72" text-anchor="middle">soma render</text>
+    <text x="262" y="88" text-anchor="middle" fill="#6d7772">一条管线</text>
+
+    <rect x="368" y="18" width="120" height="30" fill="#fff" stroke="#b9b2a0"/>
+    <text x="428" y="38" text-anchor="middle">PDF</text>
+    <rect x="368" y="58" width="120" height="30" fill="#fff" stroke="#b9b2a0"/>
+    <text x="428" y="78" text-anchor="middle">HTML</text>
+    <rect x="368" y="98" width="120" height="30" fill="#fff" stroke="#b9b2a0"/>
+    <text x="428" y="118" text-anchor="middle">SVG</text>
+    <rect x="520" y="58" width="150" height="30" fill="#fff" stroke="#b9b2a0"/>
+    <text x="595" y="78" text-anchor="middle">canonical JSON</text>
+
+    <text x="700" y="60" fill="#6d7772">同一 LayoutResult</text>
+    <text x="700" y="76" fill="#6d7772">同一份哈希</text>
+    <text x="700" y="92" fill="#6d7772">渲染器不重排</text>
+  </g>
+  <g stroke="#2f5d50" stroke-width="1.1" fill="none" marker-end="url(#arrow-b)">
+    <line x1="162" y1="78" x2="198" y2="78"/>
+    <line x1="322" y1="78" x2="364" y2="34"/>
+    <line x1="322" y1="78" x2="364" y2="72"/>
+    <line x1="322" y1="78" x2="364" y2="112"/>
+    <line x1="488" y1="72" x2="516" y2="72"/>
+  </g>
+</svg>
+<figcaption><b>图 5 · 一份源码，五种输出。</b>渲染器只消费 <code>LayoutResult</code>，不重新断行；
+这是 HTML/SVG/PDF 能指向同一份坐标的原因（Gate V/R）。</figcaption>
+</figure>
+
+<h3>复现</h3>
+<pre style="font-family:SFMono-Regular,Menlo,monospace;font-size:.76rem;line-height:1.55;background:var(--panel);padding:.9rem 1rem;overflow:auto;border-left:3px solid var(--accent)">bash scripts/gates.sh          # 12 项核心检查
+bash scripts/studio.sh         # S1–S11（服务端模式）
+bash scripts/web.sh            # W1–W6（浏览器切片）
+SOMA_FONT_DIR=/path/to/fonts \
+  bash scripts/local-assets.sh # GB2312 v2 字体 + welcome.md
+cargo test --workspace         # 1,006 passed / 1 ignored
+# 本地 S12：打开 https://somadoc.art/?selftest=1&theme=dark</pre>
+</section>
+
+<section id="s9">
+<h2><span class="num">§9</span>索引 · schema、文件与术语</h2>
+
+<h3>9.1 契约与 schema</h3>
+<table>
+  <caption>表 6 · 跨层契约</caption>
+  <thead><tr><th>契约</th><th>版本</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td><code>soma.doc</code></td><td>3</td><td>语义 IR：块 / 行内 / 元数据，无物理样式</td></tr>
+    <tr><td><code>soma.template</code></td><td>9</td><td>纯 YAML 模板：页面、样式、母版、编号、目录</td></tr>
+    <tr><td><code>soma.styles</code></td><td>7</td><td>解析后的样式表与节点样式映射</td></tr>
+    <tr><td><code>soma.pages</code></td><td>11</td><td>canonical 页面结果：块、行、坐标、数学、注音、标记</td></tr>
+    <tr><td><code>soma.engine</code></td><td>1</td><td>preset / window / fallback / vertical</td></tr>
+    <tr><td><code>soma.metrics</code></td><td>7</td><td>度量表：每个字形的横向墨迹、math 常数与纵向墨迹</td></tr>
+  </tbody>
+</table>
+
+<h3>9.2 关键文件</h3>
+<div class="kv">
+  <dt>内核</dt><dd><code>crates/soma-core</code>：Atom、Boundary、K-P、tie-break、参数、结果</dd>
+  <dt>规则</dt><dd><code>crates/soma-rules</code>：标点类、禁则、裁剪、断词、span 编译器</dd>
+  <dt>文档</dt><dd><code>crates/soma-doc</code>：DocIR；<code>soma-md/html/latex/docx</code>：四个前端</dd>
+  <dt>模板</dt><dd><code>crates/soma-template</code>：YAML 子集、选择器、样式解析</dd>
+  <dt>布局</dt><dd><code>crates/soma-layout</code>：盒树、度量适配、分页、脚注、数学放置</dd>
+  <dt>数学</dt><dd><code>crates/soma-math</code>：解析、原子类、style、几何；<code>docs/math.md</code></dd>
+  <dt>渲染</dt><dd><code>soma-render-pdf/html/svg</code>：三个后端；JSON 是 canonical 结果</dd>
+  <dt>Studio</dt><dd><code>soma-studio-core</code> 共享构建；<code>soma-studio-ui</code> 整引擎 wasm；<code>soma-studio</code> Axum 只做文件/字体/可选 native 对照</dd>
+  <dt>浏览器交付</dt><dd><code>scripts/local-assets.sh</code>：GB2312 <code>/fonts/v2</code> 与 <code>welcome.md</code>；Trunk <code>filehash</code>；ADR-0118/0119/0120</dd>
+  <dt>工具</dt><dd><code>tools/metrics-gen</code>：字体度量表；<code>scripts/</code>：门禁与样张</dd>
+</div>
+
+<h3>9.3 术语</h3>
+<div class="kv">
+  <dt>Atom</dt><dd>断行的最小单位：一个汉字、一个拉丁 run、一个对象（公式/图片/注音基）。</dd>
+  <dt>Boundary</dt><dd>两个 atom 之间的边界：可断性（Allowed/Forbidden/Forced）、glue、penalty、角色。</dd>
+  <dt>Box Tree</dt><dd>语义 + 模板解析后的物理盒：块、行、坐标、样式 id。</dd>
+  <dt>K-P</dt><dd>Knuth–Plass：全局最小的断行/分页动态规划；本项目用加法代价与整数 DP。</dd>
+  <dt>Trim</dt><dd>行边裁剪：行首/行尾的标点侧空、悬挂标点，上限由规则层给出。</dd>
+  <dt>Fallback ladder</dt><dd>正常 → relaxed → emergency → forbidden rescue；每阶段有独立标记与代价。</dd>
+  <dt>Canonical</dt><dd>固定字段顺序、整数、无浮点的字节输出；跨目标比较的对象。</dd>
+  <dt>Cramped</dt><dd>TeX 的紧排 style：分母等位置使用，避免上标与分数线相撞。</dd>
+</div>
+
+<h3>9.4 参考</h3>
+<ul>
+  <li>架构与 ADR：<code>docs/architecture-v2.md</code>、<code>docs/adr/0001–0120</code></li>
+  <li>Studio / 浏览器：<code>docs/adr/0118-browser-local-studio.md</code>、<code>0119-gb2312-subsets-and-single-md.md</code>、<code>0120-content-hashed-assets.md</code>、<code>docs/studio.md</code></li>
+  <li>K-P 模型：<code>docs/kp-model.md</code>、<code>docs/kp-closure.md</code></li>
+  <li>数学：<code>docs/math.md</code>、<code>docs/adr/0070-math-v2.md</code></li>
+  <li>默认版式：<code>docs/adr/0114-default-plex-template-v2.md</code>（Plex v2；LaTeX article 仍作为模板归档）</li>
+  <li>代码块：<code>docs/adr/0089-monospace-family.md</code>、<code>0090-code-block-panel.md</code>、<code>0091-syntax-highlighting.md</code></li>
+  <li>债务：<code>docs/debt.md</code>（D119 字体边界、D104/D105 Studio 性能/离线、D97/D98、D99、D116 为当期主要余项）</li>
+  <li>语料与标定：<code>corpus/zh</code>、<code>docs/corpus-calibration.md</code>、<code>docs/blind-test.md</code></li>
+</ul>
+</section>
+
+<section id="s10">
+<h2><span class="num">§10</span>更新 · 浏览器本地 Studio（2026-11-26）</h2>
+
+<p>v1.0 记录的是<strong>引擎</strong>：一条管线、两条 seam、可重跑的排版数字。
+这一期补上的是<strong>产品壳</strong>：同一套引擎被完整链入 wasm，线上默认在浏览器里排版、
+校样和导出 PDF；服务端退到静态资源与可选的 native 对照。</p>
+
+<table>
+  <caption>表 7 · 从「服务端 Studio」到「浏览器本地」</caption>
+  <thead><tr><th>维度</th><th>v1.0 / 服务端</th><th>v1.1 / 浏览器本地</th></tr></thead>
+  <tbody>
+    <tr><td>线上入口</td><td><code>full.tex</code> + 示例工程树</td><td>单份 <code>welcome.md</code>；改这一份就排版；<code>/welcome.md</code> 可下载</td></tr>
+    <tr><td>校验</td><td>每次重建 <code>POST /api/verify</code>，等 native</td><td><code>Build::summary</code> 本地生成；编辑路径 0 次 API</td></tr>
+    <tr><td>PDF</td><td><code>POST /api/pdf</code>，服务端字体嵌入</td><td><code>soma-render-pdf</code> 链入 wasm；224 KB / ~50 ms</td></tr>
+    <tr><td>TikZ / 保存</td><td><code>/api/tikz</code>、<code>/api/file</code></td><td>本地 <code>diagram_tikz</code> / Blob 下载</td></tr>
+    <tr><td>字体</td><td><code>/api/font</code>，<code>no-store</code>，约 19 MB/次</td><td><code>/fonts/v2/</code> GB2312 子集 4.57 MB；校样与 PDF 共用；immutable</td></tr>
+    <tr><td>资源版本</td><td>固定 <code>soma-studio-ui_bg.wasm</code>，1 小时缓存</td><td>Trunk 内容哈希；<code>index.html</code> revalidate；旧模块不会配新字体</td></tr>
+    <tr><td>部署包</td><td>49 MB，含完整字体、插图、示例书</td><td>16 MB 解包 / 7.5 MB tar；单 Markdown + 模板/引擎/度量 + dist</td></tr>
+    <tr><td>默认模式</td><td>所有访问都走 Axum</td><td><code>somadoc.art</code> 本地；<code>?server=1</code> 回到文件树/native；loopback/LAN 默认服务端</td></tr>
+  </tbody>
+</table>
+
+<h3>10.1 架构落点</h3>
+<p><code>soma-studio-core</code> 是浏览器与 Axum 共用的构建函数；<code>soma-studio-ui</code>
+把 <code>parse → DocIR → template → layout → pages</code> 与 SVG/PDF 渲染器一起编进 wasm。
+Axum 的 <code>soma-studio</code> 只保留文件读写、字体服务和可选的 native 校验；
+本地模式连字体都走同源静态文件。内容哈希与字体命名空间把「模块」和「字体」绑定到
+同一发布（ADR-0118/0119/0120）。</p>
+
+<h3>10.2 验证与数字</h3>
+<ul>
+  <li><b>测试：</b><code>cargo test --workspace</code> → <b>1,006 passed / 1 ignored</b>；共 120 份 ADR、28 个 crate、92,527 行 Rust。</li>
+  <li><b>浏览器门禁：</b>公网 <code>?selftest=1</code> → S1–S10 + S12 全过；S12 为本地 PDF 224 KB / 50 ms。</li>
+  <li><b>服务端门禁：</b><code>scripts/studio.sh</code> → S1–S11 全过；S2/S11 在本地模式按设计跳过。</li>
+  <li><b>语料：</b><code>ALL,48,599,1213,0,0,3,0,0,6,809,1404,428,0</code>；过度压缩 0、紧急回退 0。</li>
+  <li><b>线上：</b><code>somadoc.art</code> HTTPS + HTTP/2；v2 五个字体全部 200；编辑与导出路径无 <code>/api</code> 请求。</li>
+</ul>
+
+<h3>10.3 边界</h3>
+<ul>
+  <li><b>D119：</b>浏览器字体覆盖 GB2312 一、二级（7,199 字）；字集外生僻字在校样/PDF 中为空框，CLI 仍用完整字体。</li>
+  <li><b>单文件是有意设计：</b>线上只打开 <code>welcome.md</code>；任意文件与 native 对照走 <code>?server=1</code>。</li>
+  <li><b>D104/D105：</b>构建仍在主线程；没有单文件离线导出；大文档与离线分享留作后续。</li>
+  <li><b>CDN 未接入：</b>wasm/字体已可缓存，但首次仍从源站取；COS+CDN 是下一步的交付优化，不是排版模型的一部分。</li>
+</ul>
+
+<p class="mono" style="font-size:.78rem;color:var(--muted)">提交：c5948a1（内容哈希 + welcome.md）· 0607ece（GB2312 子集 + 单 Markdown）· 180e28a（浏览器本地模式）</p>
+</section>
+
+<footer>
+  <span>SOMA ATLAS · v1.1 · 2026-11-26</span>
+  <span>构建 main@c5948a1</span>
+  <span>1,006 tests · 120 ADRs · 28 crates</span>
+  <span>浏览器本地 Studio：GB2312 子集 / 内容哈希 / 单 Markdown</span>
+  <span>本图集只描述当期状态；未排期项以 <code>docs/debt.md</code> 为准</span>
+</footer>
+
+</article>
+</div>
+</body>
+</html>

@@ -71,6 +71,22 @@ fn center_alignment_centres_each_line() {
 }
 
 #[test]
+fn centering_undoes_the_leading_optical_trim() {
+    let layout = build(
+        vec![paragraph_with(vec![text("“中文")])],
+        "  - selector:\n      element: paragraph\n    declarations:\n      align: center\n",
+    );
+    let block = &layout.pages[0].blocks[0];
+    let line = &block.lines[0].line;
+    let expected = (block.width.0 - line.natural_width.0) / 2;
+
+    assert_eq!(line.trim_left, Width::ZERO);
+    assert_eq!(line.boxes[0].x.0, expected);
+    let end = line.boxes.last().unwrap().x.0 + line.boxes.last().unwrap().advance.0;
+    assert_eq!(end, expected + line.natural_width.0);
+}
+
+#[test]
 fn right_alignment_flushes_the_line() {
     let layout = build(
         vec![paragraph_with(vec![text("中文")])],

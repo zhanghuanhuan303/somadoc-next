@@ -8,7 +8,9 @@
 
 use alloc::vec::Vec;
 
-use crate::ir::{Align, AtomKind, BoundaryKind, BoundaryRole, Breakability, IrError, Paragraph};
+use crate::ir::{
+    Align, AtomKind, BoundaryKind, BoundaryRole, Breakability, IrError, Paragraph, PunctClass,
+};
 use crate::metrics::Metrics;
 use crate::params::{ParamError, ParamHash, ParamSet, BADNESS_RATIO_CLAMP};
 use crate::result::{AtomBox, BreakerKind, CjkLatinAdjust, FallbackStage, LayoutResult, Line};
@@ -44,6 +46,11 @@ pub struct BreakConfig {
     params: ParamSet,
     window: Window,
     param_hash: ParamHash,
+    /// True while running a relaxed emergency pass. The emergency stretch in
+    /// `fallback` is part of that pass even before emergency lines are allowed;
+    /// keeping this as run state (not a second parameter field) means there is
+    /// still one source of truth for the value (D13).
+    emergency_stage: bool,
 }
 
 impl BreakConfig {
@@ -52,6 +59,7 @@ impl BreakConfig {
             params,
             window,
             param_hash: params.param_hash(),
+            emergency_stage: false,
         }
     }
 
@@ -69,6 +77,15 @@ impl BreakConfig {
 
     pub fn param_hash(&self) -> ParamHash {
         self.param_hash
+    }
+
+    pub(crate) fn emergency_stage(&self) -> bool {
+        self.emergency_stage
+    }
+
+    pub(crate) fn with_emergency_stage(mut self, emergency_stage: bool) -> Self {
+        self.emergency_stage = emergency_stage;
+        self
     }
 
     pub fn rules_version(&self) -> u16 {
@@ -192,9 +209,7 @@ pub fn break_paragraph_traced(
             None => {
                 let mut params = *config.params();
                 params.break_params.tolerance = params.break_params.emergency_tolerance;
-                params.break_params.emergency_stretch =
-                    params.break_params.fallback.emergency_stretch;
-                let relaxed = BreakConfig::from_params(params);
+                let relaxed = BreakConfig::from_params(params).with_emergency_stage(true);
                 shaped
                     .eval_line(start, end, kind, &relaxed, true, true)
                     .ok_or(BreakError::NoFeasibleBreak)?
@@ -336,8 +351,7 @@ fn break_with_stats(
                 // when the fallback policy permits them.
                 let mut params = *config.params();
                 params.break_params.tolerance = break_params.emergency_tolerance;
-                params.break_params.emergency_stretch = break_params.fallback.emergency_stretch;
-                let relaxed = BreakConfig::from_params(params);
+                let relaxed = BreakConfig::from_params(params).with_emergency_stage(true);
 
                 match run(&shaped, &relaxed, algorithm, false, false) {
                     Ok((result, evaluated)) => (result, evaluated, FallbackStage::Emergency),
@@ -393,6 +407,9 @@ struct Shaped<'a> {
     shrink: Vec<i64>,
     atom_prefix: Vec<i64>,
     glue_prefix: Vec<i64>,
+    /// Hyphen glyph width per boundary, else zero. Only the boundary a line
+    /// actually breaks at contributes its width.
+    hyphen: Vec<i64>,
     stretch_prefix: Vec<i64>,
     shrink_prefix: Vec<i64>,
     cjk_latin_stretch_prefix: Vec<i64>,
@@ -414,14 +431,18 @@ impl<'a> Shaped<'a> {
         let boundary_count = paragraph.boundaries.len();
 
         let mut atom_width = Vec::with_capacity(atom_count);
-        for atom in &paragraph.atoms {
+        let tracking = paragraph.style.tracking.0.max(0) as i64;
+        for (index, atom) in paragraph.atoms.iter().enumerate() {
             // Object atoms have host-supplied geometry (inline math); text atoms
-            // go through the font path.
-            let width = match atom.kind {
-                AtomKind::InlineObject => metrics.object_advance(&atom.text, atom.style),
-                _ => metrics.advance(&atom.text, atom.style),
-            };
-            atom_width.push(width.0 as i64);
+            // go through the font path. Both go through the index-aware seam so
+            // a host that already measured the atom answers without a text key.
+            let mut width = metrics.atom_advance(index as u32, atom, atom.style).0 as i64;
+            // Tracking opens the space *between* atoms; the last one would only
+            // pad the line end.
+            if tracking > 0 && index + 1 < atom_count && atom.kind != AtomKind::InlineObject {
+                width += tracking;
+            }
+            atom_width.push(width);
         }
 
         let mut glue = Vec::with_capacity(boundary_count);
@@ -434,7 +455,7 @@ impl<'a> Shaped<'a> {
         for (index, boundary) in paragraph.boundaries.iter().enumerate() {
             let width = match boundary.kind {
                 BoundaryKind::Space => metrics.space_width(paragraph.atoms[index].style).0 as i64,
-                BoundaryKind::Normal => boundary.glue.width.0 as i64,
+                BoundaryKind::Normal | BoundaryKind::Hyphen => boundary.glue.width.0 as i64,
             };
             let boundary_stretch = boundary.glue.stretch.0.max(0) as i64;
             let boundary_shrink = boundary.glue.shrink.0.max(0) as i64;
@@ -454,6 +475,19 @@ impl<'a> Shaped<'a> {
 
         let atom_prefix = prefix_sums(&atom_width);
         let glue_prefix = prefix_sums(&glue);
+        // A broken hyphen is drawn in the style of the atom before the break.
+        let hyphen: Vec<i64> = paragraph
+            .boundaries
+            .iter()
+            .enumerate()
+            .map(|(index, boundary)| {
+                if boundary.kind == BoundaryKind::Hyphen {
+                    metrics.hyphen_width(paragraph.atoms[index].style).0.max(0) as i64
+                } else {
+                    0
+                }
+            })
+            .collect();
         let stretch_prefix = prefix_sums(&stretch);
         let shrink_prefix = prefix_sums(&shrink);
         let cjk_latin_stretch_prefix = prefix_sums(&cjk_latin_stretch);
@@ -490,6 +524,7 @@ impl<'a> Shaped<'a> {
             shrink,
             atom_prefix,
             glue_prefix,
+            hyphen,
             stretch_prefix,
             shrink_prefix,
             cjk_latin_stretch_prefix,
@@ -511,12 +546,14 @@ impl<'a> Shaped<'a> {
     }
 
     fn target(&self, start: usize) -> i64 {
-        let indent = if start == 0 {
-            self.paragraph.style.first_indent.0 as i64
+        let width = self.paragraph.style.width.0 as i64;
+        if start == 0 {
+            // The first line is indented inward by `first_indent` and outward
+            // by `hang`: a list marker hangs in the margin (ADR-0058).
+            width + self.paragraph.style.hang.0 as i64 - self.paragraph.style.first_indent.0 as i64
         } else {
-            0
-        };
-        self.paragraph.style.width.0 as i64 - indent
+            width
+        }
     }
 
     /// Natural width of line `[start, end)`. Glue on the boundary immediately
@@ -524,7 +561,14 @@ impl<'a> Shaped<'a> {
     fn natural(&self, start: usize, end: usize) -> i64 {
         let atoms = self.atom_prefix[end] - self.atom_prefix[start];
         let boundaries = self.glue_prefix[end - 1] - self.glue_prefix[start];
-        atoms + boundaries
+        // A hyphen exists only where the line breaks; internal hyphenation
+        // points contribute nothing (they are not a rendered glyph).
+        let hyphen = if end < self.len() {
+            self.hyphen[end - 1]
+        } else {
+            0
+        };
+        atoms + boundaries + hyphen
     }
 
     fn total_stretch(&self, start: usize, end: usize) -> i64 {
@@ -542,10 +586,9 @@ impl<'a> Shaped<'a> {
 
         for index in start..end {
             let atom = &self.paragraph.atoms[index];
-            let glyph = match atom.kind {
-                AtomKind::InlineObject => self.metrics.object_metrics(&atom.text, atom.style),
-                _ => self.metrics.glyph_metrics(&atom.text, atom.style),
-            };
+            let glyph = self
+                .metrics
+                .atom_glyph_metrics(index as u32, atom, atom.style);
             ascent = ascent.max(glyph.ascent.0 as i64 + glyph.baseline_shift.0 as i64);
             descent = descent.max(glyph.descent.0 as i64 - glyph.baseline_shift.0 as i64);
             leading = leading.max(glyph.leading.0 as i64);
@@ -649,20 +692,19 @@ impl<'a> Shaped<'a> {
         if n == 0 {
             return (1, 0);
         }
-        if allow_emergency {
-            // Emergency lines may be arbitrarily short or overfull (subject
-            // to `allow_overfull`), so the normal-stage width window does not
-            // apply. Keep the exhaustive scan for the fallback path.
-            return (1, n);
-        }
 
         let params = config.params().break_params;
         let tolerance = params.tolerance.0 as i128;
-        let emergency = params.emergency_stretch.0.max(0) as i128;
+        let emergency = if config.emergency_stage() {
+            params.fallback.emergency_stretch.0.max(0) as i128
+        } else {
+            0
+        };
         let width = self.paragraph.style.width.0 as i128;
         let first_indent = self.paragraph.style.first_indent.0.max(0) as i128;
+        let hang = self.paragraph.style.hang.0.max(0) as i128;
         let target_min = width - first_indent;
-        let target_max = width;
+        let target_max = width + hang;
         let max_atom = self.max_atom as i128;
         let max_glue = self.max_glue as i128;
         let min_atom = self.min_atom as i128;
@@ -682,8 +724,34 @@ impl<'a> Shaped<'a> {
         }
 
         let max_trim = (self.max_trim_left + self.max_trim_right) as i128;
+
+        // How far past the target a line may legally run, expressed as a
+        // per-mille shrink ratio plus a fixed allowance in width units.
+        //
+        // Normal stage: the ratio bound is the declared tolerance. Emergency
+        // stage: a line may be *underfull* without limit (k_min = 1 below), but
+        // the overfull direction is still bounded — an overfull line needs
+        // `allow_overfull`, and when it has it an unbounded window turns the
+        // fallback into O(n²) (D94: 1.25M candidates at n = 2000, 40 ms in a
+        // browser). Cap that escape hatch at the declared `emergency_stretch`;
+        // without `allow_overfull` the overfull case is rejected outright, so a
+        // full shrink (ratio 1.0) is the true limit.
+        let allow_overfull = config.params().break_params.fallback.allow_overfull;
+        // An overfull line (excess beyond the available shrink) is rejected
+        // unless the emergency *and* overfull flags are both set, so the ratio
+        // bound that actually admits a candidate is at most 1.0 (full shrink)
+        // whenever those flags are not both present. The declared tolerance can
+        // be as high as 10.0 (`emergency_tolerance`), which would make the
+        // arithmetic below vacuous and the scan quadratic again.
+        let tolerance_eff = tolerance.min(1_000);
+        let extra_overfull = if allow_emergency && allow_overfull {
+            emergency * 1_000
+        } else {
+            0
+        };
+
         // H(k) * 1000: overfull infeasibility margin for k atoms.
-        let coefficient = min_atom * 1000 - tolerance * max_shrink;
+        let coefficient = min_atom * 1000 - tolerance_eff * max_shrink;
         let mut k_max = n;
         if coefficient > 0 {
             for k in 1..=n {
@@ -691,12 +759,20 @@ impl<'a> Shaped<'a> {
                 let margin = k * min_atom * 1000
                     - max_trim * 1000
                     - target_max * 1000
-                    - tolerance * (k - 1) * max_shrink;
+                    - tolerance_eff * (k - 1) * max_shrink
+                    - extra_overfull;
                 if margin > 0 {
                     k_max = (k as usize) - 1;
                     break;
                 }
             }
+        }
+
+        if allow_emergency {
+            // Short lines are accepted without limit in the emergency stage.
+            // Keep at least one atom in the window so a single unbreakable atom
+            // can still start a line.
+            return (1, k_max.max(1));
         }
 
         (k_min, k_max)
@@ -761,33 +837,41 @@ impl<'a> Shaped<'a> {
         // break) is left aligned: it only trims when it would otherwise
         // overrun, which keeps its punctuation inside the block.
         let justified = end_kind == LineEnd::Justified;
-        if config.params().features.edge_trim && (justified || natural > target) {
-            // Never trim more than the mark's own advance, even if a rule table
-            // and a metrics table disagree about its side bearing. A real
-            // outline can give up more than half an em (a comma's ink sits in
-            // the left third), and that is exactly what lands it on the edge.
-            let mark_width = self.atom_width(end - 1);
-            let right_cap =
-                (self.paragraph.atoms[end - 1].compress_right.0.max(0) as i64).min(mark_width);
+        let leading_open = start + 1 < end && self.paragraph.atoms[start].class == PunctClass::Open;
+        if config.params().features.edge_trim && (justified || natural > target || leading_open) {
+            let mut c = 0i64;
+
+            // Trailing trim is a right-edge alignment: it belongs to a
+            // justified line, or to any line that would overrun.
+            if justified || natural > target {
+                // Never trim more than the mark's own advance, even if a rule
+                // table and a metrics table disagree about its side bearing. A
+                // real outline can give up more than half an em (a comma's ink
+                // sits in the left third), and that is exactly what lands it
+                // on the edge.
+                let mark_width = self.atom_width(end - 1);
+                let right_cap =
+                    (self.paragraph.atoms[end - 1].compress_right.0.max(0) as i64).min(mark_width);
+                trim_right = right_cap as i32;
+                effective = natural - right_cap;
+                c += right_cap;
+            }
+
             let start_width = self.atom_width(start);
             let left_cap =
                 (self.paragraph.atoms[start].compress_left.0.max(0) as i64).min(start_width);
 
-            // The em box, not the ink, is what native Chinese punctuation draws
-            // with. Trimming here (rather than at the renderer) keeps badness,
-            // adjustment and the box coordinates in agreement; a justified line
-            // then grows the inter-character glue by the same amount, so the
-            // ink lands on the text edge.
-            let c_end = right_cap;
-            trim_right = c_end as i32;
-            effective = natural - c_end;
-
-            // Only an overfull line needs to give up the leading mark's side
-            // bearing as well, and only an originally overfull line pays for
-            // the trim: the trailing bearing of a short line is optical
-            // alignment, not compensation.
-            let mut c = c_end;
-            if effective > target {
+            // A justified line aligns any leading glyph (ADR-0082). A
+            // ragged/left-aligned line has no right edge, but it still has a
+            // left text edge: an opening quote or bracket must put its ink on
+            // that edge too. Only 开标点 get the full optical trim here; other
+            // first glyphs keep their natural position. A single-atom line
+            // still spends the left cap when it would overrun.
+            if start + 1 < end && (justified || (natural <= target && leading_open)) {
+                trim_left = left_cap as i32;
+                effective -= left_cap;
+                c += left_cap;
+            } else if effective > target {
                 let excess = effective - target;
                 let c_start = excess.min(left_cap);
                 trim_left = c_start as i32;
@@ -810,7 +894,7 @@ impl<'a> Shaped<'a> {
                 emergency = true;
                 cost += costs.emergency.0 as i64;
             } else if end_kind == LineEnd::ParagraphEnd {
-                short_score = short_last_cost(
+                short_score = short_line_cost(
                     effective,
                     costs.short_last_threshold.0 as i64,
                     costs.short_last_scale.0,
@@ -841,8 +925,12 @@ impl<'a> Shaped<'a> {
 
         if effective < target {
             let deficit = target - effective;
-            let stretch =
-                self.total_stretch(start, end) + break_params.emergency_stretch.0.max(0) as i64;
+            let stretch = self.total_stretch(start, end)
+                + if config.emergency_stage() {
+                    break_params.fallback.emergency_stretch.0.max(0) as i64
+                } else {
+                    0
+                };
             if stretch <= 0 {
                 if !allow_emergency {
                     return None;
@@ -867,13 +955,21 @@ impl<'a> Shaped<'a> {
         } else if effective > target {
             let excess = effective - target;
             let shrink = shrink_total;
-            overfull = excess > shrink;
-            if shrink <= 0 {
+            // TeX calls this an overfull box: the glue cannot absorb the
+            // excess, so its badness is infinite. A justified line that
+            // crushed its glue past its own shrink would look broken — a
+            // Latin line's spaces collapse and the words touch (D86) — so the
+            // break is only reachable through the fallback ladder.
+            overfull = shrink <= 0 || excess > shrink;
+            if overfull {
                 if !allow_emergency || !break_params.fallback.allow_overfull {
                     return None;
                 }
                 emergency = true;
                 cost += costs.emergency.0 as i64;
+                ratio_value = ratio_milli(excess, shrink.max(1));
+                badness_value = badness(ratio_value, costs.badness_scale.0, costs.badness_exponent);
+                cost += badness_value;
                 adjustment = -saturating_i32(excess);
             } else {
                 let ratio = ratio_milli(excess, shrink);
@@ -890,6 +986,18 @@ impl<'a> Shaped<'a> {
                 adjustment = -saturating_i32(excess);
             }
         }
+
+        // A justified line that is still shorter than the threshold is a
+        // mid-paragraph widow: its glue cannot fill the measure, so the normal
+        // stage rejects it, but the emergency ladder can still admit one.
+        // Charge it with the same term the last line uses, so the ladder puts
+        // an unavoidable short line where it costs least (D115, ADR-0112).
+        short_score = short_line_cost(
+            effective,
+            costs.short_last_threshold.0 as i64,
+            costs.short_last_scale.0,
+        );
+        cost += short_score;
 
         let (boundary_deviation, ideal_gap) =
             self.cjk_latin_deviation(start, end, adjustment as i64);
@@ -1015,12 +1123,37 @@ fn end_kind(shaped: &Shaped<'_>, end: usize) -> LineEnd {
     }
 }
 
+/// Four looseness classes, the TeX fitness idea: a line is tight, normal,
+/// loose, or very loose. K7 only charges a *change* of class between adjacent
+/// justified lines; the absolute class is already priced by badness.
+const FITNESS_CLASSES: usize = 4;
+const FITNESS_NORMAL: usize = 1;
+
+/// One rhythm-DP cell: `(cost, lines, previous start, previous class)`.
+type FitnessCell = (Cost, u32, usize, u8);
+
+fn fitness_class(ratio_milli: i64) -> usize {
+    if ratio_milli < -500 {
+        0
+    } else if ratio_milli <= 500 {
+        1
+    } else if ratio_milli <= 1500 {
+        2
+    } else {
+        3
+    }
+}
+
 fn optimal(
     shaped: &Shaped<'_>,
     config: &BreakConfig,
     allow_emergency: bool,
     allow_forbidden: bool,
 ) -> Result<(LayoutResult, u64), BreakError> {
+    let params = config.params();
+    if params.features.fitness && params.break_params.costs.fitness.0 > 0 {
+        return optimal_with_fitness(shaped, config, allow_emergency, allow_forbidden);
+    }
     let segments = split_segments(shaped, config)?;
     let (k_min, k_max) = shaped.line_length_bounds(config, allow_emergency);
     let mut evaluated = 0u64;
@@ -1141,6 +1274,151 @@ fn optimal(
     ))
 }
 
+/// K7: the same DP as [`optimal`], with the looseness class of the previous
+/// line as part of the state. Four extra states per break point; a paragraph
+/// without the feature enabled never enters this function.
+fn optimal_with_fitness(
+    shaped: &Shaped<'_>,
+    config: &BreakConfig,
+    allow_emergency: bool,
+    allow_forbidden: bool,
+) -> Result<(LayoutResult, u64), BreakError> {
+    let segments = split_segments(shaped, config)?;
+    let (k_min, k_max) = shaped.line_length_bounds(config, allow_emergency);
+    let weight = config.params().break_params.costs.fitness.0 as i64;
+    let mut evaluated = 0u64;
+    let mut chosen: Vec<(usize, usize, LineEval)> = Vec::new();
+    let mut total = 0i64;
+    let mut line_count = 0u32;
+
+    for segment in &segments {
+        let len = segment.end - segment.start;
+        // Per local break point and per class: (cost, lines, previous start,
+        // previous class).
+        let mut best: Vec<[Option<FitnessCell>; FITNESS_CLASSES]> =
+            alloc::vec![[None; FITNESS_CLASSES]; len + 1];
+        best[0][FITNESS_NORMAL] = Some((Cost::ZERO, 0, 0, FITNESS_NORMAL as u8));
+
+        for local_end in 1..=len {
+            let end = segment.start + local_end;
+            if local_end < len && !shaped.is_break_allowed(end, allow_forbidden) {
+                continue;
+            }
+            let kind = if local_end == len {
+                if segment.is_paragraph_end {
+                    LineEnd::ParagraphEnd
+                } else {
+                    LineEnd::ForcedEnd
+                }
+            } else {
+                LineEnd::Justified
+            };
+
+            let (start_begin, start_end) = if kind == LineEnd::Justified {
+                if k_min > k_max || local_end < k_min {
+                    (0, 0)
+                } else {
+                    let max_start = local_end - k_min;
+                    let min_start = local_end.saturating_sub(k_max);
+                    (min_start, max_start + 1)
+                }
+            } else {
+                (0, local_end)
+            };
+
+            for local_start in start_begin..start_end {
+                let start = segment.start + local_start;
+                let Some(eval) =
+                    shaped.eval_line(start, end, kind, config, allow_emergency, allow_forbidden)
+                else {
+                    continue;
+                };
+                evaluated = evaluated.saturating_add(1);
+                let class = fitness_class(eval.ratio_milli);
+                for previous_class in 0..FITNESS_CLASSES {
+                    let Some((base, base_lines, _, _)) = best[local_start][previous_class] else {
+                        continue;
+                    };
+                    let jump = (class as i64 - previous_class as i64).unsigned_abs() as i64;
+                    let penalty = weight.saturating_mul(jump);
+                    let cost = Cost(base.0.saturating_add(eval.cost.0).saturating_add(penalty));
+                    let lines = base_lines.saturating_add(1);
+                    let better = match best[local_end][class] {
+                        None => true,
+                        Some((current, current_lines, current_start, _)) => {
+                            (cost.0, lines, local_start) < (current.0, current_lines, current_start)
+                        }
+                    };
+                    if better {
+                        best[local_end][class] =
+                            Some((cost, lines, local_start, previous_class as u8));
+                    }
+                }
+            }
+        }
+
+        let mut final_class = 0usize;
+        let mut final_cell: Option<FitnessCell> = None;
+        for (class, cell) in best[len].iter().enumerate() {
+            let Some(cell) = cell else { continue };
+            let better = match final_cell {
+                None => true,
+                Some((cost, lines, start, previous)) => {
+                    (cell.0 .0, cell.1, cell.2, class) < (cost.0, lines, start, previous as usize)
+                }
+            };
+            if better {
+                final_cell = Some(*cell);
+                final_class = class;
+            }
+        }
+        let Some((segment_total, segment_lines, _, _)) = final_cell else {
+            return Err(BreakError::NoFeasibleBreak);
+        };
+        total = total.saturating_add(segment_total.0);
+        line_count = line_count.saturating_add(segment_lines);
+
+        let mut local_end = len;
+        let mut class = final_class;
+        let mut reversed: Vec<(usize, usize, LineEval)> = Vec::new();
+        while local_end > 0 {
+            let Some((_, _, local_start, previous)) = best[local_end][class] else {
+                return Err(BreakError::NoFeasibleBreak);
+            };
+            let start = segment.start + local_start;
+            let end = segment.start + local_end;
+            let kind = if local_end == len {
+                if segment.is_paragraph_end {
+                    LineEnd::ParagraphEnd
+                } else {
+                    LineEnd::ForcedEnd
+                }
+            } else {
+                LineEnd::Justified
+            };
+            let eval = shaped
+                .eval_line(start, end, kind, config, allow_emergency, allow_forbidden)
+                .ok_or(BreakError::NoFeasibleBreak)?;
+            reversed.push((start, end, eval));
+            local_end = local_start;
+            class = previous as usize;
+        }
+        reversed.reverse();
+        chosen.extend(reversed);
+    }
+
+    if let Some(limit) = config.params().break_params.max_lines {
+        if line_count > limit {
+            return Err(BreakError::TooManyLines { limit });
+        }
+    }
+
+    Ok((
+        build_result(shaped, &chosen, Cost(total), config, BreakerKind::Optimal),
+        evaluated,
+    ))
+}
+
 fn greedy(
     shaped: &Shaped<'_>,
     config: &BreakConfig,
@@ -1246,7 +1524,7 @@ fn build_result(
 
     for (start, end, eval) in chosen {
         let indent = if *start == 0 {
-            shaped.paragraph.style.first_indent
+            shaped.paragraph.style.first_indent - shaped.paragraph.style.hang
         } else {
             Width::ZERO
         };
@@ -1288,6 +1566,8 @@ fn build_result(
             overfull: eval.overfull,
             emergency: eval.emergency,
             forced_end: eval.forced_end,
+            hyphenated: *end < shaped.len()
+                && shaped.paragraph.boundaries[*end - 1].kind == BoundaryKind::Hyphen,
             boxes,
         });
     }
@@ -1326,7 +1606,7 @@ fn build_boxes(
 ) -> Vec<AtomBox> {
     let mut boxes = Vec::with_capacity(end - start);
     let weights = boundary_weights(shaped, start, end, adjustment);
-    let adjustments = distribute(adjustment as i64, &weights);
+    let adjustments = spread(adjustment, &weights);
 
     let mut x = indent.0 as i64 - trim_left.0 as i64;
     for atom_index in start..end {
@@ -1364,7 +1644,7 @@ fn cjk_latin_adjustments(
     }
 
     let weights = boundary_weights(shaped, start, end, adjustment);
-    let adjustments = distribute(adjustment as i64, &weights);
+    let adjustments = spread(adjustment, &weights);
     let mut out = Vec::new();
 
     for (offset, adjustment) in adjustments.iter().enumerate() {
@@ -1392,11 +1672,22 @@ fn boundary_weights(shaped: &Shaped<'_>, start: usize, end: usize, adjustment: i
         weights.push(weight);
     }
 
-    if weights.iter().all(|weight| *weight <= 0) {
-        weights.fill(1);
-    }
-
     weights
+}
+
+/// Spread a justification adjustment over the boundaries that can actually
+/// take it. A boundary with no stretch (a hyphenation point, two objects set
+/// against each other) never opens up; a line with nothing to stretch is left
+/// short, which is what a compositor sees as an underfull line. Smearing the
+/// adjustment evenly instead would put space between the letters of a word.
+fn spread(adjustment: i32, weights: &[i64]) -> Vec<i32> {
+    let can_grow = weights.iter().any(|weight| *weight > 0);
+    let can_shrink = adjustment < 0 && weights.iter().any(|weight| *weight < 0);
+    if can_grow || can_shrink {
+        distribute(adjustment as i64, weights)
+    } else {
+        alloc::vec![0; weights.len()]
+    }
 }
 
 fn distribute(total: i64, weights: &[i64]) -> Vec<i32> {
@@ -1491,7 +1782,11 @@ fn badness(ratio_milli: i64, scale: u32, exponent: u8) -> i64 {
     value.min(i64::MAX as u128) as i64
 }
 
-fn short_last_cost(natural: i64, threshold: i64, scale: u32) -> i64 {
+/// Charge for a line whose content is below the short-line threshold. The
+/// term covers the ragged last line (a short tail) and, since D115, a
+/// justified non-final line that the fallback ladder had to accept short.
+/// The score is linear in the missing width: a zero-width line costs `scale`.
+fn short_line_cost(natural: i64, threshold: i64, scale: u32) -> i64 {
     if threshold <= 0 || scale == 0 {
         return 0;
     }
@@ -1518,7 +1813,7 @@ fn prefix_sums(values: &[i64]) -> Vec<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{Atom, AtomKind, Boundary, Glue, ParagraphStyle, PunctClass};
+    use crate::ir::{Atom, AtomKind, Boundary, Decorations, Glue, ParagraphStyle, PunctClass};
     use crate::metrics::{StyleId, SyntheticMetrics};
     use alloc::string::ToString;
     use alloc::vec;
@@ -1529,6 +1824,8 @@ mod tests {
             kind,
             class,
             style: StyleId(0),
+            decor: Decorations::NONE,
+            link: None,
             compress_left: Width::ZERO,
             compress_right: Width::ZERO,
         }
@@ -1555,6 +1852,8 @@ mod tests {
             style: ParagraphStyle {
                 width: Width::from_em(width_em),
                 first_indent: Width::ZERO,
+                hang: Width::ZERO,
+                tracking: Width::ZERO,
                 line_height: Width::from_em_frac(3, 2),
                 align: Align::Justify,
             },
@@ -1579,6 +1878,8 @@ mod tests {
             style: ParagraphStyle {
                 width: Width::from_em(width_em),
                 first_indent: Width::ZERO,
+                hang: Width::ZERO,
+                tracking: Width::ZERO,
                 line_height: Width::from_em_frac(3, 2),
                 align: Align::Justify,
             },
@@ -1595,6 +1896,8 @@ mod tests {
             style: ParagraphStyle {
                 width: Width::from_em(2),
                 first_indent: Width::ZERO,
+                hang: Width::ZERO,
+                tracking: Width::ZERO,
                 line_height: Width::from_em_frac(3, 2),
                 align: Align::Justify,
             },
@@ -1622,6 +1925,8 @@ mod tests {
             style: ParagraphStyle {
                 width: Width::from_em(width_em),
                 first_indent: Width::ZERO,
+                hang: Width::ZERO,
+                tracking: Width::ZERO,
                 line_height: Width::from_em_frac(3, 2),
                 align: Align::Justify,
             },
@@ -1694,13 +1999,36 @@ mod tests {
     }
 
     #[test]
-    fn short_last_cost_only_applies_below_two_ems() {
+    fn a_short_non_final_line_is_charged_like_a_short_tail() {
+        let paragraph = two_atom_paragraph(10);
+        let metrics = SyntheticMetrics::default();
+        let config = BreakConfig::default();
+        let shaped = Shaped::new(&paragraph, &metrics);
+
+        // One CJK atom (1em) against a 10em measure: it has no glue, so the
+        // normal stage rejects it and the ladder has to flag it emergency.
+        let short = shaped
+            .eval_line(0, 1, LineEnd::Justified, &config, true, false)
+            .expect("the emergency stage accepts a short line");
+        assert!(short.emergency);
+        // A 2em threshold with 1em of content charges half the scale.
+        assert_eq!(short.short_score, 500_000);
+
+        // A two-em line is exactly at the threshold: no short-line charge.
+        let full = shaped
+            .eval_line(0, 2, LineEnd::Justified, &config, true, false)
+            .expect("a two-atom line");
+        assert_eq!(full.short_score, 0);
+    }
+
+    #[test]
+    fn short_line_cost_only_applies_below_two_ems() {
         assert_eq!(
-            short_last_cost(Width::EM.0 as i64, Width::from_em(2).0 as i64, 1_000_000),
+            short_line_cost(Width::EM.0 as i64, Width::from_em(2).0 as i64, 1_000_000),
             500_000
         );
         assert_eq!(
-            short_last_cost(
+            short_line_cost(
                 (Width::EM.0 as i64) * 2,
                 Width::from_em(2).0 as i64,
                 1_000_000
@@ -1708,7 +2036,7 @@ mod tests {
             0
         );
         assert_eq!(
-            short_last_cost(
+            short_line_cost(
                 (Width::EM.0 as i64) * 3,
                 Width::from_em(2).0 as i64,
                 1_000_000
@@ -1719,9 +2047,16 @@ mod tests {
 
     #[test]
     fn last_line_counts_line_cost() {
+        use crate::params::{ParamSet, Weight};
+
         let paragraph = two_atom_paragraph(2);
         let metrics = SyntheticMetrics::default();
-        let result = break_paragraph(&paragraph, &metrics, &BreakConfig::default()).unwrap();
+        // Isolate the line cost: the default now charges a short last line
+        // below 3em, which is not what this test measures.
+        let mut params = ParamSet::default_v1();
+        params.break_params.costs.short_last_scale = Weight(0);
+        let config = BreakConfig::from_params(params);
+        let result = break_paragraph(&paragraph, &metrics, &config).unwrap();
 
         assert_eq!(result.lines.len(), 1);
         assert_eq!(result.total_cost, Cost(10));

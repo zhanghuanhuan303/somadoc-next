@@ -277,6 +277,12 @@ fn write_block(out: &mut impl Write, block: &Block, mode: CanonicalMode) -> fmt:
             out.write_str(",\"source\":")?;
             write_string(out, &node.source)?;
         }
+        Block::Diagram(node) => {
+            out.write_str(",\"dialect\":")?;
+            write_string(out, node.dialect.as_str())?;
+            out.write_str(",\"source\":")?;
+            write_string(out, &node.source)?;
+        }
         Block::Figure(node) => {
             out.write_str(",\"image\":")?;
             write_image_node(out, &node.image, mode)?;
@@ -446,7 +452,13 @@ fn write_table(out: &mut impl Write, table: &Table, mode: CanonicalMode) -> fmt:
         write_node_head(out, &column.meta, mode)?;
         out.write_str(",\"align\":\"")?;
         out.write_str(column.align.as_str())?;
-        out.write_str("\"}")?;
+        out.write_str("\"")?;
+        // Only a column with a width hint writes the key, so every existing
+        // document keeps its canonical bytes.
+        if column.share > 0 {
+            write!(out, ",\"share\":{}", column.share)?;
+        }
+        out.write_str("}")?;
     }
     out.write_str("],\"caption\":")?;
     write_inlines(out, &table.caption, mode)?;

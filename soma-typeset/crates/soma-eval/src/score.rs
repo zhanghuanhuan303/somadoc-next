@@ -109,6 +109,11 @@ pub struct PageMetrics {
     pub continuation_blocks: u32,
     pub widow_violations: u32,
     pub orphan_violations: u32,
+    /// Adjacent line pairs whose fitness classes differ by more than one.
+    /// TeX charges a demerit for each; we only count them, because adding a
+    /// fitness dimension to the DP is not worth four times the states
+    /// (ADR-0042).
+    pub fitness_jumps: u32,
     pub page_free: Vec<i32>,
     pub jitter: Vec<i32>,
     pub bdev_error: Vec<i32>,
@@ -138,9 +143,24 @@ impl PageMetrics {
         self.continuation_blocks += other.continuation_blocks;
         self.widow_violations += other.widow_violations;
         self.orphan_violations += other.orphan_violations;
+        self.fitness_jumps += other.fitness_jumps;
         self.page_free.extend_from_slice(&other.page_free);
         self.jitter.extend_from_slice(&other.jitter);
         self.bdev_error.extend_from_slice(&other.bdev_error);
+    }
+}
+
+/// TeX's fitness classes, from the line's stretch/shrink ratio in permille:
+/// tight (under 0.5 compressed), decent, loose, very loose.
+pub fn fitness_class(ratio_milli: i32) -> i8 {
+    if ratio_milli < -500 {
+        -1
+    } else if ratio_milli <= 500 {
+        0
+    } else if ratio_milli <= 1000 {
+        1
+    } else {
+        2
     }
 }
 
@@ -174,6 +194,10 @@ pub fn measure(optimal: &PagedLayout) -> PageMetrics {
                     metrics
                         .jitter
                         .push((placed.line.ratio_milli - previous).abs());
+                    if (fitness_class(placed.line.ratio_milli) - fitness_class(previous)).abs() > 1
+                    {
+                        metrics.fitness_jumps += 1;
+                    }
                 }
                 previous_ratio = Some(placed.line.ratio_milli);
 
@@ -313,4 +337,23 @@ pub fn percentile(values: &[i32], percent: usize) -> i32 {
     sorted.sort_unstable();
     let index = (sorted.len() * percent / 100).min(sorted.len() - 1);
     sorted[index]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fitness_class;
+
+    /// TeX's boundaries: tight below -0.5, decent up to 0.5, loose up to 1.0,
+    /// very loose above.
+    #[test]
+    fn fitness_classes_follow_tex_boundaries() {
+        assert_eq!(fitness_class(-900), -1);
+        assert_eq!(fitness_class(-501), -1);
+        assert_eq!(fitness_class(-500), 0);
+        assert_eq!(fitness_class(0), 0);
+        assert_eq!(fitness_class(500), 0);
+        assert_eq!(fitness_class(501), 1);
+        assert_eq!(fitness_class(1000), 1);
+        assert_eq!(fitness_class(1001), 2);
+    }
 }

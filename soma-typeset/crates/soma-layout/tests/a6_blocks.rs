@@ -5,13 +5,90 @@ mod common;
 use common::{document, engine, metrics, paragraph, paragraph_with, styled, text, TIGHT};
 use soma_core::Width;
 use soma_doc::block::{
-    Cell, CodeBlock, Column, Figure, MathBlock, Paragraph, RawBlock, Row, Table, ThematicBreak,
+    BlockQuote, Cell, CodeBlock, Column, Figure, List, ListItem, MathBlock, Paragraph, RawBlock,
+    Row, Table, ThematicBreak,
 };
 use soma_doc::inline::{FootnoteRef, Image};
 use soma_doc::meta::ImageRef;
 use soma_doc::node::NodeMeta;
 use soma_doc::{Block, CellAlign, FootnoteDef};
 use soma_layout::{layout, BoxKind, TextSource, FOOTNOTE_MARKER};
+
+const CODE_PANEL: &str = r##"
+name: code-panel
+page:
+  size: custom
+  width: 100mm
+  height: 80mm
+  margin: 4mm
+syntax:
+  keyword: "#9d00ec"
+  comment: "#575757"
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+  - selector:
+      element: codeBlock
+    declarations:
+      font-size: 8pt
+      line-height: 2
+      background: "#f6f7f6"
+      padding-top: 1em
+      padding-left: 3em
+      padding-bottom: 2em
+"##;
+
+#[test]
+fn code_panel_padding_is_part_of_the_block_box() {
+    let doc = document(vec![Block::CodeBlock(CodeBlock::new(
+        NodeMeta::synthesized(),
+        Some("rust".into()),
+        "fn main() {\n}\n",
+    ))]);
+    let styled = styled(&doc, CODE_PANEL);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+
+    assert_eq!(block.kind, BoxKind::Code);
+    let style = styled
+        .style_of(block.node)
+        .and_then(|id| styled.table().get(id))
+        .expect("code style");
+    let pad_top = style.padding_top;
+    let pad_bottom = style.padding_bottom;
+    let pad_left = style.padding_left;
+    let line_height = style.line_height;
+    assert_eq!(
+        block.height,
+        pad_top + line_height + line_height + pad_bottom
+    );
+    assert_eq!(block.lines[0].y, pad_top);
+    assert_eq!(block.lines[1].y, pad_top + line_height);
+    assert_eq!(block.lines[0].line.boxes[0].x, pad_left);
+    assert_eq!(style.background, Some(0xf6f7f6));
+}
+
+#[test]
+fn code_tokens_carry_their_syntax_class() {
+    let doc = document(vec![Block::CodeBlock(CodeBlock::new(
+        NodeMeta::synthesized(),
+        Some("rust".into()),
+        "fn main() { // note\n}",
+    ))]);
+    let styled = styled(&doc, CODE_PANEL);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+
+    let mut classes = Vec::new();
+    for atom in &block.lines[0].line.boxes {
+        classes.push(layout.text.atom_syntax(block.node, atom.atom));
+    }
+    assert!(classes.contains(&Some(soma_core::SyntaxClass::Keyword)));
+    assert!(classes.contains(&Some(soma_core::SyntaxClass::Comment)));
+}
 
 #[test]
 fn code_block_keeps_source_lines() {
@@ -28,6 +105,29 @@ fn code_block_keeps_source_lines() {
     assert_eq!(block.lines.len(), 2, "one line per source line");
     let first = layout.text.atom_text(block.node, 0);
     assert!(first.starts_with("let"), "atom text: {first}");
+}
+
+#[test]
+fn a_code_block_keeps_each_line_on_its_own_atoms() {
+    let doc = document(vec![Block::CodeBlock(CodeBlock::new(
+        NodeMeta::synthesized(),
+        None,
+        "alpha\n  beta\n",
+    ))]);
+    let styled = styled(&doc, TIGHT);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+
+    assert_eq!(block.lines.len(), 2);
+    let mut second = String::new();
+    for placed in &block.lines[1].line.boxes {
+        second.push_str(layout.text.atom_text(block.node, placed.atom));
+    }
+    assert_eq!(second, "  beta", "the second line keeps its own text");
+    assert!(
+        block.lines[0].line.end <= block.lines[1].line.start,
+        "the lines do not share atoms"
+    );
 }
 
 #[test]
@@ -62,6 +162,150 @@ fn math_block_becomes_a_display_box() {
 }
 
 #[test]
+fn a_numbered_equation_gets_a_right_aligned_label() {
+    let source = format!("{TIGHT}\nnumbering:\n  equations: \"({{n}})\"\n");
+    let doc = document(vec![Block::MathBlock(MathBlock::new(
+        NodeMeta::synthesized(),
+        "\\begin{equation}E = mc^2\\end{equation}",
+    ))]);
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+    let math = block.math.as_ref().expect("display math box");
+
+    let number = math
+        .items
+        .iter()
+        .find(|item| item.text == "(1)")
+        .expect("the formula is numbered");
+    assert_eq!(block.width, math.width, "a numbered line spans the measure");
+    assert!(
+        block.x.0 + number.x.0 > math.width.0 / 2,
+        "the label sits at the right margin: {} + {}",
+        block.x.0,
+        number.x.0
+    );
+}
+
+#[test]
+fn each_aligned_row_takes_its_own_number() {
+    let source = format!("{TIGHT}\nnumbering:\n  equations: \"({{n}})\"\n");
+    let doc = document(vec![Block::MathBlock(MathBlock::new(
+        NodeMeta::synthesized(),
+        "\\begin{align}a &= 1 \\\\ b &= 2 \\\\ c &= 3\\end{align}",
+    ))]);
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let math = layout.pages[0].blocks[0]
+        .math
+        .as_ref()
+        .expect("display math box");
+    let numbers: Vec<&str> = math
+        .items
+        .iter()
+        .filter(|item| item.text.starts_with('('))
+        .map(|item| item.text.as_str())
+        .collect();
+
+    assert_eq!(numbers, ["(1)", "(2)", "(3)"]);
+}
+
+#[test]
+fn tags_and_notags_do_not_consume_numbers() {
+    let source = format!("{TIGHT}\nnumbering:\n  equations: \"({{n}})\"\n");
+    let doc = document(vec![
+        Block::MathBlock(MathBlock::new(
+            NodeMeta::synthesized(),
+            "\\begin{align}a &= 1 \\tag{A} \\\\ b &= 2 \\notag \\\\ c &= 3\\end{align}",
+        )),
+        Block::MathBlock(MathBlock::new(
+            NodeMeta::synthesized(),
+            "\\begin{equation}d = 4\\end{equation}",
+        )),
+    ]);
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let labels: Vec<String> = layout
+        .pages
+        .iter()
+        .flat_map(|page| page.blocks.iter())
+        .filter_map(|block| block.math.as_ref())
+        .flat_map(|math| math.items.iter())
+        .filter(|item| item.text.starts_with('('))
+        .map(|item| item.text.clone())
+        .collect();
+
+    // `\tag` prints `(A)`, `\notag` prints nothing, and neither one uses up a
+    // number: the next automatic number is still (1), and the formula after it
+    // takes (2).
+    assert_eq!(labels, ["(A)", "(1)", "(2)"]);
+}
+
+#[test]
+fn a_tag_may_carry_math() {
+    let source = format!("{TIGHT}\nnumbering:\n  equations: \"({{n}})\"\n");
+    let doc = document(vec![Block::MathBlock(MathBlock::new(
+        NodeMeta::synthesized(),
+        "\\begin{equation}x \\tag{$\\alpha$}\\end{equation}",
+    ))]);
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let math = layout.pages[0].blocks[0].math.as_ref().expect("math box");
+    let texts: Vec<&str> = math.items.iter().map(|item| item.text.as_str()).collect();
+
+    assert!(
+        texts.contains(&"α"),
+        "the tag's math is set, not printed: {texts:?}"
+    );
+    assert!(
+        texts.contains(&"("),
+        "a plain `\\tag` keeps its parentheses: {texts:?}"
+    );
+}
+
+#[test]
+fn a_nested_aligned_block_keeps_one_number() {
+    let source = format!("{TIGHT}\nnumbering:\n  equations: \"({{n}})\"\n");
+    let doc = document(vec![Block::MathBlock(MathBlock::new(
+        NodeMeta::synthesized(),
+        "\\begin{equation}\\begin{aligned}a &= 1 \\\\ b &= 2\\end{aligned}\\end{equation}",
+    ))]);
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let labels: Vec<&str> = layout.pages[0].blocks[0]
+        .math
+        .as_ref()
+        .expect("math box")
+        .items
+        .iter()
+        .filter(|item| item.text.starts_with('('))
+        .map(|item| item.text.as_str())
+        .collect();
+
+    assert_eq!(labels, ["(1)"]);
+}
+
+#[test]
+fn a_plain_formula_is_not_numbered() {
+    let source = format!("{TIGHT}\nnumbering:\n  equations: \"({{n}})\"\n");
+    let doc = document(vec![Block::MathBlock(MathBlock::new(
+        NodeMeta::synthesized(),
+        "a^2 + b^2 = c^2",
+    ))]);
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let math = layout.pages[0].blocks[0]
+        .math
+        .as_ref()
+        .expect("display math box");
+
+    assert!(
+        math.items.iter().all(|item| !item.text.starts_with('(')),
+        "a bare formula carries no label"
+    );
+}
+
+#[test]
 fn malformed_math_falls_back_to_a_text_placeholder() {
     let source = "\\frac{1}";
     let doc = document(vec![Block::MathBlock(MathBlock::new(
@@ -93,6 +337,43 @@ fn figure_uses_the_intrinsic_aspect_ratio() {
     let block = &layout.pages[0].blocks[0];
 
     assert_eq!(block.kind, BoxKind::Figure);
+    assert_eq!(block.height.0, block.width.0 / 2);
+}
+
+#[test]
+fn a_figure_policy_can_halve_and_align() {
+    const POLICY: &str = r#"
+name: figure-policy
+page:
+  size: custom
+  width: 100mm
+  height: 80mm
+  margin: 4mm
+figure:
+  width: half
+  align: right
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+"#;
+    let figure = Figure::new(
+        NodeMeta::synthesized(),
+        Image::new(
+            NodeMeta::synthesized(),
+            ImageRef::new("photo.png").with_intrinsic(200, 100),
+        ),
+    );
+    let doc = document(vec![Block::Figure(figure)]);
+    let styled = styled(&doc, POLICY);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+    let content = layout.page.content_width().0;
+
+    assert_eq!(block.width.0, content / 2);
+    assert_eq!(block.x.0, content - block.width.0);
     assert_eq!(block.height.0, block.width.0 / 2);
 }
 
@@ -151,6 +432,151 @@ fn table_rows_place_cells_at_column_offsets() {
     let column_width = layout.page.content_width().0 / 2;
     assert_eq!(blocks[1].x.0, column_width);
     assert_eq!(blocks[0].y.0, blocks[1].y.0, "cells share the row baseline");
+}
+
+#[test]
+fn table_rules_leave_breathing_room_around_the_text() {
+    let columns = vec![Column::new(NodeMeta::synthesized(), CellAlign::Left)];
+    let row = Row::new(
+        NodeMeta::synthesized(),
+        false,
+        vec![Cell::new(
+            NodeMeta::synthesized(),
+            vec![Block::Paragraph(Paragraph::new(
+                NodeMeta::synthesized(),
+                vec![text("甲")],
+            ))],
+        )],
+    );
+    let doc = document(vec![Block::Table(Table::new(
+        NodeMeta::synthesized(),
+        columns,
+        vec![row],
+    ))]);
+    let source = TIGHT.replace(
+        "styles:",
+        "table:\n  outer-rule-width: 0.8pt\n  header-rule-width: 0.6pt\nstyles:",
+    );
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let blocks = &layout.pages[0].blocks;
+
+    let top = blocks
+        .iter()
+        .find(|block| block.kind == BoxKind::TableRule && block.y.0 == 0)
+        .expect("the outer rule");
+    let cell = blocks
+        .iter()
+        .find(|block| block.kind == BoxKind::TableCell)
+        .expect("the cell");
+    let bottom = blocks
+        .iter()
+        .find(|block| block.kind == BoxKind::TableRule && block.y.0 > cell.y.0)
+        .expect("the bottom rule");
+    let sep = soma_layout::TABLE_RULE_SEP.0;
+    assert_eq!(cell.y.0 - top.height.0, sep, "space below the top rule");
+    assert_eq!(
+        bottom.y.0 - (cell.y.0 + cell.height.0),
+        sep,
+        "space above the bottom rule"
+    );
+}
+
+#[test]
+fn a_natural_table_is_centred_at_its_content_width() {
+    let columns = vec![
+        Column::new(NodeMeta::synthesized(), CellAlign::Left),
+        Column::new(NodeMeta::synthesized(), CellAlign::Left),
+    ];
+    let row = Row::new(
+        NodeMeta::synthesized(),
+        false,
+        vec![
+            Cell::new(
+                NodeMeta::synthesized(),
+                vec![Block::Paragraph(Paragraph::new(
+                    NodeMeta::synthesized(),
+                    vec![text("短句")],
+                ))],
+            ),
+            Cell::new(
+                NodeMeta::synthesized(),
+                vec![Block::Paragraph(Paragraph::new(
+                    NodeMeta::synthesized(),
+                    vec![text("说明文字")],
+                ))],
+            ),
+        ],
+    );
+    let doc = document(vec![Block::Table(Table::new(
+        NodeMeta::synthesized(),
+        columns,
+        vec![row],
+    ))]);
+    let source = TIGHT.replace("styles:", "table:\n  width: natural\nstyles:");
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let cells: Vec<_> = layout.pages[0]
+        .blocks
+        .iter()
+        .filter(|block| block.kind == BoxKind::TableCell)
+        .collect();
+    assert_eq!(cells.len(), 2);
+    let left = cells[0].x.0;
+    let right = layout.page.content_width().0 - (cells[1].x.0 + cells[1].width.0);
+    assert!(left > 0, "a narrow table is not flush left");
+    assert!(
+        (left - right).abs() <= 2,
+        "the table is centred: left {left}, right {right}"
+    );
+}
+
+#[test]
+fn dash_shares_widen_a_natural_table_without_squeezing_it() {
+    let columns = vec![
+        Column::new(NodeMeta::synthesized(), CellAlign::Left).with_share(100),
+        Column::new(NodeMeta::synthesized(), CellAlign::Left).with_share(900),
+    ];
+    let row = Row::new(
+        NodeMeta::synthesized(),
+        false,
+        vec![
+            Cell::new(
+                NodeMeta::synthesized(),
+                vec![Block::Paragraph(Paragraph::new(
+                    NodeMeta::synthesized(),
+                    vec![text("短句")],
+                ))],
+            ),
+            Cell::new(
+                NodeMeta::synthesized(),
+                vec![Block::Paragraph(Paragraph::new(
+                    NodeMeta::synthesized(),
+                    vec![text("说明")],
+                ))],
+            ),
+        ],
+    );
+    let doc = document(vec![Block::Table(Table::new(
+        NodeMeta::synthesized(),
+        columns,
+        vec![row],
+    ))]);
+    let source = TIGHT.replace("styles:", "table:\n  width: natural\nstyles:");
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let cells: Vec<_> = layout.pages[0]
+        .blocks
+        .iter()
+        .filter(|block| block.kind == BoxKind::TableCell)
+        .collect();
+    assert_eq!(cells.len(), 2);
+    assert!(
+        cells[1].width.0 > cells[0].width.0,
+        "the 900 share column is wider: {} vs {}",
+        cells[1].width.0,
+        cells[0].width.0
+    );
 }
 
 #[test]
@@ -214,6 +640,43 @@ fn footnotes_move_to_the_page_area() {
     assert_eq!(page.footnotes[0].kind, BoxKind::Footnote);
     assert!(page.footnote_height.0 > 0);
     assert!(page.used_height.0 + page.footnote_height.0 <= layout.page.content_height().0);
+}
+
+#[test]
+fn the_footnote_area_has_a_rule_and_a_number_column() {
+    let doc = footnote_document();
+    let styled = styled(&doc, TIGHT);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let page = &layout.pages[0];
+    let block = &page.footnotes[0];
+    let font_size = styled
+        .style(block.style)
+        .map(|style| style.font_size.0)
+        .expect("the footnote style");
+
+    assert_eq!(page.footnote_numbers, vec![Some(1)]);
+    assert_eq!(
+        block.x.0,
+        soma_layout::footnote_number_column(Width(font_size)).0,
+        "the note text starts after the number column"
+    );
+    assert_eq!(
+        page.blocks[0].marks[0].number,
+        page.footnote_numbers[0].unwrap()
+    );
+    assert!(
+        page.footnote_height.0
+            >= block.height.0
+                + soma_layout::FOOTNOTE_RULE_THICKNESS.0
+                + soma_layout::FOOTNOTE_RULE_GAP.0,
+        "the reservation includes the separator"
+    );
+    let rule = soma_layout::footnote_rule_width(layout.page.content_width()).0;
+    assert!(
+        rule * 3 >= layout.page.content_width().0 - 2
+            && rule * 3 <= layout.page.content_width().0 + 2,
+        "the rule is one third of the measure, within rounding"
+    );
 }
 
 #[test]
@@ -308,13 +771,261 @@ fn colspan_cells_span_their_columns() {
     let blocks = &layout.pages[0].blocks;
 
     assert_eq!(blocks.len(), 2);
-    let column_width = layout.page.content_width().0 / 3;
+    // Columns are sized by content now, so "two columns wide" means "up to
+    // where the third column starts", not twice an equal share (D90).
     assert_eq!(blocks[0].x.0, 0);
     assert_eq!(
-        blocks[0].width.0,
-        column_width * 2,
-        "a colspan=2 cell must be two columns wide"
+        blocks[0].width.0, blocks[1].x.0,
+        "a colspan=2 cell ends where the third column starts"
     );
-    assert_eq!(blocks[1].x.0, column_width * 2);
-    assert_eq!(blocks[1].width.0, column_width);
+    assert_eq!(
+        blocks[1].x.0 + blocks[1].width.0,
+        layout.page.content_width().0,
+        "the table fills the measure"
+    );
+}
+
+#[test]
+fn a_footnote_marker_is_narrower_than_a_character() {
+    let doc = footnote_document();
+    let styled = styled(&doc, TIGHT);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+    let mark = block.marks[0];
+
+    let marker = block
+        .lines
+        .iter()
+        .flat_map(|placed| placed.line.boxes.iter())
+        .find(|atom| atom.atom == mark.atom)
+        .expect("the marker occupies a box");
+    let character = block
+        .lines
+        .iter()
+        .flat_map(|placed| placed.line.boxes.iter())
+        .find(|atom| atom.atom != mark.atom)
+        .expect("a text atom");
+
+    // A superscript reference needs room for its number, not a full em: an em
+    // here pushes the following punctuation onto its own line.
+    assert!(
+        marker.advance.0 < character.advance.0,
+        "marker {} vs character {}",
+        marker.advance.0,
+        character.advance.0
+    );
+    assert!(marker.advance.0 > 0, "the number still needs room");
+}
+
+const TRACKED: &str = r#"
+name: tracked
+page:
+  size: custom
+  width: 100mm
+  height: 60mm
+  margin: 4mm
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+      letter-spacing: 0.1em
+"#;
+
+#[test]
+fn letter_spacing_widens_the_gaps_between_atoms() {
+    let doc = document(vec![paragraph("甲乙")]);
+    let tight = styled(&doc, TIGHT);
+    let tracked = styled(&doc, TRACKED);
+    let plain = layout(&doc, &tight, &metrics(), &engine()).expect("layout");
+    let spaced = layout(&doc, &tracked, &metrics(), &engine()).expect("layout");
+    let plain_width = plain.pages[0].blocks[0].lines[0].line.natural_width.0;
+    let spaced_width = spaced.pages[0].blocks[0].lines[0].line.natural_width.0;
+
+    assert_eq!(
+        spaced_width - plain_width,
+        409,
+        "0.1em between two atoms, rounded down once, and nothing after the last"
+    );
+}
+
+const LISTS: &str = r#"
+name: lists
+page:
+  size: custom
+  width: 100mm
+  height: 60mm
+  margin: 4mm
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+  - selector:
+      element: paragraph
+    declarations:
+      first-indent: 2em
+  - selector:
+      element: list
+    declarations:
+      indent-left: 2em
+      space-before: 1em
+      space-after: 2em
+  - selector:
+      element: listItem
+    declarations:
+      indent-left: 1.2em
+  - selector:
+      element: paragraph
+      within: listItem
+    declarations:
+      first-indent: -1.2em
+  - selector:
+      element: blockQuote
+    declarations:
+      indent-left: 2em
+      indent-right: 2em
+  - selector:
+      element: paragraph
+      within: blockQuote
+    declarations:
+      first-indent: 0
+"#;
+
+#[test]
+fn a_bullet_item_starts_with_its_marker_and_is_indented() {
+    let doc = document(vec![
+        paragraph("正文"),
+        Block::List(List::new(
+            NodeMeta::synthesized(),
+            false,
+            1,
+            vec![ListItem::new(
+                NodeMeta::synthesized(),
+                vec![paragraph("第一项")],
+            )],
+        )),
+    ]);
+    let styled = styled(&doc, LISTS);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let body = &layout.pages[0].blocks[0];
+    let block = &layout.pages[0].blocks[1];
+
+    assert_eq!(
+        layout.text.atom_text(block.node, 0),
+        "\u{2022}",
+        "the item is marked"
+    );
+    assert_eq!(block.x.0, 8192 + 4915, "2em list + 1.2em item");
+    assert_eq!(
+        block.x.0 + block.width.0,
+        body.width.0,
+        "the measure shrinks with the indent"
+    );
+}
+
+#[test]
+fn a_list_margin_separates_its_neighbours() {
+    let doc = document(vec![
+        paragraph("前文"),
+        Block::List(List::new(
+            NodeMeta::synthesized(),
+            false,
+            1,
+            vec![ListItem::new(
+                NodeMeta::synthesized(),
+                vec![paragraph("条目")],
+            )],
+        )),
+        paragraph("后文"),
+    ]);
+    let styled = styled(&doc, LISTS);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let blocks = &layout.pages[0].blocks;
+    assert_eq!(blocks.len(), 3, "paragraph, item, paragraph");
+
+    let before_gap = blocks[1].y.0 - (blocks[0].y.0 + blocks[0].height.0);
+    let after_gap = blocks[2].y.0 - (blocks[1].y.0 + blocks[1].height.0);
+    assert_eq!(before_gap, Width::from_em(1).0);
+    assert_eq!(after_gap, Width::from_em(2).0);
+}
+
+#[test]
+fn an_ordered_item_counts_from_its_start() {
+    let doc = document(vec![Block::List(List::new(
+        NodeMeta::synthesized(),
+        true,
+        3,
+        vec![
+            ListItem::new(NodeMeta::synthesized(), vec![paragraph("甲")]),
+            ListItem::new(NodeMeta::synthesized(), vec![paragraph("乙")]),
+        ],
+    ))]);
+    let styled = styled(&doc, LISTS);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let markers: Vec<&str> = layout.pages[0]
+        .blocks
+        .iter()
+        .map(|block| layout.text.atom_text(block.node, 0))
+        .collect();
+
+    assert_eq!(markers, ["3", "4"], "numbering starts at `start`");
+}
+
+#[test]
+fn a_list_marker_hangs_outside_the_text_column() {
+    // A negative first indent is a hanging indent: line 0 starts where the
+    // marker goes and is that much wider, every later line starts at the text
+    // column (ADR-0058).
+    let long = "这是一条足够长、必定换行的列表项，用来确认续行与首行的起点不同。";
+    let doc = document(vec![Block::List(List::new(
+        NodeMeta::synthesized(),
+        false,
+        1,
+        vec![ListItem::new(
+            NodeMeta::synthesized(),
+            vec![paragraph(long)],
+        )],
+    ))]);
+    let styled = styled(&doc, LISTS);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+    let first = &block.lines[0].line;
+    let second = &block.lines[1].line;
+
+    assert_eq!(first.indent.0, -4915, "the first line starts 1.2em left");
+    assert_eq!(
+        first.target_width.0,
+        block.width.0 + 4915,
+        "and is 1.2em wider"
+    );
+    assert_eq!(
+        second.indent.0, 0,
+        "a wrapped line starts at the text column"
+    );
+    assert_eq!(second.target_width.0, block.width.0);
+}
+
+#[test]
+fn a_quote_indents_the_blocks_it_holds() {
+    let doc = document(vec![
+        paragraph("正文"),
+        Block::BlockQuote(BlockQuote::new(
+            NodeMeta::synthesized(),
+            vec![paragraph("引文")],
+        )),
+    ]);
+    let styled = styled(&doc, LISTS);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let body = &layout.pages[0].blocks[0];
+    let block = &layout.pages[0].blocks[1];
+
+    assert_eq!(block.x.0, 8192, "2em on the left");
+    assert_eq!(
+        block.x.0 + block.width.0,
+        body.width.0 - 8192,
+        "and 2em on the right"
+    );
 }

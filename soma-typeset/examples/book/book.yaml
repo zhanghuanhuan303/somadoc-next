@@ -62,6 +62,14 @@ styles:
       space-before: 0
       space-after: 0
 
+  # Display formulas get more air than the 1em default so the formula reads as
+  # its own object instead of touching the surrounding paragraphs.
+  - selector:
+      element: mathBlock
+    declarations:
+      space-before: 2em
+      space-after: 2em
+
   # Chapter titles: centred, generous space above. Level 1 opens a page;
   # level 2 is a section heading inside a chapter.
   - selector:

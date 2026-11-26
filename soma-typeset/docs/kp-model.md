@@ -11,7 +11,7 @@
 1. **采用 K-P 的全局 DP 结构，但用加法加权代价，不用 TeX 的平方 demerits。** 这样才能满足 F6「每类惩罚有独立权重」，也更容易标定。
 2. **输入是 `Atom` + `Boundary`；box/glue/penalty 是内部编译产物。** 中文规则在 IR 构建时编译进边界，breaker 保持脚本无关。
 3. **`Forbidden` 是硬约束；`Forced` 单独建模。** 不要用负 penalty 模拟强制换行。
-4. **标点挤压是行边裁剪，不是全局 glue。** 只在行超宽时裁剪行首/行尾；line cost 仍只依赖 `(i, j)`，DP 不受影响。
+4. **标点挤压是行边裁剪，不是全局 glue。** 行尾只在超宽时裁；行首开标点在 justified 行、以及左对齐/ragged 行的行首做贴墨裁剪（ADR-0082/ADR-0105）。line cost 仍只依赖 `(i, j)`，DP 不受影响。
 5. **中英边界间距偏差用「比例分配 + 前缀和」做 O(1) 聚合。** 不逐边界遍历。
 6. **MVP 不把相邻行 fitness 放进 DP 状态。** 先测行间调整量方差；有证据再升级到 `(breakpoint, fitness)`。
 7. **边裁剪会破坏行宽单调性，所以先不要上 TeX 式 active-node 剪枝。** 先 O(n²) + 前缀和，correctness first。
@@ -140,12 +140,16 @@ E < 0   → 行不足（underfull）
         否则:
             r = -E' / H
             overfull = E' > H
+            若 overfull:
+                正常阶段：不可行
+                fallback：cost += emergency；emergency = true
 ```
 
 - **`S == 0 && D > 0` 不是完美行。** 它表示这一行没有任何可拉伸的边界，正常阶段必须进入 fallback；`BADNESS_RATIO_CLAMP` 是「无有限比例」的哨兵，不是物理比例。这样不会把「不足但无法拉伸」误判为 `r = 0`。
 - **`H == 0 && E' > 0`** 同理；同时 `overfull = true`，因为即使耗尽名义 shrink 也放不下。
-- **`overfull` 的精确含义**是裁剪后 `E' > H`：名义 shrink 全部用尽仍超宽。它是**质量标记**，不是 fallback 阶段；只要 `|r| <= tol`，它可以在 `Normal` 阶段出现。`0 < E' <= H` 但 `|r| > tol` 是「超过容差但仍可压缩」，正常阶段不可行，fallback 记 `emergency`，不记 `overfull`。这与 Greedy-F 的标记语义一致。
+- **`overfull` 的精确含义**是裁剪后 `E' > H`：名义 shrink 全部用尽仍超宽。这就是 TeX 的 overfull box，badness 无穷，因此**正常阶段不可行**，只能经 fallback 到达（`cost += emergency`，`emergency = true`）。ADR-0041 之前它只是标记，结果是一行可以声明 `overfull: true` 却照样按 `-E'` 压缩、把词间空挤到粘连。`0 < E' <= H` 但 `|r| > tol` 是「超过容差但仍可压缩」，同样走 fallback，只是不记 `overfull`。
 - **末行 / 强制段尾例外：** 它们不齐行，`adjustment = 0`，不进入上面的 S/H 分支；只允许 trim。裁剪后 `E' > 0` 时正常阶段不可行，fallback 记 `overfull + emergency`。
+- **词间空的可压缩量是字体相关的：** 规则层给出 1/8 em 的上限，`soma-layout` 再把它夹到 `space_advance / 3`（TeX 的 space glue）。固定 em 在窄空字体上等于允许 40% 以上的压缩，宽空字体上又过于保守（ADR-0041）。
 - `emergency_stretch > 0` 时，fallback 先把它加入 `S`；此时 `S > 0`，不需要哨兵。
 - 可行性：`|r| <= tol`。`tol` 用千分比整数表示，例如 `tol = 1000` 表示 1.0。
 - **`r` 与 TeX 的 tolerance 不是同一量。** TeX 的 `\tolerance=200` 是 badness 阈值；在 `p=3`、`scale=100` 下约对应 `|r| ≈ 1.26`。`default-v1` 的 `3000‰ = 3.0` 更宽松，它只是硬上限，不是首选比例；接近上限的行会被 badness 强烈惩罚。
@@ -161,7 +165,7 @@ E < 0   → 行不足（underfull）
 因此：
 
 - `Atom` 带 `compress_left` / `compress_right`，表示该原子在行边最多能裁掉多少侧边距。
-- 裁剪只在**行超宽**时发生。
+- 行尾裁剪只在线**超宽**时发生；行首开标点还有一条**光学对齐**规则：justified 行总是裁首个原子的左侧空，左对齐/ragged 行在首原子是开标点时也裁（ADR-0082/ADR-0105）。
 - 裁剪量进入 line cost，但仍然是 `(i, j)` 的函数，所以 DP 不需要额外状态。
 
 #### 裁剪顺序
@@ -173,12 +177,12 @@ c       = c_end + c_start
 E'      = E - c
 ```
 
-- **先裁行尾，再裁行首。** 行尾标点是常见情况；行首裁剪留给开引号/开括号。
+- **先裁行尾，再裁行首。** 行尾标点是常见情况；行首裁剪留给开引号/开括号。行首开标点在 justified 与左对齐行都会贴墨对齐，不要求该行超宽。
 - **model v1 只实现 `TrimPriority::EndFirst`。** `StartFirst` / `Balanced` 在 `ParamSet::validate` 阶段报错，不静默退化成 EndFirst；新增顺序要升 `modelVersion`。
 - `Line.ratio_milli` 是**裁剪后**的 stretch/shrink 比例，直接用于 badness；末行与 forced 段尾不齐行，固定为 0。
 - K4 起规则层把 `open_trim_left=250‰` / `close_trim_right=500‰` / `middle_trim_left/right=500‰` 写入 `Atom.compress_*`。这些**比例**仍是 `ParamOnly`，不是 Gate Q 硬断言；规则本身（行首禁开标点、行尾禁关标点）已是 `Verified`。
 - 两侧都裁时，`Line.trim_left` / `Line.trim_right` 分别记录，便于渲染和评估。
-- 如果 `E <= 0`，`c = 0`，**不裁剪**；不足的行应该用 stretch，而不是先裁再拉。
+- 超宽补偿只在 `E > 0` 时按上面的公式裁；行首开标点的光学裁剪是独立的，`E <= 0` 也可能发生（ADR-0082/ADR-0105）。
 - 单原子行没有内部 glue，但仍允许裁剪两侧；`adjustment = 0`，只影响行宽和渲染。
 
 #### 渲染坐标约定
@@ -236,7 +240,7 @@ C(i, j) = line
         + compress_amount × c / EM
         + compress_count × [c > 0]
         + boundary_deviation × D(i, j) / ideal_gap
-        + (last ? short_score(i, j) : 0)
+        + short_score(i, j)
         + height_cost(i, j)
         + (emergency ? emergency : 0)
         + (forbidden ? forbidden : 0)
@@ -250,7 +254,7 @@ C(i, j) = line
 | `compress_amount × c / EM` | `c` 占 1 em 的比例 | 每 1em trim 的 cost |
 | `compress_count` | 一次 trim 事件 | cost / event |
 | `boundary_deviation × D / ideal_gap` | `D` 占 ideal gap 的比例 | 每 1 个 ideal gap 偏差的 cost |
-| `short_score` | `short / short_last_threshold` | 末行为 0 宽时的 cost |
+| `short_score` | `short / short_last_threshold` | 短行为 0 宽时的 cost（末行与非末行共用） |
 | `height_cost` | `excess / body_height` | 每 1 个 body height 超出的 cost |
 | `emergency` / `forbidden` | 一次事件 | cost / event |
 
@@ -322,9 +326,9 @@ D = A × sum_cjk / (G_total × N_cl)
 
 **可选的平方版本：** 如果后续评估发现平均绝对偏差不够，可以换成平方和，用 i128 或归一化比例计算；MVP 不用。
 
-#### 2.6.3 末行与段尾
+#### 2.6.3 末行、短行与段尾
 
-- 段落最后一行：不齐行，`adjustment = 0`；不做 badness；只计 `short_score`。
+- 段落最后一行：不齐行，`adjustment = 0`；不做 badness；只计短行项。
 - `short_score`：
 
 ```text
@@ -335,11 +339,12 @@ short_score = short × short_last_scale / short_last_threshold
 
 - `short_last_threshold` 默认 2em，`short_last_scale` 默认 1_000_000；两者都是 Tier A 参数。
 - `effective_width` 使用**裁剪后**的自然宽度；末行 `adjustment` 不参与。
-- 如果阈值设为 0，则不计算短末行项。
-- **`w_line` 对末行和 forced 段尾也计数。** 理由是「行」是物理成本；`short_score` 是对末行过短的额外惩罚。这一点由 golden 锁死，避免实现者自行改语义。
+- 如果阈值设为 0，则不计算短行项。
+- **ADR-0112（D115）：同一 `short_score` 也用于非末行的齐行行。** 正常阶段的短行（没有足够 glue）本来不可行；emergency 阶梯会接受它，此时按同一公式计费，避免“段中孤字”免费。`short_score` 仍是同一个字段，`Line` 不新增字段。
+- **`w_line` 对末行和 forced 段尾也计数。** 理由是「行」是物理成本；`short_score` 是对行过短的额外惩罚。这一点由 golden 锁死，避免实现者自行改语义。
 
 - 最后一行裁剪后仍超宽：正常阶段不可行；fallback 允许，标记 `overfull + emergency`。末行不拉伸，也不按 shrink 比例分配。
-- 强制换行的段尾：不拉伸、不触发 `short_score`；它是「有意短行」。
+- 强制换行的段尾：不拉伸、不触发 `short_score`；它是「有意短行」（ADR-0112：作者要求的断点不收费）。
 - 段落最后一行如果是 forced segment 的段尾，按段尾处理，不按段落末行处理。
 - **跨段落节奏不在本模型内。** `short_last`/孤字是段落级指标；评估不期待跨段效果，跨段节奏不进入 Gate Q。
 
@@ -489,7 +494,7 @@ baseline = top + ascent
 #### 2.9.4 样式与断点的关系
 
 - 加粗/斜体/链接/普通强调：宽度由 `Metrics` 决定；没有额外代价；样式切换不产生断点。
-- 行内代码：建议作为一个 `InlineObject` 或不可断 atom；宽度包含 padding/border；MVP 不在代码内部断行。
+- 行内代码：按 ADR-0111/0112 切成可断 atom（空白、`-`/`/`/`_`/`.`、驼峰接缝；超长无接缝串逐字符给高价断点）；宽度按 code 样式；不再是一个不可断对象。
 - 上标/下标：用 `StyleId + baseline_shift` 表示；与基字的边界设为 `Forbidden`，避免 `x` 和 `²` 被拆到两行。
 - 行内数学：`InlineObject`；宽度和行高由宿主提供；不可断。
 - 图片/注脚引用：`InlineObject`；不可断；参与行高。
@@ -531,7 +536,8 @@ baseline = top + ascent
 | 中文标点 | 单个 CJK atom + `PunctClass` | `StyleId` | 参与禁断/裁剪 |
 | 拉丁词 | 一个 `LatinRun` | `StyleId` | 内部不拆；MVP 不做断词 |
 | 数字/单位 | 一个 `DigitRun` | `StyleId` | `3.14`、`50%` 保持一个原子 |
-| 行内代码/对象 | 一个 `InlineObject` | `StyleId` | 不拆；宽度含 padding/border |
+| 行内代码 | 多个 `Other` atom | `StyleId` | 空白/分隔符/驼峰/超长逐字 |
+| 行内对象 | 一个 `InlineObject` | `StyleId` | 不拆；宽度含 padding/border |
 | 上下标 | 独立 atom | `StyleId` + `baseline_shift` | 与基字之间禁断 |
 | 空白 | 不产生 atom | — | 产生 `BoundaryKind::Space` |
 
@@ -595,9 +601,9 @@ baseline = top + ascent
 ### 3.6 末行与孤字
 
 - 末行不齐行。
-- 末行有效宽度 < 2em 时计 `short_score`。
-- 「孤字成行」由评估层从 `LayoutResult` 计数；代价模型只负责降低它的概率。
-- 段尾/强制换行段尾不触发短末行惩罚。
+- 末行有效宽度 < `short_last_threshold` 时计 `short_score`。
+- **非末行的孤字行也计 `short_score`（ADR-0112）**：正常阶段通常不可行，emergency 阶梯接受时不再免费。评估层仍从 `LayoutResult` 统计孤字率。
+- 段尾/强制换行段尾不触发短行惩罚。
 
 ### 3.7 强制换行 / verse
 
@@ -660,7 +666,7 @@ struct Segment {
 | 特性 | atom/边界 | 宽度 | 断行 | 行高 | MVP |
 |---|---|---|---|---|---|
 | 加粗 / 斜体 | atom + `StyleId` | `Metrics` | 普通规则 | 样式行高 | 是 |
-| 行内代码 | `InlineObject` | 含 padding/border | 不可断 | 样式行高 | 是 |
+| 行内代码 | 多个 `Other` atom | code 样式 | 空白/分隔符/驼峰/超长逐字 | 样式行高 | 是 |
 | 链接 | atom + `StyleId` | `Metrics` | 普通规则 | 样式行高 | 是 |
 | 上标 / 下标 | atom + `baseline_shift` | `Metrics` | 与基字禁断 | 行盒计算 | 是 |
 | 行内数学 | `InlineObject` | 宿主提供 | 不可断 | 宿主提供 | 是（作为对象） |
@@ -679,7 +685,7 @@ struct Segment {
 - **短语级 no-break**：如果作者希望「整个加粗短语/链接内部不换行」，由规则层在短语边界加 `Forbidden` 或 penalty；不要给样式加隐式规则。
 - **上下标**：`x²` 必须是一个基字 + 一个上标 atom，边界 `Forbidden`；行盒用 `baseline_shift` 计算。
 - **注脚引用 / 行内数学 / 行内图片**：对象本身不可断；与基字/相邻词的边界由规则层决定，默认 `Forbidden`，避免对象被孤立到下一行。
-- **行内代码**：MVP 不拆；如果未来要允许代码内换行，用特殊的 `CodeSpace` 边界，而不是普通空格。
+- **行内代码**：由规则层切分（ADR-0111/0112）；断点是普通 `BoundaryKind::Normal`，空格/分隔符/驼峰带 penalty，超长无接缝串逐字符带高价 penalty；不再使用单独的 `CodeSpace` 边界。
 - **大字号**：不改变断点规则，只改变宽度和行高；`height_scale` 默认 0。
 
 两个具体例子：
@@ -974,7 +980,7 @@ struct KpTrace {
 | `styled-mixed` | 加粗/斜体 CJK+Latin；词内样式切换不拆词 |
 | `large-inline` | 2em 行首大字；行盒变高 |
 | `super-sub` | 上下标 baseline shift；与基字禁断 |
-| `inline-code` | 行内代码不可断 |
+| `inline-code` | 行内代码在空白/分隔符/驼峰处可断；超长无接缝串逐字符可断 |
 | `edge-trim` | 行尾标点裁剪 |
 | `underfull-no-stretch` | `S == 0 && D > 0`：正常不可行，fallback 不把不足当完美 |
 | `overfull-no-shrink` | `H == 0 && E' > 0`：fallback 标 `overfull + emergency` |
@@ -1041,7 +1047,7 @@ struct KpTrace {
 | K4 | 行边裁剪 + 渲染坐标约定 + `Line.trim_*` | 裁剪案例通过；行宽对得上 |
 | K5 | 强制换行/segment 切分 | Markdown hard break 案例通过 |
 | K6 | 性能优化；Tier A 初标定 + 敏感度报告；可选保守 active-node 剪枝 + 差分测试 | n=2,000 在预算内；参数报告完成 |
-| K7 | 可选 fitness/rhythm DP 状态 | 仅在评估证明需要时启动；不在基线 |
+| K7 | ~~可选 fitness/rhythm DP 状态~~ | **否决（ADR-0042）**：语料 607 个相邻行对里只有 3 对跨一级以上 fitness，且这两行非常松（>1000‰）的行是强制的——`badness_scale` 提 10 倍断点不变。改为在 `soma-eval` 里报 `fitness_jumps`，等它真的动了再回来看 |
 | K8 | 接入 rules/eval/demo，更新 canonical schema；盲测统计 | 回归、盲测、文档完成 |
 
 **冻结基线（2026-11-20）：** K0–K5 约 15 天；K6 5 天；K8 3 天；盲测预实验/正式盲测/评估/文档 10 天；缓冲 7 天；合计 40 个工作日（8 周全职）。兼职 18–20 周。K7 不在基线内。执行中不重新估算；范围变化写变更记录，按 K7 → fitness → 剪枝 → demo 打磨的顺序砍，Gate T 不砍。

@@ -76,6 +76,13 @@ fn push_item(out: &mut Vec<VItem>, index: usize, item: &FlowItem, params: Vertic
                 }
             }
         }
+        // A table's first part is often just the header row. A page must not
+        // end there: the header would sit alone at the foot of the page while
+        // its body starts on the next one.
+        let header_alone = matches!(
+            item.table,
+            Some(table) if table.header_rows > 0 && part_index == 0 && last > 0
+        );
         out.push(VItem {
             item: index,
             part: part_index,
@@ -92,7 +99,7 @@ fn push_item(out: &mut Vec<VItem>, index: usize, item: &FlowItem, params: Vertic
             },
             notes: part.notes.clone(),
             penalty,
-            can_break: !(part_index == last && item.keep_with_next),
+            can_break: !header_alone && !(part_index == last && item.keep_with_next),
             master: item.master,
             table: item.table.map(|mut table| {
                 table.row = part.row;
@@ -122,12 +129,8 @@ pub(crate) fn place_kp(
     params: VerticalParams,
 ) -> Option<Vec<usize>> {
     let mut ends = Vec::new();
-    let last_segment = segments.len().saturating_sub(1);
-    for (index, &(start, end)) in segments.iter().enumerate() {
-        let free_last = index == last_segment;
-        ends.extend(place_segment(
-            items, start, end, capacity, notes, params, free_last,
-        )?);
+    for &(start, end) in segments {
+        ends.extend(place_segment(items, start, end, capacity, notes, params)?);
     }
     Some(ends)
 }
@@ -139,7 +142,6 @@ fn place_segment(
     capacity: Width,
     notes: &NoteMap,
     params: VerticalParams,
-    free_last: bool,
 ) -> Option<Vec<usize>> {
     let n = end - start;
     if n == 0 {
@@ -157,7 +159,13 @@ fn place_segment(
         let mut stretch: i64 = 0;
         let mut shrink: i64 = 0;
         let mut seen: Vec<usize> = Vec::new();
-        let body = items[i].height.0.max(1) as i64;
+        // D92: leftover page space is normalized by the body line, not by
+        // whatever block happens to start the page. Zero keeps the old
+        // first-item behavior for hosts with no usable body height.
+        let body = match params.body_height.0 {
+            height if height > 0 => height as i64,
+            _ => items[i].height.0.max(1) as i64,
+        };
 
         for (j, item) in items.iter().enumerate().skip(i).take(end - i) {
             if j > i {
@@ -197,7 +205,11 @@ fn place_segment(
             if can_break {
                 let last = j + 1 == end;
                 let mut cost = params.page_weight + item.penalty;
-                if !(last && free_last) {
+                // Every segment ends where the next one already starts a new
+                // page (a chapter opening or an explicit break). Only that
+                // final page may be short: filling every earlier page is what
+                // keeps a chapter from ending in two half-empty leaves.
+                if !last {
                     cost += page_badness(
                         total,
                         capacity_units,
@@ -337,7 +349,11 @@ pub(crate) fn page_badness(
 }
 
 pub(crate) fn note_height_of(notes_seen: &[usize], notes: &NoteMap) -> Width {
-    let mut height = Width::ZERO;
+    let mut height = if notes_seen.is_empty() {
+        Width::ZERO
+    } else {
+        crate::FOOTNOTE_RULE_THICKNESS + crate::FOOTNOTE_RULE_GAP
+    };
     for note in notes_seen {
         if let Some(blocks) = notes.blocks.get(*note) {
             for block in blocks {
@@ -380,25 +396,34 @@ pub(crate) fn footnote_heights(ends: &[usize], items: &[VItem], notes: &NoteMap)
     out
 }
 
+/// Footnotes for one page, plus the definition index of each returned block.
+/// The separator rule is drawn by the renderer at `y = 0`; the text starts
+/// below it, so the reservation and the placed geometry agree.
 pub(crate) fn assemble_footnotes(
     start: usize,
     end: usize,
     items: &[VItem],
     notes: &NoteMap,
-) -> Vec<PlacedBlock> {
+) -> (Vec<PlacedBlock>, Vec<usize>) {
+    let used = page_note_indices(start, end, items);
     let mut out = Vec::new();
-    let mut y = Width::ZERO;
-    for note in page_note_indices(start, end, items) {
+    let mut ids = Vec::new();
+    if used.is_empty() {
+        return (out, ids);
+    }
+    let mut y = crate::FOOTNOTE_RULE_THICKNESS + crate::FOOTNOTE_RULE_GAP;
+    for note in used {
         if let Some(blocks) = notes.blocks.get(note) {
             for block in blocks {
                 let mut placed = block.clone();
                 placed.y = y;
                 y = y + placed.height;
                 out.push(placed);
+                ids.push(note);
             }
         }
     }
-    out
+    (out, ids)
 }
 
 /// Greedy fill with the footnote reservation fixed point: paginate, measure
@@ -439,7 +464,6 @@ pub(crate) fn score_pages(
         let mut used: i64 = header_reserve(&items[previous]).0 as i64;
         let mut stretch: i64 = 0;
         let mut shrink: i64 = 0;
-        let mut body = 1i64;
         for (offset, item) in items[previous..end].iter().enumerate() {
             if offset > 0 {
                 used += item.before.width.0 as i64;
@@ -449,8 +473,13 @@ pub(crate) fn score_pages(
             used += item.height.0 as i64 + item.after.width.0 as i64;
             stretch += item.after.plus.0 as i64;
             shrink += item.after.minus.0 as i64;
-            body = item.height.0.max(1) as i64;
         }
+        // Use the same denominator the DP scored with; zero keeps the old
+        // first-item fallback.
+        let body = match params.body_height.0 {
+            height if height > 0 => height as i64,
+            _ => items[previous].height.0.max(1) as i64,
+        };
         let natural = used + page_note_height(previous, end, items, notes).0 as i64;
         let mut cost = params.page_weight;
         if index != last {
@@ -656,4 +685,136 @@ fn stretch_share(delta: i64, total: i64, cumulative: i64, plus: i64) -> i32 {
     let before = delta * cumulative / total;
     let after = delta * (cumulative + plus) / total;
     (after - before) as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(height: i32, keep: bool) -> VItem {
+        VItem {
+            item: 0,
+            part: 0,
+            height: Width(height),
+            before: Glue::ZERO,
+            after: Glue::ZERO,
+            notes: Vec::new(),
+            penalty: 0,
+            can_break: !keep,
+            master: 0,
+            table: None,
+        }
+    }
+
+    fn notes() -> crate::NoteMap {
+        crate::NoteMap {
+            labels: Vec::new(),
+            blocks: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn page_badness_uses_the_given_body_height_not_the_first_item() {
+        // A tall first item followed by three short ones. Breaking before the
+        // second item leaves 5 units free; breaking after it leaves 2 units
+        // free but pays a 400 penalty.
+        let mut items = vec![
+            item(15, false),
+            item(3, false),
+            item(3, false),
+            item(3, false),
+        ];
+        items[1].penalty = 400;
+
+        // Old behavior: the 15-unit first item normalizes the 5-unit gap, so
+        // the cheap first page wins.
+        let first_item = place_kp(
+            &items,
+            &[(0, items.len())],
+            Width(20),
+            &notes(),
+            VerticalParams::default_v1(),
+        )
+        .expect("feasible");
+        assert_eq!(first_item, vec![1, 4]);
+
+        // D92: a 3-unit body line makes the same gap costly enough that the
+        // 400 penalty is the cheaper choice.
+        let mut params = VerticalParams::default_v1();
+        params.body_height = Width(3);
+        let body_height =
+            place_kp(&items, &[(0, items.len())], Width(20), &notes(), params).expect("feasible");
+        assert_eq!(body_height, vec![2, 4]);
+    }
+
+    #[test]
+    fn a_figure_and_its_caption_stay_together() {
+        // figure + caption + figure + caption + paragraph. The first four fit
+        // on a page; the paragraph does not, and no break may fall between a
+        // figure and its caption.
+        let items = vec![
+            item(85_514, true),
+            item(4_914, false),
+            item(85_514, true),
+            item(4_914, false),
+            item(13_926, false),
+        ];
+        let ends = place_kp(
+            &items,
+            &[(0, items.len())],
+            Width(194_600),
+            &notes(),
+            VerticalParams::default_v1(),
+        )
+        .expect("feasible");
+        assert_eq!(ends, vec![4, 5]);
+
+        // With room for everything, one page holds the whole run.
+        let one = place_kp(
+            &items,
+            &[(0, items.len())],
+            Width(200_000),
+            &notes(),
+            VerticalParams::default_v1(),
+        )
+        .expect("feasible");
+        assert_eq!(one, vec![items.len()]);
+    }
+
+    #[test]
+    fn debug_two_figures_with_paragraphs() {
+        let items = vec![
+            item(85_514, true),
+            item(4_914, false),
+            item(13_926, false),
+            item(85_514, true),
+            item(4_914, false),
+            item(13_926, false),
+        ];
+        let ends = place_kp(
+            &items,
+            &[(0, items.len())],
+            Width(194_600),
+            &notes(),
+            VerticalParams::default_v1(),
+        )
+        .expect("feasible");
+        println!("ends={ends:?}");
+    }
+
+    #[test]
+    fn a_page_never_ends_between_a_figure_and_its_caption() {
+        // A page that can hold the figure but not the caption must move the
+        // pair, not leave a lone figure at the foot.
+        let items = vec![item(60_000, false), item(85_514, true), item(4_914, false)];
+        let ends = place_kp(
+            &items,
+            &[(0, items.len())],
+            Width(150_000),
+            &notes(),
+            VerticalParams::default_v1(),
+        )
+        .expect("feasible");
+        assert_eq!(ends, vec![1, 3]);
+    }
 }

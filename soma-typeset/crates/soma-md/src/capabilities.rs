@@ -72,9 +72,34 @@ pub const CAPABILITIES: &[Capability] = &[
         note: "`**x**` and `__x__` become `Strong`",
     },
     Capability {
+        syntax: "strikethrough",
+        status: CapabilityStatus::Supported,
+        note: "`~~x~~` becomes `Strikethrough`, drawn as a rule in PDF (ADR-0044)",
+    },
+    Capability {
         syntax: "inline_code",
         status: CapabilityStatus::Supported,
         note: "`` `x` `` becomes `Code`, one unbreakable atom",
+    },
+    Capability {
+        syntax: "inline_math",
+        status: CapabilityStatus::Supported,
+        note: "`$...$` and `\\(...\\)` become `MathInline`",
+    },
+    Capability {
+        syntax: "display_math",
+        status: CapabilityStatus::Supported,
+        note: "`$$...$$`, `\\[...\\]` and display environments become `MathBlock`",
+    },
+    Capability {
+        syntax: "latex_inline",
+        status: CapabilityStatus::Supported,
+        note: "common LaTeX text commands map to DocIR; `\\footnote` becomes a real definition and `\\index` inside it is collected",
+    },
+    Capability {
+        syntax: "latex_block",
+        status: CapabilityStatus::Supported,
+        note: "common LaTeX environments parse through the LaTeX frontend",
     },
     Capability {
         syntax: "link",
@@ -90,6 +115,11 @@ pub const CAPABILITIES: &[Capability] = &[
         syntax: "fenced_code",
         status: CapabilityStatus::Supported,
         note: "``` ``` ``` / `~~~` become `CodeBlock`",
+    },
+    Capability {
+        syntax: "diagram_fence",
+        status: CapabilityStatus::Supported,
+        note: "`mermaid`/`dot` fences (and an untagged `flowchart`/`digraph` header) become `Diagram`; text fences stay code (ADR-0102)",
     },
     Capability {
         syntax: "list_unordered",
@@ -117,6 +147,11 @@ pub const CAPABILITIES: &[Capability] = &[
         note: "`[^label]: text` becomes `FootnoteDef`",
     },
     Capability {
+        syntax: "ruby_marker",
+        status: CapabilityStatus::Supported,
+        note: "`[[ruby:base|reading]]` becomes `Inline::Ruby`",
+    },
+    Capability {
         syntax: "index_marker",
         status: CapabilityStatus::Supported,
         note: "`[[index:term]]` becomes `Inline::Index`",
@@ -133,38 +168,43 @@ pub const CAPABILITIES: &[Capability] = &[
     },
     Capability {
         syntax: "nested_list",
-        status: CapabilityStatus::Degraded,
-        note: "indented items join the parent item as text",
+        status: CapabilityStatus::Supported,
+        note: "an indented marker becomes a `List` inside the parent item",
     },
     Capability {
         syntax: "setext_heading",
-        status: CapabilityStatus::Degraded,
-        note: "underlined heading becomes a paragraph plus a rule",
+        status: CapabilityStatus::Supported,
+        note: "`===` / `---` under a paragraph becomes a level 1/2 `Heading`",
     },
     Capability {
         syntax: "table",
-        status: CapabilityStatus::Degraded,
-        note: "pipe rows stay text; build `Table` in DocIR to get a table",
+        status: CapabilityStatus::Supported,
+        note: "GFM pipe table with a delimiter row becomes `Table`; a backslash-bar is literal",
     },
     Capability {
         syntax: "html_block",
-        status: CapabilityStatus::Degraded,
-        note: "kept as literal text, never executed",
+        status: CapabilityStatus::Supported,
+        note: "a supported block parses through the HTML frontend; unsupported tags stay RawBlock; never executed",
     },
     Capability {
         syntax: "html_inline",
-        status: CapabilityStatus::Degraded,
-        note: "kept as literal text, never executed",
+        status: CapabilityStatus::Supported,
+        note: "formatting tags become DocIR containers; unknown tags stay RawInline; never executed",
     },
     Capability {
         syntax: "link_reference",
-        status: CapabilityStatus::Degraded,
-        note: "`[label]: url` definitions stay text",
+        status: CapabilityStatus::Supported,
+        note: "`[label]: url` definitions resolve `[text][label]` / `[text][]` links and images",
     },
     Capability {
         syntax: "multi_line_code_span",
+        status: CapabilityStatus::Supported,
+        note: "a code span may cross soft line joins; newlines normalize to spaces",
+    },
+    Capability {
+        syntax: "unterminated_code_span",
         status: CapabilityStatus::Degraded,
-        note: "an unterminated span stays literal text",
+        note: "an unterminated backtick run stays literal text",
     },
 ];
 

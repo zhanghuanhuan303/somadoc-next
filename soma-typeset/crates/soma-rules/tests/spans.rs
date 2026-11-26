@@ -2,7 +2,7 @@
 
 use soma_core::StyleId;
 use soma_core::Width;
-use soma_core::{AtomKind, PunctClass};
+use soma_core::{AtomKind, BoundaryKind, BoundaryRole, Breakability, PunctClass};
 use soma_rules::{
     is_cjk, justified_style, paragraph_from_spans, paragraph_from_text, punct_class, InlineSpan,
     SpanKind,
@@ -62,7 +62,31 @@ fn styled_runs_keep_their_style_id() {
 }
 
 #[test]
-fn code_and_object_spans_are_single_atoms() {
+fn a_footnote_mark_attaches_to_the_text_before_it() {
+    let paragraph = paragraph_from_spans(
+        &[
+            InlineSpan::text("行", StyleId(0)),
+            InlineSpan::footnote("\u{e000}", StyleId(0)),
+            InlineSpan::text("。", StyleId(0)),
+        ],
+        style(),
+    )
+    .expect("paragraph");
+
+    assert_eq!(paragraph.atoms.len(), 3);
+    // No break and no CJK/Latin gap before a footnote reference: a line must
+    // never start with a superscript number (ADR-0096).
+    let before = paragraph.boundaries[0];
+    assert_eq!(before.breakable, Breakability::Forbidden);
+    assert_eq!(before.role, BoundaryRole::Plain);
+    assert_eq!(before.glue.width, Width::ZERO);
+    assert_eq!(before.glue.stretch, Width::ZERO);
+    // The following full stop may not start a line either.
+    assert_eq!(paragraph.boundaries[1].breakable, Breakability::Forbidden);
+}
+
+#[test]
+fn inline_code_breaks_at_its_own_spaces() {
     let paragraph = paragraph_from_spans(
         &[
             InlineSpan::text("运行", StyleId(0)),
@@ -73,13 +97,35 @@ fn code_and_object_spans_are_single_atoms() {
     )
     .expect("paragraph");
 
-    let code = paragraph
+    let code: Vec<&soma_core::Atom> = paragraph
         .atoms
         .iter()
-        .find(|atom| atom.text == "let x = 1;")
-        .expect("code atom");
-    assert_eq!(code.kind, AtomKind::Other);
-    assert_eq!(code.style, StyleId(1));
+        .filter(|atom| atom.style == StyleId(1))
+        .collect();
+    assert_eq!(code.len(), 4);
+    assert!(code.iter().all(|atom| atom.kind == AtomKind::Other));
+    // The space stays at the tail of the piece before it, so the pieces
+    // concatenate back to the exact source text.
+    let texts: Vec<&str> = code.iter().map(|atom| atom.text.as_str()).collect();
+    assert_eq!(texts, ["let ", "x ", "= ", "1;"]);
+    let joined: String = code.iter().map(|atom| atom.text.as_str()).collect();
+    assert_eq!(joined, "let x = 1;");
+    // A break between two code pieces is allowed but priced, except before an
+    // operator: `x | = 1` must not start a line with `=` (ADR-0115).
+    let first = paragraph
+        .atoms
+        .iter()
+        .position(|atom| atom.style == StyleId(1))
+        .expect("code start");
+    for (index, boundary) in paragraph.boundaries[first..first + 3].iter().enumerate() {
+        assert_eq!(boundary.kind, BoundaryKind::Normal);
+        if index == 1 {
+            assert_eq!(boundary.breakable, Breakability::Forbidden);
+        } else {
+            assert_eq!(boundary.breakable, Breakability::Allowed);
+            assert!(boundary.penalty > 0);
+        }
+    }
 
     let object = paragraph
         .atoms
@@ -88,6 +134,161 @@ fn code_and_object_spans_are_single_atoms() {
         .expect("object atom");
     assert_eq!(object.kind, AtomKind::InlineObject);
     assert_eq!(object.style, StyleId(2));
+}
+
+#[test]
+fn inline_code_without_a_space_breaks_only_at_a_separator() {
+    let paragraph = paragraph_from_spans(&[InlineSpan::code("metronome-rs", StyleId(1))], style())
+        .expect("paragraph");
+    assert_eq!(paragraph.atoms.len(), 2);
+    assert_eq!(paragraph.atoms[0].text, "metronome-");
+    assert_eq!(paragraph.atoms[1].text, "rs");
+    let boundary = paragraph.boundaries[0];
+    assert_eq!(boundary.breakable, Breakability::Allowed);
+    assert_eq!(boundary.kind, BoundaryKind::Normal);
+    assert!(boundary.penalty > 0, "a code identifier break is priced");
+    let joined: String = paragraph
+        .atoms
+        .iter()
+        .map(|atom| atom.text.as_str())
+        .collect();
+    assert_eq!(joined, "metronome-rs");
+}
+
+#[test]
+fn inline_code_never_breaks_before_a_separator() {
+    let paragraph = paragraph_from_spans(
+        &[InlineSpan::code("https://example.com/a/", StyleId(1))],
+        style(),
+    )
+    .expect("paragraph");
+    let texts: Vec<&str> = paragraph
+        .atoms
+        .iter()
+        .map(|atom| atom.text.as_str())
+        .collect();
+    assert_eq!(texts, ["https:/", "/", "example.", "com/", "a/"]);
+    // A break after `https://` is allowed …
+    assert_eq!(paragraph.boundaries[1].breakable, Breakability::Allowed);
+    assert!(paragraph.boundaries[1].penalty > 0);
+    // … but not between `https/` and `//`, which would start a line with `/`.
+    assert_eq!(paragraph.boundaries[0].breakable, Breakability::Forbidden);
+}
+
+#[test]
+fn camel_case_seams_are_priced_word_breaks() {
+    let paragraph = paragraph_from_spans(
+        &[InlineSpan::code("someVeryLongIdentifier", StyleId(1))],
+        style(),
+    )
+    .expect("paragraph");
+    let texts: Vec<&str> = paragraph
+        .atoms
+        .iter()
+        .map(|atom| atom.text.as_str())
+        .collect();
+    assert_eq!(texts, ["some", "Very", "Long", "Identifier"]);
+    for boundary in &paragraph.boundaries {
+        assert_eq!(boundary.breakable, Breakability::Allowed);
+        assert_eq!(boundary.penalty, 3_000, "a case seam is a word break");
+    }
+}
+
+#[test]
+fn snake_case_and_dotted_paths_split_at_their_separators() {
+    let paragraph =
+        paragraph_from_spans(&[InlineSpan::code("some_long.path", StyleId(1))], style())
+            .expect("paragraph");
+    let texts: Vec<&str> = paragraph
+        .atoms
+        .iter()
+        .map(|atom| atom.text.as_str())
+        .collect();
+    assert_eq!(texts, ["some_", "long.", "path"]);
+    // A decimal separator is not a word seam.
+    let number = paragraph_from_spans(&[InlineSpan::code("v1.2.3", StyleId(1))], style())
+        .expect("paragraph");
+    assert_eq!(number.atoms.len(), 1);
+    assert_eq!(number.atoms[0].text, "v1.2.3");
+}
+
+#[test]
+fn a_long_unseparated_code_run_breaks_per_character() {
+    let text = "a1b2c3d4e5f6a7b8c9d0e1f2";
+    let paragraph =
+        paragraph_from_spans(&[InlineSpan::code(text, StyleId(1))], style()).expect("paragraph");
+    assert_eq!(paragraph.atoms.len(), text.len());
+    assert!(paragraph
+        .boundaries
+        .iter()
+        .all(|boundary| boundary.breakable == Breakability::Allowed),);
+    assert!(
+        paragraph
+            .boundaries
+            .iter()
+            .all(|boundary| boundary.penalty == 8_000),
+        "an intrusive break is the most expensive ordinary break"
+    );
+    let joined: String = paragraph
+        .atoms
+        .iter()
+        .map(|atom| atom.text.as_str())
+        .collect();
+    assert_eq!(joined, text);
+}
+
+#[test]
+fn an_intrusive_split_keeps_a_trailing_space_at_the_tail() {
+    let text = "abcdefghijklmnop qr";
+    let paragraph =
+        paragraph_from_spans(&[InlineSpan::code(text, StyleId(1))], style()).expect("paragraph");
+    assert!(
+        paragraph
+            .atoms
+            .iter()
+            .all(|atom| !atom.text.starts_with(' ')),
+        "no atom may start with the space: a line could begin with it"
+    );
+    assert!(paragraph.atoms.iter().any(|atom| atom.text == "p "));
+    let joined: String = paragraph
+        .atoms
+        .iter()
+        .map(|atom| atom.text.as_str())
+        .collect();
+    assert_eq!(joined, text);
+    // The boundary before `qr` is the code space, not an intrusive break.
+    let qr = paragraph
+        .atoms
+        .iter()
+        .position(|atom| atom.text == "qr")
+        .expect("the short piece");
+    assert_eq!(paragraph.boundaries[qr - 1].penalty, 100);
+}
+
+#[test]
+fn code_operators_never_start_a_line() {
+    // A wrapped expression reads as a continuation: `tick *` ends the line,
+    // not `* 60` begins the next one.
+    let paragraph = paragraph_from_spans(&[InlineSpan::code("tick * 60 = x", StyleId(1))], style())
+        .expect("paragraph");
+    let texts: Vec<&str> = paragraph
+        .atoms
+        .iter()
+        .map(|atom| atom.text.as_str())
+        .collect();
+    assert_eq!(texts, ["tick ", "* ", "60 ", "= ", "x"]);
+    assert_eq!(
+        paragraph.boundaries[0].breakable,
+        Breakability::Forbidden,
+        "a line may not begin with `*`"
+    );
+    assert_eq!(paragraph.boundaries[1].breakable, Breakability::Allowed);
+    assert_eq!(
+        paragraph.boundaries[2].breakable,
+        Breakability::Forbidden,
+        "a line may not begin with `=`"
+    );
+    assert_eq!(paragraph.boundaries[3].breakable, Breakability::Allowed);
 }
 
 #[test]

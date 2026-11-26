@@ -6,7 +6,7 @@
 
 mod common;
 
-use common::{document, engine, metrics, paragraph, styled, TIGHT};
+use common::{document, engine, metrics, paragraph, styled, BOOK, TIGHT};
 use soma_core::{Metrics, Width};
 use soma_doc::block::MathBlock;
 use soma_doc::node::NodeMeta;
@@ -43,6 +43,49 @@ fn display_formula_is_centred_on_the_content_box() {
 }
 
 #[test]
+fn consecutive_display_formulas_keep_the_default_skip() {
+    let doc = document(vec![
+        Block::MathBlock(MathBlock::new(NodeMeta::synthesized(), r"\frac{a}{b}")),
+        Block::MathBlock(MathBlock::new(NodeMeta::synthesized(), r"\sqrt{x}")),
+    ]);
+    let styled = styled(&doc, BOOK);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let first = &layout.pages[0].blocks[0];
+    let second = &layout.pages[0].blocks[1];
+    let gap = second.y.0 - (first.y.0 + first.height.0);
+    let body = styled.table().styles()[0].font_size.0;
+    assert!(
+        gap >= body * 9 / 10,
+        "display skips: gap {gap}, body {body}"
+    );
+}
+
+#[test]
+fn a_display_after_a_short_line_keeps_half_the_template_skip() {
+    let doc = document(vec![
+        paragraph("短句"),
+        Block::MathBlock(MathBlock::new(NodeMeta::synthesized(), r"\frac{a}{b}")),
+    ]);
+    let styled = styled(&doc, TIGHT);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let body = styled.table().styles()[0].font_size.0;
+    let above = &layout.pages[0].blocks[0];
+    let math = &layout.pages[0].blocks[1];
+    let gap = math.y.0 - (above.y.0 + above.height.0);
+
+    // TIGHT has no mathBlock rule, so the default 1em before-glue is halved
+    // for a short preceding line. Page glue may add at most 0.1em.
+    assert!(
+        gap >= body * 49 / 100,
+        "short display gap {gap} is below half a body em ({body})"
+    );
+    assert!(
+        gap <= body * 61 / 100,
+        "short display gap {gap} grew past the template glue ({body})"
+    );
+}
+
+#[test]
 fn superscript_sits_above_the_baseline_and_is_smaller() {
     let layout = math_layout("x^2");
     let math = layout.pages[0].blocks[0].math.as_ref().expect("math box");
@@ -62,8 +105,14 @@ fn superscript_sits_above_the_baseline_and_is_smaller() {
     assert!(sup.y.0 < 0, "superscript lifts above the baseline");
     assert!(sup.size.0 < base.size.0, "scripts are set smaller");
     assert!(sup.x.0 >= base.x.0 + metrics().advance("x", soma_core::StyleId(0)).0);
-    // The raised script must be counted in the ascent, not clipped.
-    assert!(math.baseline.0 > base.size.0);
+    // The raised script must be counted in the ascent, not clipped: the box
+    // top is above the superscript's own baseline.
+    assert!(
+        math.baseline.0 > -sup.y.0,
+        "box top {} vs sup lift {}",
+        math.baseline.0,
+        -sup.y.0
+    );
 }
 
 #[test]
@@ -147,7 +196,7 @@ fn canonical_json_carries_the_formula() {
     let layout = math_layout("\\frac{a}{b}");
     let json = layout.canonical_json();
 
-    assert!(json.contains("\"schema\":\"soma.pages/9\""));
+    assert!(json.contains("\"schema\":\"soma.pages/11\""));
     assert!(json.contains("\"math\":{\"width\":"));
     assert!(json.contains("\"inlineMath\":[]"));
     assert!(json.contains("\"baseline\":"));
@@ -189,4 +238,50 @@ fn math_height_does_not_change_the_line_count() {
         .map(|block| block.lines_total)
         .sum();
     assert_eq!(plain_lines, math_lines);
+}
+
+#[test]
+fn a_real_math_face_selects_design_variants() {
+    use soma_layout::StyledMetrics;
+    use soma_metrics::MetricsTable;
+
+    let doc = document(vec![Block::MathBlock(MathBlock::new(
+        NodeMeta::synthesized(),
+        r"\sum_{i=1}^{n} a_i + \sqrt{\frac{a}{b}}",
+    ))]);
+    let styled = styled(&doc, TIGHT);
+    let table = MetricsTable::embedded();
+    let metrics = StyledMetrics::new(&table, &styled);
+    let layout = layout(&doc, &styled, &metrics, &engine()).expect("layout");
+    let math = layout.pages[0].blocks[0].math.as_ref().expect("math box");
+
+    let sum = math
+        .items
+        .iter()
+        .find(|item| item.text == "∑")
+        .expect("summation");
+    assert!(
+        sum.variant().is_some(),
+        "the embedded Noto MATH table has a display sum: {sum:?}"
+    );
+    assert_eq!(
+        sum.design,
+        styled.style(soma_core::StyleId(0)).unwrap().font_size,
+        "a variant is drawn at the formula's design size"
+    );
+    assert!(sum.size.0 > sum.design.0, "the text fallback is larger");
+
+    let radical = math
+        .items
+        .iter()
+        .find(|item| item.text == "√")
+        .expect("radical");
+    assert!(radical.variant().is_some(), "a tall radicand has a variant");
+
+    let json = layout.canonical_json();
+    assert!(
+        json.contains("\"design\":"),
+        "the page result names the size"
+    );
+    assert!(json.contains("\"glyph\":1") || json.contains("\"glyph\":2"));
 }

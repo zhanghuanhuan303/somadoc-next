@@ -1,0 +1,9 @@
+somadoc
+Copyright 2026 zhanghuanhuan303
+
+The soma-typeset engine lives under soma-typeset/.
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+Third-party assets and their licenses are recorded in
+soma-typeset/NOTICE and soma-typeset/PROVENANCE.md. The evaluation corpus is
+CC-BY-4.0; see soma-typeset/corpus/LICENSE.

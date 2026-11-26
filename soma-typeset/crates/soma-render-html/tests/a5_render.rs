@@ -1,13 +1,13 @@
 //! A5 renderer: absolute positions, escaping, no re-breaking.
 
 use soma_core::{BreakConfig, SyntheticMetrics};
-use soma_doc::block::Paragraph;
+use soma_doc::block::{Heading, Paragraph};
 use soma_doc::inline::FootnoteRef;
 use soma_doc::meta::DocumentMeta;
 use soma_doc::node::NodeMeta;
 use soma_doc::{Block, Document, FootnoteDef, Text};
 use soma_layout::{layout, FOOTNOTE_MARKER};
-use soma_render_html::{render, render_page};
+use soma_render_html::{render, render_fragments, render_page, PAGE_STYLE};
 use soma_template::{parse_template, resolve, StyledDoc, Template};
 
 const TEMPLATE: &str = r#"
@@ -103,6 +103,14 @@ fn text_of(html: &str) -> String {
 }
 
 #[test]
+fn page_style_has_a_light_fallback_color() {
+    // The proof is mounted in a dark UI; a missing template color must not
+    // inherit `canvastext` (white) on a white page.
+    assert!(PAGE_STYLE.contains("color-scheme:light"));
+    assert!(PAGE_STYLE.contains("color:#111"));
+}
+
+#[test]
 fn renders_pages_with_absolute_positions() {
     let html = render_document();
 
@@ -113,6 +121,48 @@ fn renders_pages_with_absolute_positions() {
     assert!(html.contains("em;"));
     assert!(!html.contains("<br"), "the renderer must not re-break");
     assert!(!html.to_lowercase().contains("<script"));
+}
+
+#[test]
+fn heading_line_height_is_a_ratio_of_its_font() {
+    const HEADING_TEMPLATE: &str = r#"
+name: heading
+page:
+  size: A5
+  margin: 10mm
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+      align: justify
+  - selector:
+      element: heading
+    declarations:
+      font-size: 2em
+      line-height: 1.2
+"#;
+    let mut document = Document::new(DocumentMeta::new());
+    document.push_block(Block::Heading(Heading::new(
+        NodeMeta::synthesized(),
+        1,
+        vec![Text::new(NodeMeta::synthesized(), "标题").into()],
+    )));
+    document.renumber();
+    let template = parse_template(HEADING_TEMPLATE).expect("template");
+    let styled = resolve(&document, &template).expect("styles");
+    let pages = layout(
+        &document,
+        &styled,
+        &SyntheticMetrics::default(),
+        &BreakConfig::default(),
+    )
+    .expect("layout");
+    let html = render(&pages, styled.table(), &pages.text);
+    assert!(html.contains("font-size:2.000em"), "{html}");
+    assert!(html.contains("line-height:1.199em"), "{html}");
+    assert!(!html.contains("line-height:2.400em"), "{html}");
 }
 
 #[test]
@@ -138,9 +188,10 @@ fn footnote_markers_render_the_number() {
         "placeholder must not reach the output"
     );
     assert!(
-        html.contains(">1</span>"),
-        "the marker must draw its number"
+        html.contains("<sup class=\"footnote-mark\">1</sup>"),
+        "the marker must draw its number as a superscript"
     );
+    assert!(PAGE_STYLE.contains("vertical-align:0.6em"));
     assert!(text_of(&html).contains("脚注内容。"));
 }
 
@@ -171,6 +222,30 @@ fn html_is_escaped() {
         "{visible}"
     );
     assert!(!visible.contains("< b"));
+}
+
+#[test]
+fn page_fragments_join_to_the_same_document() {
+    let document = document();
+    let styled = styled(&document);
+    let pages = layout(
+        &document,
+        &styled,
+        &SyntheticMetrics::default(),
+        &BreakConfig::default(),
+    )
+    .expect("layout");
+    let html = render(&pages, styled.table(), &pages.text);
+    let fragments = render_fragments(&pages, styled.table(), &pages.text);
+    let mut joined = String::from("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">\n<style>");
+    joined.push_str(PAGE_STYLE);
+    joined.push_str("</style></head><body>\n");
+    for fragment in &fragments {
+        assert_eq!(fragment.style, PAGE_STYLE);
+        joined.push_str(&fragment.body);
+    }
+    joined.push_str("</body></html>\n");
+    assert_eq!(html, joined);
 }
 
 #[test]

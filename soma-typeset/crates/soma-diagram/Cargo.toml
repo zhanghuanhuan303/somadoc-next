@@ -1,0 +1,14 @@
+[package]
+name = "soma-diagram"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Deterministic vector diagrams: Mermaid/Graphviz source to TikZ paths (ADR-0102)"
+
+[dependencies]
+soma-core = { path = "../soma-core" }
+soma-doc = { path = "../soma-doc" }
+soma-math = { path = "../soma-math" }
+soma-tikz = { path = "../soma-tikz" }

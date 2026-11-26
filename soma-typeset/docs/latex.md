@@ -1,6 +1,6 @@
 # LaTeX 前端（`soma-latex`）
 
-状态：**v1 已落地**（输出 `soma.doc/2`）。代码是权威；本文说明支持的子集与限制。
+状态：**v1 已落地**（输出 `soma.doc/3`）。代码是权威；本文说明支持的子集与限制。
 
 参考：ADR-0004（语法前端）、ADR-0009（语义/呈现边界）、ADR-0025（本前端）。
 
@@ -16,7 +16,7 @@ let document = parse_latex(r"\section{标题}
 ```
 
 - 零依赖、`no_std + alloc`、`forbid(unsafe_code)`。
-- 只产出 DocIR；不解析宏、不执行 `\usepackage`、不做真实公式排版。
+- 只产出 DocIR；`\newcommand` 等宏在解析前展开（ADR-0067），不执行 `\usepackage`，不做真实公式排版。
 - `%` 注释会被去掉；`\%` 保留。
 - 正文从 `\begin{document}` 之后开始；没有该标记时解析全文。
 - 未闭合的 `{`/环境保留剩余文本，不 panic。
@@ -45,6 +45,7 @@ let document = parse_latex(r"\section{标题}
 | `tabular`（`\\` 分行、`&` 分列、`\hline`/`\toprule`/`\midrule`/`\bottomrule`、`\multicolumn`） | `Table` |
 | `table` / `table*`（内部 `\caption{...}`） | `Table.caption` |
 | `figure` / `figure*`（`\includegraphics[opts]{path}` + `\caption{...}`） | `Figure`（`ImageRef`，无 intrinsic 时按 3:2 占位）；无路径时丢弃 |
+| `tikzpicture` 环境 | `MathBlock` 保留环境源码；布局交给 `soma-tikz` 解析核心 PGF 绘图语言（ADR-0092，子集见 `docs/tikz.md`），失败时回退为源码文本 |
 | `\newpage` / `\clearpage` | `PageBreak` |
 | `\title` / `\author`（`\and` 分隔）/ `\date`（`YYYY-MM-DD`） | `DocumentMeta` |
 
@@ -68,7 +69,7 @@ let document = parse_latex(r"\section{标题}
 
 ## 5. 限制（见 `docs/debt.md` D70）
 
-- 无宏、计数器、交叉引用、参考文献。`\includegraphics` 只得到路径，不读取图片尺寸。
+- 宏只在本文档内定义：`\newcommand`/`\renewcommand`/`\providecommand`/`\def`（0–9 个参数），计数器 `\newcounter`/`\setcounter`/`\stepcounter` 与 `\arabic`/`\roman`/`\Roman`/`\alph`/`\Alph`/`\value`/`\the<名称>`。不做 `\newcommand*`、可选参数、`\let`、环境定义、交叉引用与参考文献。`\includegraphics` 只得到路径，不读取图片尺寸。
 - 行间公式的源码原样进入 `MathBlock.source`，随后由 `soma-math` 排成数学盒（ADR-0026）；
   行内公式同样交给 `soma-math`，作为对象 atom 参与断行（ADR-0027）。
 - 无 `\item[label]`、无 `description` 环境、无 `\multicolumn` 以外的列格式。
@@ -83,7 +84,9 @@ let document = parse_latex(r"\section{标题}
 - 行内与行间公式；
 - 列表、引用、verbatim；
 - tabular 的表头与网格，并通过 `validate`；
-- 元数据（标题/作者/日期）；
+- 元数据（标题/作者/日期）；导言区的 `\subtitle{...}` 进封面，`\language{...}`
+  进元数据并写入 PDF `/Lang`，`\colophon{...}` 进封面字段；`\\` 在 colophon
+  内表示换行。
 - 未知命令保留参数；
 - 畸形输入不 panic；
 - canonical 确定性；

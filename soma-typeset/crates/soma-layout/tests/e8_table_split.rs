@@ -105,7 +105,10 @@ fn a_long_table_splits_across_pages_without_losing_rows() {
             "page {} repeats the header once",
             page.number
         );
-        assert_eq!(headers[0].y.0, 0, "the header sits at the top of the page");
+        assert_eq!(
+            headers[0].y.0, 0,
+            "without rules the repeated header starts at the page top"
+        );
         let first_body = cells
             .iter()
             .find(|block| block_text(&layout, block) != "表头")

@@ -43,6 +43,7 @@ fn collect(inlines: &[Inline], out: &mut String) {
             | Inline::Subscript(children) => collect(&children.children, out),
             Inline::Link(link) => collect(&link.children, out),
             Inline::Math(math) => out.push_str(&math.source),
+            Inline::Ruby(node) => out.push_str(&node.base),
             Inline::LineBreak(_) => out.push(' '),
             _ => {}
         }
@@ -236,6 +237,28 @@ fn unknown_commands_keep_their_braced_content() {
 }
 
 #[test]
+fn an_item_that_opens_with_an_inline_command_stays_one_paragraph() {
+    // `\textbf{...}` at the start of a block is an inline run, not an unknown
+    // block command: it must not split the item into two paragraphs.
+    let source = r"\begin{itemize}
+\item \textbf{甲}：正文
+\end{itemize}";
+    let document = parse_latex(source);
+    let Block::List(list) = &document.blocks[0] else {
+        panic!("list");
+    };
+    assert_eq!(list.items.len(), 1);
+    assert_eq!(list.items[0].blocks.len(), 1, "one paragraph per item");
+    let Block::Paragraph(paragraph) = &list.items[0].blocks[0] else {
+        panic!("paragraph");
+    };
+    assert!(
+        paragraph.inlines.len() >= 2,
+        "the bold run and the text that follows it"
+    );
+}
+
+#[test]
 fn malformed_latex_is_recovered_without_panicking() {
     let source = r"\section{未闭合
 正文 \textbf{粗体
@@ -254,7 +277,7 @@ fn parsing_is_deterministic() {
     let first = parse_latex(source).canonical_json();
     let second = parse_latex(source).canonical_json();
     assert_eq!(first, second);
-    assert!(first.starts_with("{\"schema\":\"soma.doc/2\""));
+    assert!(first.starts_with("{\"schema\":\"soma.doc/3\""));
 }
 
 #[test]
@@ -319,6 +342,35 @@ fn a_subtitle_reaches_the_cover_data() {
 }
 
 #[test]
+fn a_colophon_keeps_its_line_breaks() {
+    let source = r#"\colophon{甲乙\\丙丁}
+\begin{document}
+正文。
+\end{document}
+"#;
+    let doc = parse_latex(source);
+    let cover = doc.meta.cover.as_ref().expect("cover data");
+    let colophon = cover
+        .fields
+        .iter()
+        .find(|field| field.key == "colophon")
+        .expect("colophon field");
+    assert_eq!(colophon.value, "甲乙\n丙丁");
+}
+
+#[test]
+fn a_language_tag_reaches_the_metadata() {
+    let source = r#"\language{zh-Hans}
+\title{书}
+\begin{document}
+正文。
+\end{document}
+"#;
+    let doc = parse_latex(source);
+    assert_eq!(doc.meta.language.as_deref(), Some("zh-Hans"));
+}
+
+#[test]
 fn index_commands_become_markers() {
     let document = parse_latex("正文\\index{排版}后文");
     let Block::Paragraph(paragraph) = &document.blocks[0] else {
@@ -340,4 +392,27 @@ fn an_empty_index_command_is_dropped() {
     let document = parse_latex("正文\\index{}后文");
     assert_eq!(paragraph_text(&document.blocks[0]), "正文后文");
     document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn a_ruby_command_carries_base_and_reading() {
+    let document = parse_latex("正文\\ruby{汉字}{hànzì}后文");
+    let Block::Paragraph(paragraph) = &document.blocks[0] else {
+        panic!("paragraph")
+    };
+    assert!(
+        paragraph.inlines.iter().any(|inline| matches!(
+            inline,
+            Inline::Ruby(node) if node.base == "汉字" && node.annotation == "hànzì"
+        )),
+        "the annotation is in the inline sequence"
+    );
+    assert_eq!(paragraph_text(&document.blocks[0]), "正文汉字后文");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn mermaid_environment_becomes_a_diagram() {
+    let document = parse_latex("\\begin{mermaid}\nflowchart TD\n  A --> B\n\\end{mermaid}\n");
+    assert!(matches!(document.blocks[0], Block::Diagram(_)));
 }

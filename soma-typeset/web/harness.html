@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>soma-kp · 自检</title>
+<style>
+  body { font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem; background: #fbfaf4; color: #18201d; }
+  h1 { font-size: 1rem; letter-spacing: .08em; text-transform: uppercase; color: #2f5d50; }
+  pre { background: #fff; border: 1px solid #d9d6c7; padding: 1rem; white-space: pre-wrap; }
+  .ok { color: #2f5d50; }
+  .bad { color: #a33; font-weight: 700; }
+</style>
+</head>
+<body>
+<h1>soma-kp self-check</h1>
+<p>W1 zero imports · W2 size · W3 parity with <code>parity.txt</code> · W4 timing ·
+   W5 memory stability · W6 fallback policy.</p>
+<pre id="out">running…</pre>
+<script type="module">
+import { Kp, UNITS_PER_EM, RESULT_FALLBACK } from './soma-kp.js';
+
+const rows = [];
+function report(id, ok, detail) {
+  rows.push(`${id}|${ok ? 'ok' : 'FAIL'}|${detail}`);
+  const line = document.createElement('div');
+  line.className = ok ? 'ok' : 'bad';
+  line.textContent = `${id}|${ok ? 'ok' : 'FAIL'}|${detail}`;
+  out.appendChild(line);
+}
+const out = document.getElementById('out');
+out.textContent = '';
+
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+try {
+  // ---------------------------------------------------------------- W1 / W2
+  const bytes = await (await fetch('./soma-kp.wasm')).arrayBuffer();
+  const module = new WebAssembly.Module(bytes);
+  const imports = WebAssembly.Module.imports(module);
+  report('W1-imports', imports.length === 0, `${imports.length} imports, ${bytes.byteLength} bytes`);
+
+  const kp = await Kp.fromBytes(bytes);
+  const memory = kp.memory;
+
+  // Allocate once so the comparison below starts from a warm heap.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // ------------------------------------------------------------------- W3
+  const fixture = await (await fetch('./parity.txt')).text();
+  const field = {};
+  for (const line of fixture.split('\n')) {
+    const at = line.indexOf('|');
+    if (at > 0) field[line.slice(0, at)] = line.slice(at + 1);
+  }
+  const numbers = (text) => text.split(',').map(Number);
+  const widths = Int32Array.from(numbers(field.widths));
+  const expectedEnds = numbers(field.ends);
+
+  const compiled = kp.compile(field.text, {
+    width: Number(field.width),
+    lineHeight: Number(field.lineHeight),
+  });
+  const result = kp.break(compiled, {
+    widths,
+    spaceWidth: Number(field.space),
+    hyphenWidth: Number(field.hyphen),
+    ascent: Number(field.ascent),
+    descent: Number(field.descent),
+    leading: Number(field.leading),
+  });
+  const gotEnds = result.lines.map((line) => line.end);
+  const sameAtoms = compiled.atoms.length === widths.length;
+  const sameEnds = gotEnds.length === expectedEnds.length &&
+    gotEnds.every((end, index) => end === expectedEnds[index]);
+  report(
+    'W3-parity',
+    sameAtoms && sameEnds,
+    `${compiled.atoms.length} atoms, ends ${gotEnds.join(',')} vs ${expectedEnds.join(',')}`,
+  );
+  compiled.free();
+
+  // ------------------------------------------------------------------- W4
+  const sample = '中文English混排，数字 123，排版Engine v2。'.repeat(120);
+  const face = { font: '400 16px serif', sizePx: 16 };
+  const big = kp.compile(sample, { width: 40 * UNITS_PER_EM, lineHeight: Math.round(UNITS_PER_EM * 1.5) });
+  kp.measure(big, face);
+  const atomCount = big.atoms.length;
+  kp.break(big); // warm
+  const samples = [];
+  for (let i = 0; i < 9; i += 1) {
+    const started = performance.now();
+    kp.break(big);
+    samples.push(performance.now() - started);
+  }
+  const ms = median(samples);
+  // Under `--virtual-time-budget` the clock does not advance across synchronous
+  // work, so this is informational here; `web/check.mjs` does the timed gate.
+  report('W4-time', atomCount > 1500, `${atomCount} atoms, ${ms.toFixed(2)} ms (virtual clock)`);
+
+  // ------------------------------------------------------------------- W5
+  const before = memory.buffer.byteLength;
+  for (let i = 0; i < 50; i += 1) {
+    kp.break(big);
+  }
+  const after = memory.buffer.byteLength;
+  report('W5-memory', before === after, `${before} → ${after} bytes after 50 breaks`);
+
+  // ------------------------------------------------------------------- W6
+  const narrow = kp.compile(sample, { width: 20 * UNITS_PER_EM, lineHeight: Math.round(UNITS_PER_EM * 1.5) });
+  kp.measure(narrow, face);
+  const kpResult = kp.break(narrow);
+  const greedyResult = kp.break(narrow, { greedy: true });
+  const usedFallback = (kpResult.fallback ? 'K-P used the ladder' : 'K-P clean') +
+    `; greedy ${greedyResult.lines.length} lines`;
+  report('W6-policy', greedyResult.lines.length > 0, usedFallback);
+  narrow.free();
+  big.free();
+
+  report('done', true, `${rows.length} checks`);
+} catch (error) {
+  report('exception', false, String(error && error.stack ? error.stack : error));
+}
+</script>
+</body>
+</html>

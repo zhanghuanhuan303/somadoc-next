@@ -7,3 +7,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+
+[dev-dependencies]
+soma-core = { path = "../soma-core" }
+soma-rules = { path = "../soma-rules" }

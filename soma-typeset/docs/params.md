@@ -273,7 +273,8 @@ pub struct ParamError {
 | `badness_exponent` | 1..=5 |
 | 所有权重 | 0..=1_000_000_000 |
 | `emergency_stretch` | 0..=10em |
-| `short_last_threshold` / `height_threshold` | 0..=5em |
+| `short_last_threshold` | 0..=8em |
+| `height_threshold` | 0..=5em |
 | `first_indent` | 0..=10em |
 | `line_height_min` | 0.5em..=5em |
 | `cjk_gap.*` / `cjk_latin_gap.*` | 0..=1000 permille |
@@ -300,7 +301,7 @@ pub struct ParamError {
 
 - `emergency_tolerance >= tolerance`；否则 fallback 比正常还紧。
 - `max_kp_atoms = Some(k)` 时 `k > 0`；`n > k` 走 Greedy-C，结果必须标 `breaker_used = GreedyC` / `length_limited = true`（K6 已实现）。
-- `short_last_threshold == 0` 表示关闭短末行项；否则必须 `> 0`。
+- `short_last_threshold == 0` 表示关闭短行项（末行与孤字行）；否则必须 `> 0`。
 - `height_scale == 0` 时忽略 `height_threshold`；`height_scale > 0` 时阈值必须 `> 0` 或 `None`（取正文行高）。
 - `features.edge_trim == false` 时忽略 `trim_priority` 和所有 trim 成本。
 - `features.boundary_deviation == false` 时 `costs.boundary_deviation` 必须为 0 或不生效。
@@ -328,9 +329,9 @@ pub struct ParamError {
 
 ```json
 {
-  "modelVersion": 1,
+  "modelVersion": 4,
   "preset": "default-v1",
-  "rulesVersion": 3,
+  "rulesVersion": 2,
   "metricsVersion": 2,
   "paramHash": "9f2c..."
 }
@@ -348,7 +349,10 @@ pub struct ParamError {
 Preset 是数据，不是算法分支：
 
 - `default-v1`：冻结的 K-P 参考（`tolerance = 3000`）。
-- `publish-v1`：**引擎默认**（ADR-0023）：`default-v1` + `tolerance = 1500`，其余权重与回退完全相同；母语出版优先。
+- `publish-v1`：**`soma.engine/1` 的默认 preset**（ADR-0023）：`default-v1` + `tolerance = 1500`，其余权重与回退完全相同；母语出版优先。
+- `book-v1`：`publish-v1` + `short_last_threshold = 3em`（ADR-0106）。中文书籍里两字末行按孤尾计费；自 ADR-0112 起段中孤字行也按同一项计费。样书 `examples/book/book.engine` 使用它。
+- `proposal-v1`：`book-v1` + `short_last_threshold = 8em`、`short_last_scale = 2_000_000`（ADR-0115）。提案的末行 5–8 个字也按孤尾计费，代价是 `book-v1` 的两倍；Studio 的内置默认（`examples/templates/proposal.engine`）使用它。
+- `latex-v1`：LaTeX article 的断行口径（ADR-0069，**CLI 内置默认**）：`default-v1` + `tolerance = 1260`（`\tolerance=200` 换算）+ `short_last_scale = 0`（短行项关闭：末行与孤字行都不罚）；其余权重与回退不变。
 - ~~更保守的 emergency~~：实测没有必要，回退阶梯保持 `default-v1`。
 - `mobile-v1`：更低 `max_lines`、更少 feature（延迟优先）。
 - `debug`：启用 trace、保留所有候选统计（不用于发布）。
@@ -472,12 +476,12 @@ pub struct EvalParams {
 | `emergency_tolerance` | 10000 | 0..=10000 | 工程 | fallback 最大 ratio |
 | `max_lines` | none | 1..=10000 | 工程 | 调用方保护 |
 | `max_kp_atoms` | none | `None` 或 1..=10000 | 工程 | 超过后改用 Greedy-C；K6 实测 4,000 atoms 已在 native 预算内，默认保留 `None` |
-| `trim_priority` | EndFirst | enum | 规则 | 行尾先裁；行尾标点的侧空在两端对齐行上恒裁（ADR-0036），行首侧空只在行超宽时裁 |
+| `trim_priority` | EndFirst | enum | 规则 | 行尾先裁；行尾标点的侧空在两端对齐行上恒裁（ADR-0036），行首开标点在两端对齐与左对齐行上贴墨裁（ADR-0082/0105），其余行首侧空只在行超宽时裁 |
 | `tie_break` | CostLineStart | enum | 固定 | 代价→行数→起点更小 |
 | `features.edge_trim` | true | bool | 规则 | K4 启用 |
 | `features.boundary_deviation` | true | bool | 规则 | K2 启用 |
 | `features.height_cost` | false | bool | 实验 | K3 默认关闭 |
-| `features.fitness` | false | bool | 实验 | K7 才启用 |
+| `features.fitness` | false | bool | 实验 | K7 才启用；`rhythm-v1` 打开（ADR-0064） |
 | `features.forced_breaks` | true | bool | 规则 | K5 启用 |
 | `fallback.allow_emergency` | true | bool | 固定 | fallback 开关 |
 | `fallback.allow_forbidden` | true | bool | 固定 | 最后一搏允许 Forbidden 断点；结果标 `ForbiddenRescue` |
@@ -495,17 +499,20 @@ pub struct EvalParams {
 | `compress_amount` | 20 | 0..=1e9 | 是 | 每 1 em trim；0.25em = 5 |
 
 > `publish-v1` 只改 `tolerance`（1500）；`badness_scale=100`、权重、fallback 与
-> 短末行阈值都与 `default-v1` 相同，便于对照。`rules_version = 1` 对应
-> 开标点行首 trim 从 1/4 em 改为 1/2 em（ADR-0023）。
+> 短行阈值都与 `default-v1` 相同，便于对照。`book-v1`（ADR-0106）在
+> `publish-v1` 上只把 `short_last_threshold` 提到 3em，用于中文书籍样张；
+> 自 ADR-0112 起同一个短行项也计非末行的孤字行。
+> `rules_version = 2` 对应 ADR-0111/0112（代码
+> 分段、分隔符 penalty 与短行口径）；初值是 ADR-0023 的开标点 trim。
 | `compress_count` | 5 | 0..=1e9 | 是 | 每次裁剪；0.25em 事件合计约 10 |
 | `boundary_deviation` | 50 | 0..=1e9 | 是 | 每 1 个 ideal gap 的平均偏差；满 gap = 5 行 |
-| `short_last_scale` | 1_000_000 | 0..=1e9 | 是 | 短末行；0 宽末行的 cost |
-| `short_last_threshold` | 2em | 0..=5em | 是 | 低于此值计费 |
+| `short_last_scale` | 1_000_000 | 0..=1e9 | 是 | 短行（末行与孤字行）；0 宽行的 cost |
+| `short_last_threshold` | 2em | 0..=8em | 是 | 低于此值计费 |
 | `height_scale` | 0 | 0..=1e9 | 实验 | 行高代价；默认关闭 |
 | `height_threshold` | none → body height | `None` 或 0..=5em | 实验 | 超出部分计费 |
 | `emergency` | 10_000_000 | 0..=1e9 | 固定 | 每行 emergency |
 | `forbidden` | 100_000_000 | 0..=1e9 | 固定 | rescue 禁断 |
-| `fitness` | 0 | 0..=1e9 | 实验 | K7 才启用 |
+| `fitness` | 0 | 0..=1e9 | 实验 | 每跨一个松紧等级记一次；`rhythm-v1` 为 10（ADR-0064） |
 
 > 这些数字只是起点。真正标定后写入新的 preset；不要把它们散落在代码里。
 >
@@ -521,7 +528,7 @@ pub struct EvalParams {
 | `compress_amount` | cost / em-trimmed | `c / EM` | 每 1 em trim |
 | `compress_count` | cost / trim-event | `[c > 0]` | 每次发生 trim |
 | `boundary_deviation` | cost / ideal-gap-deviation | `D / ideal_gap` | 每 1 个 ideal gap 的平均偏差 |
-| `short_last_scale` | cost / short-score-unit | `short / threshold` | 0 宽末行的 cost |
+| `short_last_scale` | cost / short-score-unit | `short / threshold` | 0 宽短行的 cost（末行或孤字行） |
 | `height_scale` | cost / body-height-excess | `excess / body_height` | 每超出 1 个正文行高 |
 | `emergency` / `forbidden` | cost / event | 1 | 每行/每次 rescue |
 
@@ -548,7 +555,7 @@ pub struct EvalParams {
 
 > 规则比例属于 `RuleSet`，有来源和版本；不要从 `CostParams` 里改。
 > 这些比例都是 **base em**。如果业务希望按字号缩放（例如大字号标点的 trim 更大），规则层用 `font_scale` 乘一下再写入 IR；breaker 只看最终宽度。
-> **K4 状态：** `soma-rules` 已把 `open_trim_left` / `close_trim_right` / `middle_trim_left` / `middle_trim_right` 写进 `Atom.compress_*`。行尾收尾标点的右侧侧空在**两端对齐行上恒裁**，与宽窄无关（ADR-0036）；行首侧空只在行超宽时裁。半角标点的侧空为 `125‰`（`LATIN_TRIM`，代码常量，不在 Tier B 表内）。这两组数值是**回退值**：`soma.metrics/2` 表若带标点轮廓（`ink_right`），`scale_trim` 用真实墨迹覆盖它们（ADR-0037）。`pair_trim_table` 尚未作为表实现（`PAIR_TRIM` 是代码常量，只在 `Join::Normal` 生效）。数值仍为 `ParamOnly`（未标定），不参与 Gate Q 的硬断言。
+> **K4 状态：** `soma-rules` 已把 `open_trim_left` / `close_trim_right` / `middle_trim_left` / `middle_trim_right` 写进 `Atom.compress_*`。行尾收尾标点的右侧侧空在**两端对齐行上恒裁**，与宽窄无关（ADR-0036）；行首开标点在两端对齐与左对齐/ragged 行上都贴墨裁（ADR-0082/0105），其余行首侧空只在行超宽时裁。半角标点的侧空为 `125‰`（`LATIN_TRIM`，代码常量，不在 Tier B 表内）。这两组数值是**回退值**：`soma.metrics/2` 表若带标点轮廓（`ink_right`），`scale_trim` 用真实墨迹覆盖它们（ADR-0037）。`pair_trim_table` 尚未作为表实现（`PAIR_TRIM` 是代码常量，只在 `Join::Normal` 生效）。数值仍为 `ParamOnly`（未标定），不参与 Gate Q 的硬断言。
 > **K6 状态：** `soma_rules::RULES` 提供 `id / status / source` 盘点表；`RuleStatus` 为 `Verified | Tbd | ParamOnly`。当前盘点为 **8 `Verified` / 0 `Tbd` / 6 `ParamOnly`**：标点硬规则已引用 GB/T 15834-2011 via W3C clreq §6.1.1（basic）并升为 `Verified`；trim/gap 比例仍为 `ParamOnly`，Gate Q 不得把比例数值当作已核实来源。
 > **每条规则带 `rule_id` / `source` / `status: Verified | Tbd | ParamOnly`。** `Tbd` 只能产生 `Allowed` + penalty/trim，不能产生 `Forbidden`/`Forced`；`ParamOnly` 只提供参数，不产生断点规则。K0 交付 `ruleId × source × status × golden` 盘点表；Gate Q 只对 `Verified` 断言。
 

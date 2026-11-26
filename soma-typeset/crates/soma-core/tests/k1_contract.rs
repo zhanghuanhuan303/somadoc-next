@@ -33,7 +33,7 @@ fn default_v1_matches_the_frozen_table() {
     let params = ParamSet::default_v1();
 
     assert_eq!(params.preset.0, "default-v1");
-    assert_eq!(params.model_version, 1);
+    assert_eq!(params.model_version, 4);
     assert_eq!(params.break_params.tolerance, Permille(3000));
     assert_eq!(params.break_params.emergency_tolerance, Permille(10_000));
     assert_eq!(params.break_params.max_lines, None);
@@ -58,6 +58,30 @@ fn default_v1_matches_the_frozen_table() {
             height_cost: false,
             fitness: false,
             forced_breaks: true,
+        }
+    );
+}
+
+#[test]
+fn book_v1_only_raises_the_short_last_threshold() {
+    let publish = ParamSet::publish_v1();
+    let book = ParamSet::book_v1();
+
+    assert_eq!(book.break_params.tolerance, publish.break_params.tolerance);
+    assert_eq!(
+        book.break_params.costs.short_last_threshold,
+        Width::from_em(3)
+    );
+    assert_eq!(
+        book.break_params.costs.short_last_scale,
+        publish.break_params.costs.short_last_scale
+    );
+    assert_eq!(book.preset.0, "book-v1");
+    assert_eq!(
+        book.break_params.costs,
+        CostParams {
+            short_last_threshold: Width::from_em(3),
+            ..publish.break_params.costs
         }
     );
 }
@@ -123,10 +147,6 @@ fn override_changes_only_the_expected_field() {
     assert_eq!(tuned.metrics_version, base.metrics_version);
     assert_eq!(tuned.break_params.costs, base.break_params.costs);
     assert_eq!(tuned.break_params.fallback, base.break_params.fallback);
-    assert_eq!(
-        tuned.break_params.emergency_stretch,
-        base.break_params.emergency_stretch
-    );
     assert_eq!(
         tuned.break_params.emergency_tolerance,
         base.break_params.emergency_tolerance

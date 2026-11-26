@@ -2,7 +2,7 @@
 
 # 提案：中文优先排版核心的 Phase 1 落地方案
 
-**对应 PRD：** [`prd.md`](prd.md)（终稿，2026-11-19）
+**对应 PRD：** 项目简报（未随仓库分发）
 **参考实现：** [`somadoc-engine`](somadoc-engine/README.md)（v0.1.0 + wasm 支持，commit `32424f1`）
 **结论：** 把 `somadoc-engine` 定位为「前期研究 + 产品线」，新开一个干净的排版核心仓库/工作区来实现 PRD。不要试图在现有 Typst 管线里替换断行器：那里没有可注入的缝（seam）。
 

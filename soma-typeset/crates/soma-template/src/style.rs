@@ -25,7 +25,54 @@ use alloc::vec::Vec;
 use soma_core::{Align, StyleId, Width};
 use soma_doc::{Block, Document, Inline, NodeId};
 
-use crate::template::{FontSlant, FontWeight, Property, PropertyValue, StyleRule, Template};
+/// Which family a `font-family` value asks for.
+///
+/// Three roles, not two: code needs a monospaced face, and folding it into
+/// sans (the pre-ADR-0089 behaviour) makes every proportional face look wrong
+/// in a code block. `serif` is the default so a template that says nothing
+/// keeps its historical body face.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FamilyRole {
+    #[default]
+    Serif,
+    Sans,
+    Mono,
+}
+
+pub fn family_role(family: Option<&str>) -> FamilyRole {
+    let family = family.unwrap_or("");
+    let has = |needle: &str| contains_ignore_ascii_case(family, needle);
+    if ["mono", "monospace", "code", "typewriter"]
+        .iter()
+        .any(|needle| has(needle))
+    {
+        FamilyRole::Mono
+    } else if ["sans", "hei", "gothic"].iter().any(|needle| has(needle)) {
+        FamilyRole::Sans
+    } else {
+        FamilyRole::Serif
+    }
+}
+
+/// Compatibility predicate for the two-family era. `mono` is no longer sans.
+pub fn family_is_sans(family: Option<&str>) -> bool {
+    family_role(family) == FamilyRole::Sans
+}
+
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    let haystack = haystack.as_bytes();
+    let needle = needle.as_bytes();
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    haystack
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle))
+}
+
+use crate::template::{
+    FontSlant, FontWeight, Property, PropertyValue, StyleRule, SyntaxPalette, Template,
+};
 use crate::units::Rational;
 use crate::TemplateError;
 
@@ -36,8 +83,17 @@ pub struct ComputedStyle {
     /// Absolute leading, resolved from the multiplier or fixed length.
     pub line_height: Width,
     pub first_indent: Width,
+    /// Extra advance after every atom but the last (tracking).
+    pub tracking: Width,
     pub indent_left: Width,
     pub indent_right: Width,
+    /// Panel paint behind a block. `None` draws nothing.
+    pub background: Option<u32>,
+    /// Panel inset between the block edge and its content.
+    pub padding_top: Width,
+    pub padding_right: Width,
+    pub padding_bottom: Width,
+    pub padding_left: Width,
     pub space_before: Width,
     pub space_after: Width,
     /// Stretchable part of the space before a block (vertical glue).
@@ -74,8 +130,14 @@ impl ComputedStyle {
             font_size: Width::EM,
             line_height: Width::from_em_frac(6, 5),
             first_indent: Width::ZERO,
+            tracking: Width::ZERO,
             indent_left: Width::ZERO,
             indent_right: Width::ZERO,
+            background: None,
+            padding_top: Width::ZERO,
+            padding_right: Width::ZERO,
+            padding_bottom: Width::ZERO,
+            padding_left: Width::ZERO,
             space_before: Width::ZERO,
             space_after: Width::ZERO,
             space_before_plus: Width::ZERO,
@@ -108,6 +170,7 @@ impl ComputedStyle {
             color: parent.color,
             weight: parent.weight,
             slant: parent.slant,
+            tracking: parent.tracking,
             small_caps: parent.small_caps,
             widow_lines: parent.widow_lines,
             orphan_lines: parent.orphan_lines,
@@ -123,11 +186,25 @@ impl ComputedStyle {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StyleTable {
     styles: Vec<ComputedStyle>,
+    syntax: SyntaxPalette,
 }
 
 impl StyleTable {
     pub fn styles(&self) -> &[ComputedStyle] {
         &self.styles
+    }
+
+    /// Colors for highlighted code, if the template declared any.
+    pub fn syntax(&self) -> SyntaxPalette {
+        self.syntax
+    }
+
+    pub fn syntax_color(&self, class: soma_core::SyntaxClass) -> Option<u32> {
+        self.syntax.color(class)
+    }
+
+    pub(crate) fn set_syntax(&mut self, syntax: SyntaxPalette) {
+        self.syntax = syntax;
     }
 
     pub fn get(&self, id: StyleId) -> Option<&ComputedStyle> {
@@ -225,6 +302,8 @@ pub struct CoverStyles {
     pub subtitle: StyleId,
     pub author: StyleId,
     pub date: StyleId,
+    pub colophon: StyleId,
+    pub colophon_rule: StyleId,
 }
 
 /// The resolved style layer for one document.
@@ -236,6 +315,8 @@ pub struct StyledDoc {
     page: ResolvedPage,
     footnote: crate::template::FootnoteNumbering,
     table_rules: TableRules,
+    table_width: crate::template::TableWidth,
+    figure: crate::template::FigureSpec,
     masters: Vec<ResolvedMaster>,
     header_text: Option<String>,
     folio: Option<String>,
@@ -253,6 +334,15 @@ pub struct StyledDoc {
     toc_style: StyleId,
     /// Style for the TOC heading (`element: tocTitle`).
     toc_title_style: StyleId,
+    /// Contents rows by level and the figure/table list heading.
+    toc_chapter_style: StyleId,
+    toc_section_style: StyleId,
+    toc_list_title_style: StyleId,
+    /// Running head and folio styles.
+    running_head_style: StyleId,
+    folio_style: StyleId,
+    /// Chapter flow chosen by the template.
+    layout_mode: crate::template::LayoutMode,
     /// Style for generated figure captions (`element: figureCaption`).
     figure_caption_style: StyleId,
     /// Style for generated table captions (`element: tableCaption`).
@@ -303,6 +393,16 @@ impl StyledDoc {
         self.table_rules
     }
 
+    /// Horizontal sizing chosen by the template's `table: width:`.
+    pub fn table_width(&self) -> crate::template::TableWidth {
+        self.table_width
+    }
+
+    /// Sizing and placement chosen by the template's `figure:` section.
+    pub fn figure(&self) -> crate::template::FigureSpec {
+        self.figure
+    }
+
     /// Master 0 is the default `page:` geometry, then `masters:` in order.
     pub fn masters(&self) -> &[ResolvedMaster] {
         &self.masters
@@ -341,6 +441,35 @@ impl StyledDoc {
     /// Style of the TOC heading.
     pub fn toc_title_style(&self) -> StyleId {
         self.toc_title_style
+    }
+
+    /// Style of a contents row at `level`.
+    pub fn toc_entry_style(&self, level: u8) -> StyleId {
+        if level <= 1 {
+            self.toc_chapter_style
+        } else {
+            self.toc_section_style
+        }
+    }
+
+    /// Style of the `figures`/`tables` list heading.
+    pub fn toc_list_title_style(&self) -> StyleId {
+        self.toc_list_title_style
+    }
+
+    /// Style of the running head (`element: runningHead`).
+    pub fn running_head_style(&self) -> StyleId {
+        self.running_head_style
+    }
+
+    /// Style of the folio (`element: folio`).
+    pub fn folio_style(&self) -> StyleId {
+        self.folio_style
+    }
+
+    /// Chapter flow chosen by the template.
+    pub fn layout_mode(&self) -> crate::template::LayoutMode {
+        self.layout_mode
     }
 
     /// Style of generated figure captions.
@@ -424,6 +553,23 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         ));
     }
 
+    // A typed percentage is accepted by the parser, but the template/layout
+    // contract only defines a base for page margins and `line-height`. Reject
+    // every other percentage up front, including rules no node matches, so it
+    // can never fall through as an em length.
+    for rule in &template.styles {
+        for declaration in &rule.declarations {
+            if matches!(declaration.value, PropertyValue::Percent(_)) {
+                return Err(TemplateError::new(
+                    declaration.line,
+                    declaration.column,
+                    "styles",
+                    "percentage is not supported for this property",
+                ));
+            }
+        }
+    }
+
     let mut resolver = Resolver {
         rules: &template.styles,
         body_pt,
@@ -458,13 +604,26 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
     resolver.node_style.sort_by_key(|(node, _)| *node);
 
     let (width, height) = template.page.size.dimensions();
+    let page_width = width.resolve(root.font_size, body_pt);
     let page = ResolvedPage {
-        width: width.resolve(root.font_size, body_pt),
+        width: page_width,
         height: height.resolve(root.font_size, body_pt),
-        margin_top: template.page.margin_top.resolve(root.font_size, body_pt),
-        margin_bottom: template.page.margin_bottom.resolve(root.font_size, body_pt),
-        margin_left: template.page.margin_left.resolve(root.font_size, body_pt),
-        margin_right: template.page.margin_right.resolve(root.font_size, body_pt),
+        margin_top: template
+            .page
+            .margin_top
+            .resolve(page_width, root.font_size, body_pt),
+        margin_bottom: template
+            .page
+            .margin_bottom
+            .resolve(page_width, root.font_size, body_pt),
+        margin_left: template
+            .page
+            .margin_left
+            .resolve(page_width, root.font_size, body_pt),
+        margin_right: template
+            .page
+            .margin_right
+            .resolve(page_width, root.font_size, body_pt),
         header_height: template.page.header.resolve(root.font_size, body_pt),
         footer_height: template.page.footer.resolve(root.font_size, body_pt),
     };
@@ -532,12 +691,14 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         ComputedStyle::inherited_from(&root),
         &[],
     )?;
-    let toc_style_id = resolver.table.intern(toc_style);
+    let toc_style_id = resolver.table.intern(toc_style.clone());
     let cover_styles = CoverStyles {
         title: intern_element(&mut resolver, "coverTitle", &root)?,
         subtitle: intern_element(&mut resolver, "coverSubtitle", &root)?,
         author: intern_element(&mut resolver, "coverAuthor", &root)?,
         date: intern_element(&mut resolver, "coverDate", &root)?,
+        colophon: intern_element(&mut resolver, "coverColophon", &root)?,
+        colophon_rule: intern_element(&mut resolver, "coverColophonRule", &root)?,
     };
     let toc_title_style = resolver.compute(
         "tocTitle",
@@ -547,7 +708,13 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         ComputedStyle::inherited_from(&root),
         &[],
     )?;
-    let toc_title_style_id = resolver.table.intern(toc_title_style);
+    let toc_title_style_id = resolver.table.intern(toc_title_style.clone());
+    let toc_chapter_style = intern_element_from(&mut resolver, "tocChapter", &toc_style)?;
+    let toc_section_style = intern_element_from(&mut resolver, "tocSection", &toc_style)?;
+    let toc_list_title_style =
+        intern_element_from(&mut resolver, "tocListTitle", &toc_title_style)?;
+    let running_head_style = intern_element(&mut resolver, "runningHead", &root)?;
+    let folio_style = intern_element(&mut resolver, "folio", &root)?;
     let figure_caption_style = intern_element(&mut resolver, "figureCaption", &root)?;
     let table_caption_style = intern_element(&mut resolver, "tableCaption", &root)?;
     let index_style = intern_element(&mut resolver, "indexEntry", &root)?;
@@ -577,6 +744,8 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         },
     };
 
+    resolver.table.set_syntax(template.syntax);
+
     Ok(StyledDoc {
         node_style: resolver.node_style,
         table: resolver.table,
@@ -589,6 +758,12 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
         front_matter: template.page.front_matter,
         toc_style: toc_style_id,
         toc_title_style: toc_title_style_id,
+        toc_chapter_style,
+        toc_section_style,
+        toc_list_title_style,
+        running_head_style,
+        folio_style,
+        layout_mode: template.layout,
         figure_caption_style,
         table_caption_style,
         index_style,
@@ -606,6 +781,8 @@ pub fn resolve(doc: &Document, template: &Template) -> Result<StyledDoc, Templat
             style: template.table.style,
             style_id: rule_style,
         },
+        table_width: template.table.width,
+        figure: template.figure,
         masters,
         header_text: template.page.header_text.clone(),
         folio: template.page.folio.clone(),
@@ -630,12 +807,23 @@ fn intern_element(
     element: &str,
     root: &ComputedStyle,
 ) -> Result<StyleId, TemplateError> {
+    intern_element_from(resolver, element, root)
+}
+
+/// Intern a generated element's style, inheriting from `base` rather than the
+/// document root. A template that never mentions the element keeps the style
+/// it had before the element existed.
+fn intern_element_from(
+    resolver: &mut Resolver<'_>,
+    element: &str,
+    base: &ComputedStyle,
+) -> Result<StyleId, TemplateError> {
     let style = resolver.compute(
         element,
         None,
         &[],
         None,
-        ComputedStyle::inherited_from(root),
+        ComputedStyle::inherited_from(base),
         &[],
     )?;
     Ok(resolver.table.intern(style))
@@ -658,12 +846,25 @@ impl Resolver<'_> {
         for block in blocks {
             let meta = block.meta();
             let element = block_element(block);
+            let mut base = ComputedStyle::inherited_from(parent);
+            if element == "mathBlock" {
+                // TeX's display skips: a template that does not mention
+                // `mathBlock` still gets breathing room, so consecutive
+                // formulas do not touch (ADR-0080). An explicit rule overrides
+                // every value here.
+                base.space_before = base.font_size;
+                base.space_after = base.font_size;
+                base.space_before_plus = Width(base.font_size.0 / 5);
+                base.space_after_plus = Width(base.font_size.0 / 5);
+                base.space_before_minus = Width(base.font_size.0 / 2);
+                base.space_after_minus = Width(base.font_size.0 / 2);
+            }
             let style = self.compute(
                 element,
                 meta.attrs.role.as_deref(),
                 &class_refs(&meta.attrs.classes),
                 block_level(block),
-                ComputedStyle::inherited_from(parent),
+                base,
                 ancestors,
             )?;
             let id = self.table.intern(style.clone());
@@ -775,6 +976,7 @@ impl Resolver<'_> {
             Block::Generated(node) => self.blocks(&node.blocks, style, ancestors),
             Block::CodeBlock(_)
             | Block::MathBlock(_)
+            | Block::Diagram(_)
             | Block::ThematicBreak(_)
             | Block::PageBreak(_)
             | Block::Raw(_) => Ok(()),
@@ -859,6 +1061,20 @@ impl Resolver<'_> {
                     .rev()
                     .find(|declaration| declaration.property == property)
                 {
+                    // A percentage needs a base. `line-height` takes one from
+                    // the resolved font size; no other property has a defined
+                    // base in the current template/layout contract, so reject
+                    // instead of silently treating `%` as em.
+                    if matches!(declaration.value, PropertyValue::Percent(_))
+                        && property != Property::LineHeight
+                    {
+                        return Err(TemplateError::new(
+                            declaration.line,
+                            declaration.column,
+                            "styles",
+                            "percentage is not supported for this property",
+                        ));
+                    }
                     apply(&mut style, property, &declaration.value, self.body_pt);
                 }
             }
@@ -873,10 +1089,11 @@ impl Resolver<'_> {
 
 /// Fixed application order: `font-size` first, then `line-height`, then the
 /// remaining properties. This makes the result independent of YAML key order.
-const PROPERTY_ORDER: [Property; 25] = [
+const PROPERTY_ORDER: [Property; 31] = [
     Property::FontSize,
     Property::LineHeight,
     Property::FirstIndent,
+    Property::LetterSpacing,
     Property::IndentLeft,
     Property::IndentRight,
     Property::SpaceBefore,
@@ -888,6 +1105,11 @@ const PROPERTY_ORDER: [Property; 25] = [
     Property::WidowLines,
     Property::OrphanLines,
     Property::BaselineGrid,
+    Property::Background,
+    Property::PaddingTop,
+    Property::PaddingRight,
+    Property::PaddingBottom,
+    Property::PaddingLeft,
     Property::HangingCap,
     Property::HangingPunctuation,
     Property::Align,
@@ -910,11 +1132,27 @@ fn apply(style: &mut ComputedStyle, property: Property, value: &PropertyValue, b
         (Property::FirstIndent, PropertyValue::Length(length)) => {
             style.first_indent = length.resolve(font_size, body_pt);
         }
+        (Property::LetterSpacing, PropertyValue::Length(length)) => {
+            style.tracking = length.resolve(font_size, body_pt);
+        }
         (Property::IndentLeft, PropertyValue::Length(length)) => {
             style.indent_left = length.resolve(font_size, body_pt);
         }
         (Property::IndentRight, PropertyValue::Length(length)) => {
             style.indent_right = length.resolve(font_size, body_pt);
+        }
+        (Property::Background, PropertyValue::Color(color)) => style.background = Some(*color),
+        (Property::PaddingTop, PropertyValue::Length(length)) => {
+            style.padding_top = length.resolve(font_size, body_pt);
+        }
+        (Property::PaddingRight, PropertyValue::Length(length)) => {
+            style.padding_right = length.resolve(font_size, body_pt);
+        }
+        (Property::PaddingBottom, PropertyValue::Length(length)) => {
+            style.padding_bottom = length.resolve(font_size, body_pt);
+        }
+        (Property::PaddingLeft, PropertyValue::Length(length)) => {
+            style.padding_left = length.resolve(font_size, body_pt);
         }
         (Property::SpaceBefore, PropertyValue::Length(length)) => {
             style.space_before = length.resolve(font_size, body_pt);
@@ -973,6 +1211,7 @@ fn block_element(block: &Block) -> &'static str {
         Block::BlockQuote(_) => "blockQuote",
         Block::CodeBlock(_) => "codeBlock",
         Block::MathBlock(_) => "mathBlock",
+        Block::Diagram(_) => "diagram",
         Block::Figure(_) => "figure",
         Block::Table(_) => "table",
         Block::ThematicBreak(_) => "thematicBreak",

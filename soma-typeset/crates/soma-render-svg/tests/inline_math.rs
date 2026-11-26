@@ -68,7 +68,11 @@ fn inline_symbols_are_painted_on_the_line_baseline() {
         .expect("the formula atom");
 
     let base_x = pages.page.margin_left.0 + block.x.0 + atom.x.0;
-    let base_y = pages.page.margin_top.0 + block.y.0 + placed.y.0 + placed.line.ascent.0;
+    let base_y = pages.page.margin_top.0
+        + block.y.0
+        + placed.y.0
+        + placed.line.ascent.0
+        + placed.line.leading.0 / 2;
 
     assert_eq!(
         svg.matches("data-math=").count(),
@@ -109,12 +113,5 @@ fn a_malformed_formula_keeps_its_source_text() {
 }
 
 fn em(value: i32) -> String {
-    let sign = if value < 0 { "-" } else { "" };
-    let absolute = value.abs();
-    format!(
-        "{}{}.{:03}em",
-        sign,
-        absolute / 4096,
-        (absolute % 4096) * 1000 / 4096
-    )
+    soma_render_svg::units(soma_core::Width(value))
 }

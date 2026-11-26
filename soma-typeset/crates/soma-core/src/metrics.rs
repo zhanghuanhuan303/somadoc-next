@@ -7,6 +7,8 @@
 
 use crate::units::Width;
 
+use crate::ir::{Atom, AtomKind};
+
 /// Index into the caller's style table.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StyleId(pub u16);
@@ -50,6 +52,35 @@ pub trait Metrics: Sync {
     /// object. The implementation may sum per-character advances internally.
     fn advance(&self, text: &str, style: StyleId) -> Width;
 
+    /// Width of the atom at `index`, for hosts that measure text themselves.
+    ///
+    /// The default routes to [`Self::advance`] / [`Self::object_advance`], so an
+    /// implementation that cannot answer by position stays byte-identical.
+    /// A host that already holds a width array (the browser slice) answers from
+    /// it and never has to build a text key; this also keeps the answer stable
+    /// when the breaker asks after the break is chosen (`line_vertical`).
+    fn atom_advance(&self, _index: u32, atom: &Atom, style: StyleId) -> Width {
+        match atom.kind {
+            AtomKind::InlineObject => self.object_advance(&atom.text, style),
+            _ => self.advance(&atom.text, style),
+        }
+    }
+
+    /// Per-glyph metrics of the atom at `index`. The default mirrors
+    /// [`Self::atom_advance`].
+    fn atom_glyph_metrics(&self, _index: u32, atom: &Atom, style: StyleId) -> GlyphMetrics {
+        match atom.kind {
+            AtomKind::InlineObject => self.object_metrics(&atom.text, style),
+            _ => self.glyph_metrics(&atom.text, style),
+        }
+    }
+
+    /// Width of the hyphen drawn when a line breaks at a hyphenation point.
+    /// The default measures `"-"`.
+    fn hyphen_width(&self, style: StyleId) -> Width {
+        self.advance("-", style)
+    }
+
     fn line_metrics(&self, style: StyleId) -> LineMetrics;
 
     /// Version of the metrics source. `0` means "not a versioned table"
@@ -79,6 +110,16 @@ pub trait Metrics: Sync {
             overhang_left: Width::ZERO,
             overhang_right: Width::ZERO,
         }
+    }
+
+    /// Whether the face that draws `style` has a glyph for `character`.
+    ///
+    /// The math layout asks before setting a variable in the Mathematical
+    /// Italic block: a face without those glyphs would draw `.notdef`. A host
+    /// that cannot answer says no, which keeps the letter upright — a formula
+    /// set in roman is a smaller disappointment than a formula full of boxes.
+    fn has_glyph(&self, _character: char, _style: StyleId) -> bool {
+        false
     }
 
     /// Optional kerning hook. MVP implementations return zero.
@@ -123,6 +164,72 @@ pub trait Metrics: Sync {
         self.line_metrics(style)
     }
 
+    /// One constant from the math face's OpenType `MATH` table, in per-mille of
+    /// one em. `None` means the host has no table; `soma-math` then uses its
+    /// TeX fallback values.
+    ///
+    /// The variant order is the storage order of `soma.metrics`; changing it
+    /// needs a new table version.
+    fn math_param(&self, _param: MathParam, _style: StyleId) -> Option<i32> {
+        None
+    }
+
+    /// Ink extent of a math glyph run at the style's size, in 1/4096 em:
+    /// `(above baseline, below baseline)`. `None` when the host has no outline
+    /// data for every character in `text`.
+    ///
+    /// The math box needs ink, not the font's em box: a radical bar sits on the
+    /// radicand's ink top, a fence is sized by the body's ink, and a fraction
+    /// clears the bar by the numerator's ink depth (Math v2).
+    fn math_ink(&self, _text: &str, _style: StyleId) -> Option<(Width, Width)> {
+        None
+    }
+
+    /// Italic correction of the last glyph in `text`, in 1/4096 em. A
+    /// superscript after a slanted base starts this much further right.
+    fn math_italic(&self, _text: &str, _style: StyleId) -> Width {
+        Width::ZERO
+    }
+
+    /// Number of vertical design variants for the first character of `text`
+    /// (OpenType `MATH` `MathVariants`). `0` when the host has no variant data;
+    /// `soma-math` then scales the text-size glyph as it always did (ADR-0075).
+    fn math_variant_count(&self, _text: &str, _style: StyleId) -> u16 {
+        0
+    }
+
+    /// One vertical design variant, in 1/4096 em at the style's size.
+    ///
+    /// The ordinal is the font's storage order (increasing design size) and is
+    /// deliberately not a glyph id: a renderer resolves it in the font it
+    /// actually draws with. `None` for an out-of-range ordinal or a host
+    /// without variants.
+    fn math_variant(&self, _text: &str, _index: u16, _style: StyleId) -> Option<MathVariant> {
+        None
+    }
+
+    /// Top accent attachment of the first glyph of `text`, in 1/4096 em at the
+    /// style's size. `None` when the face has no `MATH` attachment for it; an
+    /// accent is then centred on the base by its advance.
+    fn math_top_accent(&self, _text: &str, _style: StyleId) -> Option<Width> {
+        None
+    }
+
+    /// Whether the **math** face itself has `character`. [`Self::has_glyph`] is
+    /// the union of the text and math faces, which is not enough to choose a
+    /// combining accent: the text face may answer yes for a glyph the formula
+    /// will not draw.
+    fn math_has_glyph(&self, _character: char, _style: StyleId) -> bool {
+        false
+    }
+
+    /// Signed ink bottom of the first glyph of `text`, in 1/4096 em at the
+    /// style's size: negative when the whole glyph sits above its baseline (a
+    /// combining accent), which is exactly what the accent placement needs.
+    fn math_glyph_bottom(&self, _text: &str, _style: StyleId) -> Option<Width> {
+        None
+    }
+
     /// Advance of an unbreakable object atom (`AtomKind::InlineObject`).
     ///
     /// Hosts that typeset objects themselves (inline math, inline images with
@@ -143,6 +250,167 @@ pub trait Metrics: Sync {
     /// Width of a space boundary. Defaults to the advance of `" "`.
     fn space_width(&self, style: StyleId) -> Width {
         self.advance(" ", style)
+    }
+}
+
+/// A vertical design variant of a math glyph, measured at one style's size.
+///
+/// `advance` is horizontal (the cursor step); `above`/`below` are the glyph's
+/// ink around the baseline. `right_gap` is `advance - ink right`, never
+/// negative: a radical's vinculum starts at the ink edge, not at the advance
+/// (ADR-0075).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MathVariant {
+    pub advance: Width,
+    pub above: Width,
+    pub below: Width,
+    pub right_gap: Width,
+}
+
+/// A constant from the math face's OpenType `MATH` table.
+///
+/// Values are stored in per-mille of one em (a length of 0.677 em is 677; a
+/// percentage of 70% is also 700). The discriminants are the table's storage
+/// order: `soma-metrics` writes them in this order and `tools/metrics-gen`
+/// reads the same names. Adding a variant is a new metrics-table version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u16)]
+pub enum MathParam {
+    /// `MathConstants.axisHeight`.
+    AxisHeight = 0,
+    /// `MathConstants.fractionRuleThickness`.
+    RuleThickness = 1,
+    /// `MathConstants.scriptPercentScaleDown` (percent -> per-mille).
+    ScriptPercent = 2,
+    /// `MathConstants.scriptScriptPercentScaleDown`.
+    ScriptScriptPercent = 3,
+    /// `MathConstants.superscriptShiftUp`.
+    SupShift = 4,
+    /// `MathConstants.superscriptShiftUpCramped`.
+    SupShiftCramped = 5,
+    /// `MathConstants.subscriptShiftDown`.
+    SubShift = 6,
+    /// `MathConstants.superscriptBaselineDropMax`.
+    SupDrop = 7,
+    /// `MathConstants.subscriptBaselineDropMin`.
+    SubDrop = 8,
+    /// `MathConstants.subSuperscriptGapMin`.
+    SubSupGap = 9,
+    /// `MathConstants.superscriptBottomMin`.
+    SupBottomMin = 10,
+    /// `MathConstants.superscriptBottomMaxWithSubscript`.
+    SupBottomMaxWithSub = 11,
+    /// `MathConstants.fractionNumeratorShiftUp`.
+    NumShift = 12,
+    /// `MathConstants.fractionNumeratorDisplayStyleShiftUp`.
+    NumShiftDisplay = 13,
+    /// `MathConstants.fractionDenominatorShiftDown`.
+    DenomShift = 14,
+    /// `MathConstants.fractionDenominatorDisplayStyleShiftDown`.
+    DenomShiftDisplay = 15,
+    /// `MathConstants.fractionNumeratorGapMin`.
+    NumGapMin = 16,
+    /// `MathConstants.fractionDenominatorGapMin`.
+    DenomGapMin = 17,
+    /// `MathConstants.upperLimitGapMin`.
+    LimitAboveGap = 18,
+    /// `MathConstants.upperLimitBaselineRiseMin`.
+    LimitAboveRise = 19,
+    /// `MathConstants.lowerLimitGapMin`.
+    LimitBelowGap = 20,
+    /// `MathConstants.lowerLimitBaselineDropMin`.
+    LimitBelowDrop = 21,
+    /// `MathConstants.radicalRuleThickness`.
+    RadicalRule = 22,
+    /// `MathConstants.radicalExtraAscender`.
+    RadicalExtra = 23,
+    /// `MathConstants.radicalKernBeforeDegree`.
+    RadicalKernBefore = 24,
+    /// `MathConstants.radicalKernAfterDegree`.
+    RadicalKernAfter = 25,
+    /// `MathConstants.radicalDegreeBottomRaisePercent` (percent -> per-mille).
+    RadicalDegreeRaise = 26,
+    /// `MathConstants.displayOperatorMinHeight`.
+    DisplayOperatorMin = 27,
+    /// `MathConstants.overbarVerticalGap`.
+    OverbarGap = 28,
+    /// `MathConstants.overbarRuleThickness`.
+    OverbarRule = 29,
+    /// `MathConstants.overbarExtraAscender`.
+    OverbarExtra = 30,
+    /// `MathConstants.underbarVerticalGap`.
+    UnderbarGap = 31,
+    /// `MathConstants.underbarRuleThickness`.
+    UnderbarRule = 32,
+    /// `MathConstants.underbarExtraDescender`.
+    UnderbarExtra = 33,
+    /// `MathConstants.accentBaseHeight`.
+    AccentBaseHeight = 34,
+    /// `MathConstants.radicalVerticalGap`: clearance between the radicand's
+    /// ink top and the vinculum's bottom, in text style.
+    RadicalGap = 35,
+    /// `MathConstants.radicalDisplayStyleVerticalGap`: the same clearance in
+    /// display style.
+    RadicalDisplayGap = 36,
+    /// `MathConstants.fractionNumDisplayStyleGapMin`.
+    NumDisplayGap = 37,
+    /// `MathConstants.fractionDenomDisplayStyleGapMin`.
+    DenomDisplayGap = 38,
+    /// `MathConstants.subscriptTopMax`.
+    SubTopMax = 39,
+    /// `MathConstants.spaceAfterScript`.
+    SpaceAfterScript = 40,
+}
+
+impl MathParam {
+    pub const COUNT: usize = 41;
+
+    pub const ALL: [Self; Self::COUNT] = [
+        Self::AxisHeight,
+        Self::RuleThickness,
+        Self::ScriptPercent,
+        Self::ScriptScriptPercent,
+        Self::SupShift,
+        Self::SupShiftCramped,
+        Self::SubShift,
+        Self::SupDrop,
+        Self::SubDrop,
+        Self::SubSupGap,
+        Self::SupBottomMin,
+        Self::SupBottomMaxWithSub,
+        Self::NumShift,
+        Self::NumShiftDisplay,
+        Self::DenomShift,
+        Self::DenomShiftDisplay,
+        Self::NumGapMin,
+        Self::DenomGapMin,
+        Self::LimitAboveGap,
+        Self::LimitAboveRise,
+        Self::LimitBelowGap,
+        Self::LimitBelowDrop,
+        Self::RadicalRule,
+        Self::RadicalExtra,
+        Self::RadicalKernBefore,
+        Self::RadicalKernAfter,
+        Self::RadicalDegreeRaise,
+        Self::DisplayOperatorMin,
+        Self::OverbarGap,
+        Self::OverbarRule,
+        Self::OverbarExtra,
+        Self::UnderbarGap,
+        Self::UnderbarRule,
+        Self::UnderbarExtra,
+        Self::AccentBaseHeight,
+        Self::RadicalGap,
+        Self::RadicalDisplayGap,
+        Self::NumDisplayGap,
+        Self::DenomDisplayGap,
+        Self::SubTopMax,
+        Self::SpaceAfterScript,
+    ];
+
+    pub const fn index(self) -> usize {
+        self as usize
     }
 }
 

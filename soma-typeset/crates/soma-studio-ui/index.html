@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Soma Studio</title>
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('soma.theme');
+          var theme = stored === 'light' || stored === 'dark'
+            ? stored
+            : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+          document.documentElement.dataset.theme = theme;
+        } catch (_) {
+          document.documentElement.dataset.theme = 'dark';
+        }
+      })();
+    </script>
+    <link data-trunk rel="css" href="style/tokens.css" />
+    <link data-trunk rel="css" href="style/studio.css" />
+    <link data-trunk rel="rust" data-wasm-opt="z" />
+  </head>
+  <body>
+    <noscript>Soma Studio 的排版引擎是 WebAssembly；请启用浏览器脚本以加载。</noscript></noscript>
+    <div id="app"></div>
+  </body>
+</html>

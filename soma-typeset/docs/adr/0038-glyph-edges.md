@@ -46,7 +46,7 @@ becomes universal is the **edge treatment**.
    per face:
      ... version 2 sections ...
      u32 glyph_ink_count                      -- sorted by codepoint
-     per entry: u32 codepoint | u8 ink_left | u8 ink_right
+     per entry: varint(codepoint delta) | u8 ink_left | u8 ink_right
    ```
 
    Bearings are quantised to `u8` (16 units of 1/4096 em, ~0.4% em). At 10.5 pt
@@ -89,10 +89,12 @@ becomes universal is the **edge treatment**.
   schema id does not change: shape and meaning are identical.
 - A CFF face keeps `compress_right = 0` unless the rule table gives it a
   constant, because it has no outlines. It behaves exactly as before this ADR.
-- Blob size: MiSans grows by `29,414 × 6 ≈ 176 KB` per face (33 KB → 227 KB for
-  a body face plus math). That is the price of per-glyph edges; a coarser
-  one-byte ink-width encoding was rejected because it loses the left/right split
-  that trailing and leading trim each need.
+- Blob size: per-glyph edges cost roughly three bytes each — a one-byte codepoint
+  delta plus two bearings. A body face grows from 33 KB to about 150 KB; the
+  committed LXGW baseline is 360 KB for 46,473 glyphs across three faces (it was
+  690 KB when the codepoint was a fixed `u32`). A coarser one-byte ink-width
+  encoding was rejected because it loses the left/right split that trailing and
+  leading trim each need.
 - Measured on the example book: still 11 pages, `canonicalHash` moves to
   `a94a8aee18fd0d37`. Every justified line now satisfies
   `boxes.last().x + advance == indent + target_width`, and at 300 dpi the ink

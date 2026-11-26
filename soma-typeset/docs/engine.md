@@ -14,7 +14,7 @@
 
 ```yaml
 schema: soma.engine/1          # 必需
-preset: publish-v1             # 可选；publish-v1（默认）或 default-v1
+preset: publish-v1             # 可选；publish-v1（引擎默认）、book-v1、proposal-v1、default-v1、rhythm-v1 或 latex-v1
 window: paragraph              # 可选；目前只实现 paragraph
 max_kp_atoms: null             # null 或 1..=10000
 fallback:                      # 可选；覆盖 default-v1
@@ -102,7 +102,10 @@ let json = engine.canonical_json();
 
 ## 5. 当前边界
 
-- 只有 `default-v1` 与 `publish-v1`（ADR-0023）；新 preset 需要新 ADR 与代码。
+- `default-v1`、`publish-v1`（ADR-0023）、`book-v1`（ADR-0106，3em 末行阈值）、
+  `proposal-v1`（ADR-0115，8em 末行阈值、双倍孤尾代价）、
+  `rhythm-v1`（ADR-0064，K7 行节奏）与 `latex-v1`（ADR-0069，LaTeX article 的
+  tolerance 与末行策略）；新 preset 需要新 ADR 与代码。
 - 只有 `paragraph` 窗口；`page` / `chapter` 在配置层就被拒绝。
 - 不暴露单项权重：preset 的意义就是让文档不能漂移到未复核的代价模型。
 - 解析器是固定形状实现，不复用模板的 YAML 子集（D65）。
@@ -111,5 +114,5 @@ let json = engine.canonical_json();
 
 - `Gate A`：`soma-engine` 只依赖 `soma-core`、保持 `no_std`、无浮点、声明
   `soma.engine/1`。
-- `cargo test -p soma-engine`：15 个测试，覆盖解析、重复键、缩进、窗口、
+- `cargo test -p soma-engine`：17 个测试，覆盖解析、重复键、缩进、窗口、
   preset、越界、canonical 哈希，以及「配置布局 = 手写参数布局」的逐字节等价。

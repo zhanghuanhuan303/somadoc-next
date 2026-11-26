@@ -115,6 +115,199 @@ let y = 2;</code></pre>
 }
 
 #[test]
+fn definition_lists_become_unordered_lists_without_losing_terms() {
+    let html = r#"<dl>
+  <dt>术语</dt>
+  <dd>第一条定义。</dd>
+  <dt>甲</dt>
+  <dd><p>第一段</p><p>第二段</p></dd>
+</dl>"#;
+    let document = parse_html(html);
+    let Block::List(list) = &document.blocks[0] else {
+        panic!("a dl becomes a list: {:?}", document.blocks[0]);
+    };
+    assert!(!list.ordered);
+    assert_eq!(list.start, 1);
+    assert_eq!(list.items.len(), 4);
+    assert_eq!(paragraph_text(&list.items[0].blocks[0]), "术语");
+    assert_eq!(paragraph_text(&list.items[1].blocks[0]), "第一条定义。");
+    assert_eq!(paragraph_text(&list.items[2].blocks[0]), "甲");
+    assert_eq!(paragraph_text(&list.items[3].blocks[0]), "第一段");
+    assert_eq!(paragraph_text(&list.items[3].blocks[1]), "第二段");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn nested_definition_lists_and_div_groups_keep_their_structure() {
+    let html = r#"<dl><div>
+  <dt>外术语</dt>
+  <dd>
+    <dl><dt>内术语</dt><dd>内定义</dd></dl>
+  </dd>
+</div></dl>"#;
+    let document = parse_html(html);
+    let Block::List(outer) = &document.blocks[0] else {
+        panic!("a dl becomes a list");
+    };
+    assert_eq!(outer.items.len(), 2);
+    assert_eq!(paragraph_text(&outer.items[0].blocks[0]), "外术语");
+    let Block::List(inner) = &outer.items[1].blocks[0] else {
+        panic!("the nested dl stays a list: {:?}", outer.items[1].blocks[0]);
+    };
+    assert_eq!(inner.items.len(), 2);
+    assert_eq!(paragraph_text(&inner.items[0].blocks[0]), "内术语");
+    assert_eq!(paragraph_text(&inner.items[1].blocks[0]), "内定义");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn consecutive_terms_and_definitions_are_siblings() {
+    let html = "<dl><dt>甲<dt>乙<dd>丙<dd>丁</dl>";
+    let document = parse_html(html);
+    let Block::List(list) = &document.blocks[0] else {
+        panic!("a dl becomes a list");
+    };
+    assert_eq!(
+        list.items.len(),
+        4,
+        "unclosed dt/dd auto-close on a sibling"
+    );
+    let text: Vec<String> = list
+        .items
+        .iter()
+        .map(|item| paragraph_text(&item.blocks[0]))
+        .collect();
+    assert_eq!(text, vec!["甲", "乙", "丙", "丁"]);
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn del_and_ins_map_to_strikethrough_and_underline() {
+    let document = parse_html("<p><del>删除</del><ins>插入</ins></p>");
+    let Block::Paragraph(paragraph) = &document.blocks[0] else {
+        panic!("expected a paragraph");
+    };
+    assert!(matches!(paragraph.inlines[0], Inline::Strikethrough(_)));
+    assert!(matches!(paragraph.inlines[1], Inline::Underline(_)));
+    assert_eq!(paragraph_text(&document.blocks[0]), "删除插入");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn del_and_ins_nest_inside_other_inlines() {
+    let html = r#"<p><strong><del>粗删</del></strong><em><ins>斜插</ins></em></p>"#;
+    let document = parse_html(html);
+    let Block::Paragraph(paragraph) = &document.blocks[0] else {
+        panic!("expected a paragraph");
+    };
+    assert!(matches!(
+        &paragraph.inlines[0],
+        Inline::Strong(container)
+            if matches!(container.children.as_slice(), [Inline::Strikethrough(_)])
+    ));
+    assert!(matches!(
+        &paragraph.inlines[1],
+        Inline::Emphasis(container)
+            if matches!(container.children.as_slice(), [Inline::Underline(_)])
+    ));
+    assert_eq!(paragraph_text(&document.blocks[0]), "粗删斜插");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn sup_and_sub_stay_semantic_inlines_when_nested() {
+    let html = "<p>H<sub>2</sub>O 与 x<sup><em>2</em></sup></p>";
+    let document = parse_html(html);
+    let Block::Paragraph(paragraph) = &document.blocks[0] else {
+        panic!("expected a paragraph");
+    };
+    assert!(paragraph
+        .inlines
+        .iter()
+        .any(|inline| matches!(inline, Inline::Subscript(_))));
+    let superscript = paragraph
+        .inlines
+        .iter()
+        .find_map(|inline| match inline {
+            Inline::Superscript(container) => Some(container),
+            _ => None,
+        })
+        .expect("a superscript");
+    assert!(
+        matches!(superscript.children.as_slice(), [Inline::Emphasis(_)]),
+        "emphasis nests inside superscript"
+    );
+    assert_eq!(paragraph_text(&document.blocks[0]), "H2O 与 x2");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn hr_inside_a_container_is_a_thematic_break() {
+    let document = parse_html("<blockquote><p>前</p><hr><p>后</p></blockquote>");
+    let Block::BlockQuote(quote) = &document.blocks[0] else {
+        panic!("expected a blockquote");
+    };
+    assert_eq!(quote.blocks.len(), 3);
+    assert!(matches!(quote.blocks[1], Block::ThematicBreak(_)));
+    assert_eq!(paragraph_text(&quote.blocks[0]), "前");
+    assert_eq!(paragraph_text(&quote.blocks[2]), "后");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn a_figure_with_an_image_and_caption_maps_to_the_figure_block() {
+    let html = r#"<figure><img src="chart.png" alt="图表"><figcaption>图 <strong>一</strong></figcaption></figure>"#;
+    let document = parse_html(html);
+    let Block::Figure(figure) = &document.blocks[0] else {
+        panic!("expected a figure: {:?}", document.blocks[0]);
+    };
+    assert_eq!(figure.image.source.src, "chart.png");
+    assert_eq!(figure.image.source.alt.as_deref(), Some("图表"));
+    let mut caption = String::new();
+    collect_inline_text(&figure.caption, &mut caption);
+    assert_eq!(caption, "图 一");
+    assert!(figure
+        .caption
+        .iter()
+        .any(|inline| matches!(inline, Inline::Strong(_))));
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn a_figure_keeps_content_beside_the_image_and_caption() {
+    let html =
+        r#"<figure><img src="a.png" alt="A"><p>图旁正文</p><figcaption>标题</figcaption></figure>"#;
+    let document = parse_html(html);
+    assert!(matches!(document.blocks[0], Block::Figure(_)));
+    assert_eq!(paragraph_text(&document.blocks[1]), "图旁正文");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn a_figure_without_an_image_keeps_its_text() {
+    let html = "<figure><figcaption>无图说明</figcaption><p>图内正文</p></figure>";
+    let document = parse_html(html);
+    let text: Vec<String> = document.blocks.iter().map(paragraph_text).collect();
+    assert_eq!(text, vec!["无图说明", "图内正文"]);
+    assert!(!document
+        .blocks
+        .iter()
+        .any(|block| matches!(block, Block::Figure(_))));
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn new_elements_never_carry_scripts_into_docir() {
+    let html = r#"<dl><dt><script>alert('term')</script>术语</dt><dd><ins>定义</ins></dd></dl>"#;
+    let document = parse_html(html);
+    let canonical = document.canonical_json();
+    assert!(!canonical.contains("alert"), "script content is dropped");
+    assert!(canonical.contains("术语"), "the term survives");
+    assert!(canonical.contains("定义"), "the definition survives");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
 fn a_table_becomes_a_full_grid() {
     let html = r#"<table>
   <thead><tr><th>项目</th><th>金额</th><th>备注</th></tr></thead>
@@ -135,6 +328,51 @@ fn a_table_becomes_a_full_grid() {
     assert_eq!(table.rows[1].cells[1].rowspan, 2);
     // The second body row is padded so the grid is full.
     assert_eq!(table.rows[2].cells.len(), 2);
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn a_colgroup_supplies_relative_column_widths() {
+    let html = r#"<table>
+  <colgroup>
+    <col width="25%">
+    <col span="2" width="100">
+  </colgroup>
+  <tr><th>甲</th><th>乙</th><th>丙</th></tr>
+  <tr><td>1</td><td>2</td><td>3</td></tr>
+</table>"#;
+    let document = parse_html(html);
+    let Block::Table(table) = &document.blocks[0] else {
+        panic!("expected a table");
+    };
+    assert_eq!(table.columns.len(), 3);
+    assert_eq!(table.columns[0].share, 250);
+    assert_eq!(table.columns[1].share, 100);
+    assert_eq!(table.columns[2].share, 100, "span repeats the hint");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn a_table_without_colgroup_has_no_width_hints() {
+    let document = parse_html("<table><tr><td>甲</td></tr></table>");
+    let Block::Table(table) = &document.blocks[0] else {
+        panic!("expected a table");
+    };
+    assert_eq!(table.columns[0].share, 0);
+}
+
+#[test]
+fn a_table_caption_becomes_the_table_title() {
+    let html = r#"<table>
+  <caption>支出<strong>明细</strong></caption>
+  <tr><th>项目</th><th>金额</th></tr>
+  <tr><td>甲</td><td>1</td></tr>
+</table>"#;
+    let document = parse_html(html);
+    let Block::Table(table) = &document.blocks[0] else {
+        panic!("expected a table");
+    };
+    assert!(!table.caption.is_empty(), "the caption is kept");
     document.validate().expect("valid DocIR");
 }
 
@@ -188,7 +426,7 @@ fn parsing_is_deterministic() {
     let first = parse_html(html).canonical_json();
     let second = parse_html(html).canonical_json();
     assert_eq!(first, second);
-    assert!(first.starts_with("{\"schema\":\"soma.doc/2\""));
+    assert!(first.starts_with("{\"schema\":\"soma.doc/3\""));
 }
 
 #[test]
@@ -226,4 +464,26 @@ styles:
     assert!(text.contains("标题"), "{text}");
     assert!(text.contains("正文"), "{text}");
     assert!(text.contains("重点"), "{text}");
+}
+
+#[test]
+fn details_and_summary_keep_their_content() {
+    let document =
+        parse_html("<details><summary>点击展开</summary><p>折叠内容 <em>x</em></p></details>");
+    document.validate().expect("valid DocIR");
+    let text = document.plain_text();
+    assert!(text.contains("点击展开"), "{text}");
+    assert!(text.contains("折叠内容"), "{text}");
+    assert!(!text.contains("<details>"), "{text}");
+
+    let Block::Paragraph(summary) = &document.blocks[0] else {
+        panic!("summary paragraph")
+    };
+    assert!(matches!(summary.inlines.first(), Some(Inline::Strong(_))));
+}
+
+#[test]
+fn pre_mermaid_class_becomes_a_diagram() {
+    let document = parse_html("<pre class=\"mermaid\">flowchart TD\n  A --> B</pre>");
+    assert!(matches!(document.blocks[0], Block::Diagram(_)));
 }

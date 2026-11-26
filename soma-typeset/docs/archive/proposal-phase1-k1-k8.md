@@ -2,7 +2,7 @@
 
 # 主提案：参数化中文优先排版核心（Phase 1）
 
-**对应 PRD：** [`prd.md`](prd.md)（终稿，2026-11-19）
+**对应 PRD：** 项目简报（未随仓库分发）
 **参考实现：** [`somadoc-engine`](somadoc-engine/README.md)（v0.1.0 + wasm 支持，commit `32424f1`）
 **详细 K-P 模型：** [`soma-typeset/docs/kp-model.md`](soma-typeset/docs/kp-model.md)
 **参数系统：** [`soma-typeset/docs/params.md`](soma-typeset/docs/params.md)

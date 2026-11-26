@@ -1,11 +1,19 @@
 # soma-typeset
 
-**A runtime-independent typesetting core for Chinese-first, mixed CJK/Latin text.**
+[![CI](https://github.com/zhanghuanhuan303/somadoc-next/actions/workflows/ci.yml/badge.svg)](https://github.com/zhanghuanhuan303/somadoc-next/actions/workflows/ci.yml)
 
-This workspace contains the verified Phase 1 inline kernel (K1–K8) and the
-frozen architecture for the document/template/page phase. It is a clean-room
-implementation of the PRD in [`../prd.md`](../prd.md); it is deliberately
-independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
+**A Chinese-first, deterministic typesetting engine with a browser-local Studio.**
+
+Current snapshot (2026-11-26): **1,006 tests**, **120 ADRs**, **28 crates**. The
+engine parses Markdown, LaTeX, HTML and DOCX into DocIR, resolves a pure-YAML
+template, runs Knuth–Plass line breaking and vertical pagination in 1/4096 em
+integers, and renders PDF, HTML and SVG. The same engine is compiled into wasm:
+the hosted Studio at [somadoc.art](https://somadoc.art) edits one `welcome.md`
+and exports a PDF in the browser without an API round-trip. The authoritative
+map is [`docs/soma-atlas.html`](docs/soma-atlas.html).
+
+It is deliberately independent of Typst, TeX, DOM, the filesystem, and platform
+font APIs. Clean-room provenance is in [`PROVENANCE.md`](PROVENANCE.md).
 
 ## What works now
 
@@ -57,13 +65,13 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
 - A minimal CJK/Latin rule compiler: CJK atoms, Latin runs, spaces as glue,
   punctuation classes, basic 避头尾 (forbidden line-start/line-end) rules,
   edge trim caps, and `paragraph_from_lines` for hard-broken source lines.
-- A1 DocIR (`soma-doc`, schema `soma.doc/2`): 13 block and 17 inline kinds with
+- A1 DocIR (`soma-doc`, schema `soma.doc/3`): 14 block and 17 inline kinds with
   `NodeId`/`SourceSpan`/`Attrs`, footnotes, figures, tables, math source, raw
   payload preservation, structural validation, canonical JSON, and two hashes
   (`docHash` for exact reproduction, `contentHash` for content identity). The
   crate has **zero dependencies** and no floats; Gate A enforces that.
 - A3–A6 pipeline: `soma-layout` builds paragraph boxes over the frozen kernel and
-  paginates with **line-level vertical K-P** by default (`soma.pages/9`):
+  paginates with **line-level vertical K-P** by default (`soma.pages/11`):
   paragraphs split across pages, widows/orphans are penalties, vertical glue can
   stretch, footnotes are charged to the marker's line, and page masters add a
   running header, footer, and folio. Figure boxes, table cell boxes,
@@ -74,8 +82,9 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   `soma-render-html`
   paints absolutely positioned HTML. The WASI fixture hashes DocIR, inline
   layout, and pages together.
-- E1–Q′ effect layer: `soma-metrics` ships a committed `soma.metrics/1` table
-  generated from Noto Serif/Sans CJK SC (numbers only), `StyledMetrics` scales
+- E1–Q′ effect layer: `soma-metrics` ships a committed `soma.metrics/7` table
+  generated from Noto CJK SC + New Computer Modern Math (per-glyph ink, MATH
+  constants and vertical variants), `StyledMetrics` scales
   advances by the resolved font size, trim follows the atom's size, adjacent
   punctuation compresses, closing punctuation can hang, and a baseline grid is
   available per template. `soma-render-svg` is a second renderer used by Gate R;
@@ -86,16 +95,51 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   `soma-eval corpus` measures them and `soma-eval calibrate` sweeps tolerance ×
   badness scale on a proxy objective; see
   [`docs/corpus-calibration.md`](docs/corpus-calibration.md).
-- Display math (`soma-math`, ADR-0026): a TeX subset (symbols, scripts,
-  fractions, radicals, `\sum`/`\int` with limits, function names,
-  `\left…\right`) laid out into integer glyphs and rules. `soma-layout`
+- Display math (`soma-math`, ADR-0026/ADR-0054/ADR-0056): a TeX subset (symbols,
+  italic variables, scripts, fractions, radicals, `\sum`/`\int` with limits,
+  function names, `\left…\right`, `array` column formats, `\substack`,
+  `\overbrace`/`\underbrace` — glyph when narrow, assembled from rules when
+  wide — `\color`, tags) laid out into integer glyphs and rules. `soma-layout`
   centres one `MathBox` per `MathBlock`; both renderers paint it; a malformed
-  formula falls back to text instead of failing the page. Inline formulas are
+  formula falls back to text instead of failing the page. `numbering.equations`
+  numbers `equation`/`align`/`gather`/`multline` blocks per row, right-aligned in
+  the margin, with `\tag`/`\tag*`/`\notag` overriding a row; a nested `aligned`
+  never adds numbers. `\text{}` accepts `$…$` inside it. Inline formulas are
   object atoms measured by their own box (ADR-0027), so they break and raise the
   line box like any other inline object. Fences stretch to their body, and
   `matrix`/`pmatrix`/`bmatrix`/`vmatrix`/`cases`/`aligned` are supported; symbols
   come from a dedicated math face in the metrics table (ADR-0030). See
   [`docs/math.md`](docs/math.md).
+- TikZ drawings (`soma-tikz`, ADR-0092): the core PGF drawing language —
+  coordinates (Cartesian/polar/relative/named), `--`, `rectangle`, `circle`,
+  `ellipse`, `arc`, `grid`, `-|`/`|-`, nodes with anchors and labels, `\foreach`,
+  colours, line widths, dash patterns and arrow barbs — parsed into integer
+  vector paths on the display-math box. The PDF/SVG/HTML backends paint the same
+  paths; node text goes through the math subsystem, so `$…$` and CJK work. An
+  unsupported key or command is a hard error and falls back to the visible
+  source, never a wrong picture. See [`docs/tikz.md`](docs/tikz.md).
+- Browser slice (ADR-0071): `soma-web` compiles `soma-core` + `soma-rules` to a
+  32.7 KB gzip, **zero-import** `wasm32-unknown-unknown` module; `web/` is a
+  dependency-free ES module plus a demo and a self-checking harness. The host
+  measures with canvas `measureText`, hands over one integer per atom, and gets
+  line ranges and box coordinates back — the same numbers the PDF renderer
+  consumes. `scripts/web.sh` verifies zero imports, size, native/wasm parity,
+  timing, memory stability and the fallback policy. See
+  [`web/README.md`](web/README.md).
+- Soma Studio (ADR-0093, ADR-0094): the **whole engine runs in the browser**
+  (`soma-studio-ui`, Leptos CSR) and Axum is only an I/O boundary
+  (`soma-studio`) for files, fonts, native verification and PDF. The default
+  workspace is a closable left-source/right-proof split; inspect and verify are
+  sidebar views. It has Shadow-DOM pages, tabs, a command palette, a theme
+  system, a local-rules assistant, and a font-consistency probe. Both sides
+  call `soma-studio-core`; canonical hashes must match, which closes the
+  page-geometry half of D95. Typing rebuilds after a 220 ms debounce and IME
+  composition defers the build. A missing `--font` falls back to a system CJK
+  face via fontconfig, so PDF export still produces text. `scripts/studio.sh`
+  locks S1–S11. See [`docs/studio.md`](docs/studio.md).
+- Code blocks (`ADR-0055`): each source line keeps its own spaces and is laid
+  out on the block's atom table — indentation survives, nothing reflows, and a
+  line that is too long overflows instead of wrapping.
 - Engine configuration: `soma-engine` parses `soma.engine/1` (preset, window,
   atom window, fallback switches, vertical cost model) into the same
   `BreakConfig`/`VerticalParams` the hand-built path uses. See
@@ -113,19 +157,118 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   elements (`figureCaption`/`tableCaption`); contents rows wrap and keep the
   page number on the last line; the page result carries an `outline` (one
   bookmark per heading with physical and printed page) and an `index` report.
-  `\index{term}` in LaTeX or `[[index:term]]` in Markdown, plus `index: {title}`
-  in the template, produces a sorted index with merged page lists.
+  `\index{term}` in LaTeX or `[[index:term]]` in Markdown, plus
+  `index: {title, sort}` in the template, produces an index with merged page
+  lists (runs of three or more pages collapse to `3–5`). The marker grammar supports sub-entries (`宋体!字面`), per-part sort
+  keys (`宋体@songti`), `|see{}` and `|seealso{}`; markers inside table cells
+  and footnote definitions are collected on the page that prints them. Order is
+  code point (`codepoint`, the default) or **pinyin** from the checked-in
+  `soma-collate` table (ADR-0061).
+- Ruby (ADR-0060): `\ruby{汉字}{hànzì}` in LaTeX and `[[ruby:汉字|hànzì]]` in
+  Markdown. The base stays one atom, the line reserves space above its ascent,
+  and the PDF, SVG, and HTML renderers each draw the annotation.
+- Hyphenation (ADR-0059): `soma-hyphen` implements Liang's algorithm over an
+  external TeX pattern file (`soma render --hyphenation en.pat`). A broken line
+  ends in a real hyphen whose width is charged to the line; a document without
+  patterns is byte-identical to before.
+- Diagrams (ADR-0102): Mermaid `flowchart`/`graph` and Graphviz DOT fences
+  (or `mermaid`/`dot` environments) become semantic `Block::Diagram` blocks.
+  `soma-diagram` lays them out deterministically and emits the same integer
+  vector box as TikZ, so PDF/SVG/HTML draw them without a JavaScript runtime;
+  `soma diagram --input chart.mmd` and Studio's `⤴ TikZ` export the computed
+  geometry as TikZ.
+  Unsupported constructs fall back to their source, never to a wrong picture.
+- Mixed syntax (ADR-0104): a Markdown document can contain `$...$` and
+  `$$...$$` math, LaTeX text commands (`\textbf`, `\underline`, `\href`,
+  `\ruby`, `\index`) and environments (`itemize`, `quote`, `tabular`,
+  `equation`, `tikzpicture`, `mermaid`), plus semantic inline HTML
+  (`<u>`, `<a>`, `<img>`, `<sup>`, `<sub>`, `<ruby>`) and HTML block
+  containers. Inline Markdown still works inside HTML tags, and math/LaTeX
+  inside an HTML block is parsed rather than shown as source. Unknown syntax
+  stays visible; nothing is executed. See `examples/mixed/showcase.md`.
+- Word input (ADR-0063/ADR-0066): `soma render --input draft.docx` reads the
+  archive with a dependency-free zip/inflate and maps paragraphs, headings
+  (by style name, through `basedOn` chains), inline emphasis, tables, lists,
+  core metadata, and embedded images (as figures) to DocIR. Floats, wrap,
+  crop, fields, and footnotes are not read; no layout fidelity is promised
+  (remaining Word limits: N3 in `docs/debt.md`).
+- Markdown structure (ADR-0062): nested lists, GFM tables (alignment, escaped
+  bars), setext headings, and link reference definitions join the existing
+  subset. HTML `<colgroup>`/`<col>`
+  can give a column a relative width (ADR-0065); the HTML frontend also maps
+  definition lists, `<ins>`, `<sup>`/`<sub>`, `<hr>` and figure captions.
+- LaTeX macros and counters (ADR-0067): `\newcommand`/`\renewcommand`/
+  `\providecommand`/`\def` with up to nine arguments expand before parsing;
+  `\newcounter`/`\setcounter`/`\stepcounter` and `\arabic`/`\roman`/
+  `\alph`/`\value`/`\the<name>` print counter values. `verbatim` is never
+  expanded.
+- Line rhythm (ADR-0064): `preset: rhythm-v1` charges a DP state for a change
+  of looseness class between adjacent justified lines. `publish-v1` and
+  `default-v1` are unchanged.
 - One command (ADR-0029): `soma render --input doc.tex --template book.yaml
-  --format html|svg|json|pdf` runs the whole pipeline; `soma check` prints
-  layout facts and the canonical hash. See [`docs/cli.md`](docs/cli.md).
+  --format html|svg|json|pdf` runs the whole pipeline; `--input - --from md`
+  reads stdin, and `--input <dir> --out <dir>` batches a directory. `soma check`
+  prints layout facts and the canonical hash. See [`docs/cli.md`](docs/cli.md).
+- Math v2 (ADR-0070): TeX's eight atom classes and 8×8 spacing table
+  (`\sin x`, `a,b`, `x = -1`), four style levels with cramping and rule-18
+  scripts, and geometry taken from the math face's `MATH` table plus per-glyph
+  vertical ink: fraction shifts and gaps, a vinculum on the radicand's ink,
+  `\left…\right` sized by ink, accents, `\binom`, `\operatorname`, and
+  inline formulas that break at relations and binaries. `soma.metrics/7`
+  (MATH constants, vertical variants and per-glyph ink).
+- Plex reference defaults (ADR-0088): without `--template` the CLI uses the
+  pandoc `soma.latex` page design — A4, 25.4 mm margins, IBM Plex Sans SC
+  10 pt on a 14.4 pt baseline, zero paragraph indent, a 20 pt paragraph skip,
+  natural-width booktabs tables, a cover from metadata, a TOC from headings,
+  and the Rust-book code panel. The former LaTeX `article` default is
+  archived as `examples/templates/latex-article.yaml`; without `--engine` the
+  CLI still breaks with `latex-v1` (`tolerance=1260`, ragged last line).
+  An explicit template or engine file still wins.
+- Code blocks (ADR-0089/0090/0091): a full-measure panel with a template
+  `background` and `padding-*`, a real monospace family (`mono`, PDF
+  `F7`/`F8`, `--font-mono`), and a dependency-free line lexer for Rust, C,
+  C++, shell, Markdown, LaTeX, Python, JS/TS, JSON, YAML, TOML, HTML, CSS,
+  SQL, Go, Java, Kotlin, Swift, C#, Ruby, PHP, Lua and Haskell. Token colors
+  come from the template's optional `syntax:` palette; the Plex template
+  transcribes mdBook's Rust theme.
 - PDF output (`soma-render-pdf`, ADR-0034): `--format pdf --font book.ttf`
   embeds a sparse TrueType subset (Identity-H + ToUnicode), writes integer
   glyph positions, table rules, display math, a nested bookmark tree from
   `outline`, and `/PageLabels` from the printed labels. The same layout and
   fonts produce identical bytes. `--metrics` lets layout measure with a table
   generated from that same font (`tools/metrics-gen`); `scripts/book.sh` does
-  this for the example. CFF/OTF fonts are rejected; figures are placeholder
-  frames (D82).
+  this for the example. `glyf` and CFF outlines are embedded (`/FontFile2` and
+  `/FontFile3`; a name-keyed CFF is promoted to CID-keyed and its `seac`
+  composites are drawn out). `--font-math` names the formula face; when it is
+  omitted and the document has a formula, the CLI uses the bundled New Computer
+  Modern Math (the embedded table's face), then probes installed faces, and
+  accepts only one whose advances match the table. So a fresh install gets
+  serif LaTeX-style formulas with no flag and no TeX Live; `∑` and `√` are never
+  drawn with the body face by accident (ADR-0077). Streams are
+  deflated by a deterministic encoder
+  that picks fixed or dynamic Huffman blocks per stream (ADR-0043/ADR-0045),
+  underlines and strikethroughs are drawn from the font's `post` table, links
+  become `/Annots` rectangles (ADR-0044), figures embed PNG and JPEG images as
+  XObjects, and every page carries a tagged structure tree with `/Alt` text
+  (ADR-0047). The HTML and SVG renderers inline the same images as `data:`
+  URIs, so a preview stays one self-contained file (ADR-0048).
+- Full-capability sample (ADR-0068): `examples/book/full.tex` +
+  `scripts/full.sh` render one 14-page book with every front-end and layout
+  feature in a single document — ruby, hyphenation, nested and description
+  lists, a table with merged cells, PNG/JPEG figures at their true aspect
+  ratio, numbered formulas, macros and counters, footnotes, and a pinyin index
+  with sub-entries, `see`/`see also`, and page ranges. `full-html.pdf` is a
+  one-page supplement for the HTML-only constructs (`<colgroup>` widths and
+  native `<ruby>`).
+- Reference page design (`examples/templates/plex.yaml`, ADR-0081/0088): a
+  pure-YAML transcription of pandoc's `soma.latex` — A4 with one-inch margins,
+  IBM Plex Sans SC at 10pt on a 1.44 baseline, zero first-line indent with a
+  20pt paragraph skip, article-sized headings, italic quotations, booktabs
+  three-rule tables and a pinyin index. It is also the built-in template.
+  `scripts/plex.sh` resolves the system fonts (they are not redistributed),
+  measures the body, mono and math faces with `tools/metrics-gen`, and renders
+  `examples/book/full.tex` to `plex.pdf` plus the multi-language code sample
+  `examples/templates/code.md` to `code.pdf`.
 - First-release artifact (`examples/book`, ADR-0031/ADR-0032/ADR-0033): `scripts/book.sh`
   renders an eleven-page book from `examples/book/book.tex` + `book.yaml` — generated
   cover, roman-numbered front matter, contents with leaders plus figure/table
@@ -136,38 +279,49 @@ independent of Typst, TeX, DOM, the filesystem, and platform font APIs.
   (`left`/`center`/`right`) is a layout pass, so titles and cover lines can be
   centred. The build has 0 overflow pages and 0 degraded lines;
   `docs/first-release.md` lists the remaining design gaps.
+- Delivery brief (`examples/book/brief.tex`, `scripts/brief.sh`): a twelve-page
+  PDF about the engine itself — cover, contents with figure and table lists,
+  bulleted capability lists, numbered formulas with a `\tag` and a `\notag`
+  row, a code block with a pipeline diagram, two images, a data table, a
+  quotation, and an index — written in the LaTeX subset and set with the Song
+  template. It is the shortest end-to-end exercise of everything above.
 - Blind-test tooling: kit generation, key unmapping, Wilson interval, Fleiss'
   kappa, and a committable Markdown report (`soma-eval blind --out`). A
   **simulated** dry run proves the chain (`docs/blind-dry-run.md`); the human
   panel (D01) is still open.
 - A2 template layer (`soma-template`, schemas `soma.template/9` and
-  `soma.styles/7`): a documented YAML subset with line/column errors, exact units
-  (decimal → rational → 1/4096 em, truncation toward zero), a selector cascade
-  with inheritance and heading levels, a 25-property whitelist, `templateHash`,
+  `soma.styles/7`): a documented YAML subset (block + single-line flow
+  collections) with line/column errors, exact units (decimal → rational →
+  1/4096 em, truncation toward zero; percentages only where a base exists), a
+  selector cascade with `within`/`parent`/`ancestors` and heading levels, a
+  25-property whitelist, data-level `parse_template_inherit`, `templateHash`,
   and `StyledDoc` as lifetime-free data with `styleHash`. Templates cannot write
   engine knobs; Gate A enforces that statically.
 
 ## What is not here yet
 
-- Word import, browser WASM packaging, incremental layout, and the human
-  blind-test run. Gate Q remains `Inconclusive` until that run exists; the
-  effect scorecard (Q′) is a structural report, not a quality claim. See
-  [`docs/roadmap-v2.md`](docs/roadmap-v2.md) and
-  [`docs/debt.md`](docs/debt.md).
+- The human blind-test run (D01; Gate Q remains `Inconclusive`), incremental
+  layout (N4), nested box trees (D51), page/chapter search windows (D66), and
+  the wider TikZ library surface (D99).
+- Browser fonts cover GB2312 levels 1+2 only (D119); the Studio builds on the
+  main thread (D104); there is no single-file offline export (D105).
+- See [`docs/debt.md`](docs/debt.md) for the full register.
 
 ## Limitations
 
 - Font metrics come from a committed table, not from shaping: no kerning pairs
-  yet, bold uses regular advances, and rare codepoints fall back to 1em (D61,
-  D63).
-- No hyphenation dictionary. Latin runs may break after `-` and `/`, and nothing
-  else; a long unbreakable run can still compress past its shrink limit (D09,
-  D60).
+  yet (D100), CJK has no italic face (D61), and rare codepoints fall back to 1em
+  (D63).
+- Hyphenation needs a pattern set supplied by the caller: there is no built-in
+  dictionary, and a run that the patterns do not cover can still compress past
+  its shrink limit. Tracking is opt-in per style, not automatic for hard cases
+  (D60).
 - The punctuation hard rules are cited against GB/T 15834-2011 via W3C clreq
-  §6.1.1 (basic). Trim and pair-compression ratios remain `ParamOnly` and
-  uncalibrated.
-- Page masters are one set per document: no first-page/cover variant, no
-  per-section masters (D62). Header/footer text is a single centered line (D64).
+  §6.1.1 (basic). Trim and pair-compression ratios remain `ParamOnly`; D04
+  measured the alternatives and kept the current ratios for quality reasons.
+- Page masters share one content geometry per document; per-master content
+  geometry is not modeled (D62). Header/footer text truncates with `…` when it
+  exceeds the margin, and does not spill into the content box.
 - The demo uses the real metrics table, but its HTML is still a geometry proof:
   it paints positions and lets the browser choose the font.
 
@@ -178,26 +332,36 @@ crates/
   soma-core/   # frozen inline kernel: units, ParaIR, metrics, breaker, result
   soma-doc/    # DocIR: nodes, source spans, validation, canonical JSON, hashes
   soma-engine/ # soma.engine/1: preset, window, fallback, vertical knobs
-  soma-metrics/ # soma.metrics/1 table parser + embedded Noto CJK metrics
+  soma-metrics/ # soma.metrics/7 parser + embedded Noto CJK / NewCM Math table
   soma-template/ # pure-YAML template: parse, exact units, cascade, StyledDoc
   soma-layout/ # paragraph boxes, line-level pagination, page masters
-  soma-md/     # Markdown subset -> DocIR
+  soma-md/     # Markdown subset + embedded LaTeX/HTML -> DocIR
   soma-html/   # HTML subset (semantic whitelist) -> DocIR
   soma-latex/  # LaTeX subset (sections, inline, environments) -> DocIR
+  soma-docx/   # Word .docx (zip + OOXML) -> DocIR
+  soma-collate/ # pinyin order for the index
+  soma-hyphen/ # Liang hyphenation over an external pattern set
   soma-cli/    # `soma`: source + template -> HTML/SVG/PDF/canonical JSON
   soma-math/   # TeX subset -> integer math boxes (symbols + rules)
+  soma-tikz/   # core PGF drawing language -> integer vector paths
+  soma-diagram/ # Mermaid/DOT -> integer diagram paths, TikZ export
   soma-render-html/ # PagedLayout -> absolutely positioned HTML
   soma-render-svg/  # PagedLayout -> SVG (Gate V/R)
   soma-render-pdf/  # PagedLayout -> PDF (TrueType subset, bookmarks)
   soma-rules/  # text -> ParaIR (Chinese punctuation + CJK/Latin segmentation)
+  soma-highlight/ # dependency-free code lexer: SyntaxClass spans per line
   soma-eval/   # benchmark, sweeps, blind-test statistics, effect scorecard
   soma-demo/   # static HTML renderer consuming LayoutResult
+  soma-web/     # C ABI slice for the browser (rules + K-P, no imports)
   soma-wasm/   # native/WASI fixture for cross-target byte verification
+  soma-studio-core/ # shared Studio build: parse, layout, fragments, probes, DTOs
+  soma-studio-ui/   # Leptos CSR workbench; the whole engine compiled to wasm
+  soma-studio/      # Axum boundary: files, assets, fonts, verify, PDF, SSE
 tools/dry-run-panel/ # simulated blind-test panel generator (not human data)
 tools/
-  metrics-gen/ # offline OTF/TTC -> soma.metrics/1 (numbers only)
+  metrics-gen/ # offline OTF/TTC -> soma.metrics/7 (numbers + ink)
 examples/
-  book/        # first-release book: book.tex + book.yaml (scripts/book.sh)
+  book/        # first-release book: book.tex + song.tex + brief.tex (+ .yaml)
 corpus/
   zh/          # self-authored evaluation corpus (five genres)
   README.md    # provenance and corpus rules
@@ -214,20 +378,33 @@ scripts/
   demo.sh      # target/demo.html
   wasm-hash.sh # native vs wasm32-wasip1 canonical bytes
   kp-verify.sh # K-P closure: gates + bench budget + length policy
+  studio.sh    # S1–S11: browser self-test, CSP, PDF pages, SSE reloads, font probe
+  local-assets.sh # GB2312 v2 fonts + welcome.md for browser-local mode
+web/
+  soma-kp.js       # ES module: compile / measure / break / render (no dependencies)
+  soma-kp.wasm     # built slice (32.7 KB gzip, zero imports) — rebuilt by scripts/web.sh
+  soma-kp.worker.js
+  demo.html        # interactive demo: width, size, family, indent, canvas mode
+  harness.html     # self-checking page used by the gate
+  parity.txt       # fixture shared by the Rust ABI test and the browser harness
 docs/
+  soma-atlas.html     # single-file research atlas: capability map, gates, numbers, pitfalls
+  studio.md           # browser/Studio boundary, flags, deployment and security
   architecture-v2.md  # frozen architecture
   fonts.md            # how a body font is scored and a metrics table is built
   mixed-font.md       # coverage, rescue faces, and the fallback plan
   font-preset.md      # proposal: ink-aware line width, one profile per font
-  adr/                # accepted decisions (ADR-0001 … 0038)
+  adr/                # accepted decisions (ADR-0001 … 0120)
   roadmap-v2.md       # A1–A6 + E1–E7 + Q′ schedule, work packages, gates
-  debt.md             # global not-done register (D01–D77, N1–N6)
+  debt.md             # global not-done register (D01–D119, N1–N6)
   proposal-effect-max.md # E1–E6 + Q′ proposal
+  proposal-web-kp.md  # Web v1: the K-P slice in wasm (measurement, ABI, budgets)
   e1-q-report.md      # E1–Q′ delivery report
   engine.md           # soma.engine/1: shape, defaults, errors, usage
   corpus-calibration.md # real corpus: metrics and proxy calibration
   docir.md            # DocIR contract: nodes, canonical JSON, validation
   math.md             # display math: TeX subset, box model, style constants
+  tikz.md             # TikZ subset: coordinates, paths, nodes, backends, limits
   template.md         # template DSL: YAML subset, units, cascade, hashes
   a1-report.md        # A1 milestone report (Gate A1 checklist)
   a2-report.md        # A2 milestone report (Gate A2 checklist)
@@ -266,6 +443,23 @@ For the visual demo and evaluation harness:
 
 ```sh
 scripts/demo.sh            # writes target/demo.html
+scripts/web.sh             # build the browser slice + W1-W6 gates
+scripts/web-bundle.sh      # -> target/soma-kp-standalone.html (open it, no server)
+
+# Browser-local Studio (no API round-trip)
+(cd crates/soma-studio-ui && trunk build --release)
+SOMA_FONT_DIR=/path/to/fonts bash scripts/local-assets.sh
+# serve crates/soma-studio-ui/dist and open ?local=1&selftest=1
+# hosted demo: https://somadoc.art
+
+# Server mode (file tree + native verification)
+cargo run -p soma-studio -- --input examples/book/welcome.md \
+  --template examples/templates/plex.yaml --metrics examples/templates/plex.smt \
+  --font /path/to/IBMPlexSansSC_Regular.ttf --font-bold /path/to/IBMPlexSansSC_Bold.ttf \
+  --font-mono /path/to/NotoSansMono-Regular.ttf --font-math /path/to/NewCMMath-Regular.otf \
+  --port 7070
+scripts/studio.sh          # S1–S11 (starts its own server)
+(cd . && python3 -m http.server 8000)   # or browse /web/demo.html
 scripts/wasm-hash.sh       # native vs wasm32-wasip1 canonical bytes
 scripts/bench.sh           # 100..4,000 atoms, P50/P95, budget check
 scripts/sweep.sh           # tolerance x badness scale
@@ -273,21 +467,30 @@ cargo run -p soma-eval --release -- inspect --kind mixed --atoms 500
 cargo run -p soma-eval --release -- blind preferences.csv
 ```
 
+`SOMA_FONT_DIR` must contain Plex regular/bold, Noto Sans Mono regular/bold and
+New Computer Modern Math. The fonts are not redistributed; the script generates
+GB2312 subsets and `dist/welcome.md` locally.
+
 ## Test
 
 ```sh
-scripts/gates.sh
+scripts/gates.sh    # core gates (format, clippy, tests, wasm, demo, boundaries, A/C/V-R/Q')
+scripts/studio.sh   # S1-S11 server mode (needs chromium)
+scripts/web.sh      # W1-W6 browser slice
+cargo test --workspace
 ```
 
-The gate runs format, clippy, 550 tests, a `wasm32-unknown-unknown` check for
-`soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-template`,
-`soma-layout`, `soma-md`, `soma-render-html`, `soma-render-svg`, and
+The gate runs format, clippy, **1,006 tests**, a `wasm32-unknown-unknown` check for
+`soma-core`, `soma-doc`, `soma-engine`, `soma-metrics`, `soma-highlight`, `soma-template`,
+`soma-layout`, `soma-tikz`, `soma-md`, `soma-render-html`, `soma-render-svg`, and
 `soma-render-pdf`, a
 native/`wasm32-wasip1` canonical-byte comparison (DocIR + inline layout + pages),
 a demo smoke render, the `soma-core` dependency-boundary check, Gate A, Gate C,
 Gate V/R (SVG visual lock + cross-renderer atom parity), and Gate Q′ (effect
 scorecard). `scripts/kp-verify.sh` additionally runs the benchmark budget and
-the deterministic length policy. The individual commands are still available:
+the deterministic length policy. The browser-local S12 check (local PDF in wasm)
+is run by opening `?selftest=1` on a local mode page. The individual commands are
+still available:
 
 ```sh
 cargo test
@@ -298,9 +501,32 @@ cargo check -p soma-core --target wasm32-unknown-unknown
 
 This is a clean-room implementation. See [`PROVENANCE.md`](PROVENANCE.md): no
 code from a prior Typst project is included or referenced; public references
-are the PRD, the published Knuth-Plass algorithm, and cited CJK rules. No
-Typst-dependent code is included.
+are the project brief ([`../prd.md`](../prd.md)), the published Knuth-Plass
+algorithm, and cited CJK rules. No Typst-dependent code is included.
+
+## Documentation
+
+[`docs/soma-atlas.html`](docs/soma-atlas.html) is the dated, single-file map;
+[`docs/README.md`](docs/README.md) indexes the normative contracts and the
+historical reports; [`REPO_LAYOUT.md`](REPO_LAYOUT.md) maps the tree and lists
+what is intentionally not committed.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). Behavior changes start with an ADR;
+determinism, clean-room provenance, and the gate baselines are not optional.
+
+## Security
+
+See [`SECURITY.md`](SECURITY.md). The Studio binds loopback by default and has
+no user authentication; deploy it behind TLS and a reverse proxy, with an
+explicit `--allow-origin` allowlist.
+
+## Code of conduct
+
+This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
 
 ## License
 
-Apache-2.0. See [`LICENSE`](LICENSE).
+Apache-2.0. See [`LICENSE`](LICENSE). The evaluation corpus is CC-BY-4.0; see
+[`corpus/README.md`](corpus/README.md).

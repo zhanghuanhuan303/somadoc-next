@@ -6,8 +6,8 @@
 
 use soma_core::{
     break_paragraph, break_paragraph_traced, Align, Atom, AtomKind, Boundary, BoundaryKind,
-    BoundaryRole, BreakConfig, BreakError, Breakability, Glue, Paragraph, ParagraphStyle, ParamSet,
-    PunctClass, StyleId, SyntheticMetrics, TrimPriority, Width,
+    BoundaryRole, BreakConfig, BreakError, Breakability, Decorations, Glue, Paragraph,
+    ParagraphStyle, ParamSet, PunctClass, StyleId, SyntheticMetrics, TrimPriority, Width,
 };
 
 fn atom(text: &str, kind: AtomKind, class: PunctClass, left: Width, right: Width) -> Atom {
@@ -16,6 +16,8 @@ fn atom(text: &str, kind: AtomKind, class: PunctClass, left: Width, right: Width
         kind,
         class,
         style: StyleId(0),
+        decor: Decorations::NONE,
+        link: None,
         compress_left: left,
         compress_right: right,
     }
@@ -42,6 +44,8 @@ fn style(width: Width) -> ParagraphStyle {
     ParagraphStyle {
         width,
         first_indent: Width::ZERO,
+        hang: Width::ZERO,
+        tracking: Width::ZERO,
         line_height: Width::from_em_frac(3, 2),
         align: Align::Justify,
     }
@@ -79,6 +83,45 @@ fn trailing_comma_paragraph() -> Paragraph {
     }
 }
 
+/// Eight CJK atoms with 1/4em of stretch between them, starting with an
+/// opening quote. Target 4em produces a justified first line and a ragged
+/// second line; the quote must give up its 1/2em left side bearing on the
+/// justified line even though that line is not overfull.
+fn opening_quote_paragraph() -> Paragraph {
+    let mut atoms = vec![atom(
+        "“",
+        AtomKind::Other,
+        PunctClass::Open,
+        Width::from_em_frac(1, 2),
+        Width::ZERO,
+    )];
+    for _ in 0..7 {
+        atoms.push(atom(
+            "中",
+            AtomKind::Cjk,
+            PunctClass::None,
+            Width::ZERO,
+            Width::ZERO,
+        ));
+    }
+    let boundary = Boundary {
+        breakable: Breakability::Allowed,
+        kind: BoundaryKind::Normal,
+        role: BoundaryRole::Plain,
+        glue: Glue {
+            width: Width::ZERO,
+            stretch: Width::from_em_frac(1, 4),
+            shrink: Width::ZERO,
+        },
+        penalty: 0,
+    };
+    Paragraph {
+        style: style(Width::from_em(4)),
+        atoms,
+        boundaries: (0..7).map(|_| boundary).collect(),
+    }
+}
+
 /// `（ 中 ）` with 0.25em on each outer side. Natural 3em, target 2.5em:
 /// 0.5em must be removed, 0.25em at the end and 0.25em at the start.
 fn double_trim_paragraph() -> Paragraph {
@@ -109,6 +152,138 @@ fn double_trim_paragraph() -> Paragraph {
         ],
         boundaries: vec![forbidden_boundary(), forbidden_boundary()],
     }
+}
+
+#[test]
+fn a_justified_line_trims_an_opening_quote_at_its_start() {
+    let result = break_paragraph(
+        &opening_quote_paragraph(),
+        &SyntheticMetrics::default(),
+        &BreakConfig::default(),
+    )
+    .unwrap();
+
+    assert!(
+        result.lines.len() > 1,
+        "the paragraph needs a ragged last line"
+    );
+    let line = &result.lines[0];
+    assert_eq!(line.start, 0);
+    assert_eq!(line.trim_left, Width::from_em_frac(1, 2));
+    assert!(
+        line.adjustment > 0,
+        "the trimmed bearing is returned to the glue"
+    );
+    let first = line.boxes.first().expect("a line has boxes");
+    assert_eq!(first.x, Width::ZERO - Width::from_em_frac(1, 2));
+    let last = line.boxes.last().expect("a line has boxes");
+    assert_eq!(
+        last.x.0 + last.advance.0,
+        line.indent.0 + line.target_width.0
+    );
+}
+
+#[test]
+fn a_ragged_line_trims_an_opening_quote_at_its_start() {
+    let paragraph = Paragraph {
+        style: ParagraphStyle {
+            align: Align::Left,
+            ..style(Width::from_em(5))
+        },
+        atoms: vec![
+            atom(
+                "“",
+                AtomKind::Other,
+                PunctClass::Open,
+                Width::from_em_frac(1, 2),
+                Width::ZERO,
+            ),
+            atom(
+                "中",
+                AtomKind::Cjk,
+                PunctClass::None,
+                Width::ZERO,
+                Width::ZERO,
+            ),
+            atom(
+                "文",
+                AtomKind::Cjk,
+                PunctClass::None,
+                Width::ZERO,
+                Width::ZERO,
+            ),
+            atom(
+                "字",
+                AtomKind::Cjk,
+                PunctClass::None,
+                Width::ZERO,
+                Width::ZERO,
+            ),
+        ],
+        boundaries: (0..3).map(|_| allowed_boundary()).collect(),
+    };
+    let result = break_paragraph(
+        &paragraph,
+        &SyntheticMetrics::default(),
+        &BreakConfig::default(),
+    )
+    .unwrap();
+    let line = &result.lines[0];
+    assert_eq!(line.natural_width, Width::from_em(4));
+    assert!(line.natural_width < line.target_width);
+    assert_eq!(line.trim_left, Width::from_em_frac(1, 2));
+    assert_eq!(line.trim_right, Width::ZERO);
+    assert_eq!(line.boxes[0].x, Width::ZERO - Width::from_em_frac(1, 2));
+    let last = line.boxes.last().expect("boxes");
+    assert_eq!(
+        last.x.0 + last.advance.0,
+        line.natural_width.0 - line.trim_left.0
+    );
+}
+
+#[test]
+fn a_ragged_line_without_an_opening_mark_keeps_its_start() {
+    let paragraph = Paragraph {
+        style: ParagraphStyle {
+            align: Align::Left,
+            ..style(Width::from_em(5))
+        },
+        atoms: vec![
+            atom(
+                "中",
+                AtomKind::Cjk,
+                PunctClass::None,
+                Width::ZERO,
+                Width::ZERO,
+            ),
+            atom(
+                "文",
+                AtomKind::Cjk,
+                PunctClass::None,
+                Width::ZERO,
+                Width::ZERO,
+            ),
+            atom(
+                "字",
+                AtomKind::Cjk,
+                PunctClass::None,
+                Width::ZERO,
+                Width::ZERO,
+            ),
+        ],
+        boundaries: (0..2).map(|_| allowed_boundary()).collect(),
+    };
+    let result = break_paragraph(
+        &paragraph,
+        &SyntheticMetrics::default(),
+        &BreakConfig::default(),
+    )
+    .unwrap();
+    let line = &result.lines[0];
+    assert_eq!(line.trim_left, Width::ZERO);
+    assert_eq!(line.boxes[0].x, Width::ZERO);
+    let last = line.boxes.last().expect("boxes");
+    assert_eq!(last.x.0 + last.advance.0, line.natural_width.0);
 }
 
 #[test]

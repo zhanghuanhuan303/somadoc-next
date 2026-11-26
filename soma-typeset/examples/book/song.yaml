@@ -1,0 +1,372 @@
+# A book template: cover, contents, chapter openings, running heads, folio.
+# Build with: scripts/book.sh
+name: soma-song
+version: 1
+
+page:
+  size: A5
+  margin: 16mm
+  margin-top: 18mm
+  header: 6mm
+  footer: 6mm
+  header-text: running-title
+  folio: "{page}"
+  start-master: chapter
+  # The cover and contents use roman numerals; the body restarts at 1.
+  front-matter: roman
+
+# A book puts every chapter on a new page. A capability sheet may set
+# `mode: sample` to keep the flow continuous; the heading style is the same.
+layout:
+  mode: book
+
+cover:
+  master: cover
+
+toc:
+  depth: 2
+  title: 目录
+  figures: 图目录
+  tables: 表目录
+
+index:
+  title: 索引
+
+numbering:
+  headings: chinese-chapter
+  depth: 2
+  figures: "图 {n}"
+  tables: "表 {n}"
+  equations: "({n})"
+
+masters:
+  - name: cover
+    header: 0
+    footer: 0
+  - name: chapter
+    header: 0
+    footer: 6mm
+    folio: "{page}"
+
+table:
+  header-rule-width: 0.6pt
+  outer-rule-width: 0.8pt
+
+styles:
+  - selector:
+      element: document
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.7
+      align: justify
+      color: "#1a1a1a"
+
+  # Inline emphasis keeps the serif family; the weight picks the second face.
+  - selector:
+      element: strong
+    declarations:
+      family: serif
+      weight: bold
+
+  - selector:
+      element: emphasis
+    declarations:
+      slant: italic
+
+  # Inline code switches to the sans family, which also proves that a family
+  # can change inside a paragraph.
+  - selector:
+      element: code
+    declarations:
+      family: sans
+      font-size: 9pt
+
+  # Quotations and lists share one shape: indented on both sides, with no
+  # first-line indent, so the indent itself says "this is another voice".
+  # Formulas use the body size; the math face is a different family, not a
+  # different size.
+  # The math face is a Latin design: its cap height is ~0.7 em against a CJK
+  # face's ~0.88, so the same point size looks smaller next to Han. Set it a
+  # little larger so the formula matches the body's optical size.
+  - selector:
+      element: mathBlock
+    declarations:
+      font-size: 12pt
+      space-before: 0.5em
+      space-after: 0.5em
+
+  - selector:
+      element: math
+    declarations:
+      font-size: 11pt
+
+  # A code block is not prose: smaller, tighter, in the sans family, and no
+  # first-line indent. The panel fill and inset separate it from the body
+  # without drawing a full border (ADR-0090).
+  - selector:
+      element: codeBlock
+    declarations:
+      family: sans
+      font-size: 8.75pt
+      line-height: 1.45
+      background: "#f7f7f5"
+      padding-top: 0.75em
+      padding-right: 1em
+      padding-bottom: 0.75em
+      padding-left: 1em
+      # Justification would redistribute the spaces that carry a diagram's
+      # indentation.
+      align: left
+      first-indent: 0
+      space-before: 1em
+      space-after: 1em
+
+  - selector:
+      element: blockQuote
+    declarations:
+      indent-left: 2em
+      indent-right: 2em
+      first-indent: 0
+      space-before: 0.6em
+      space-after: 0.6em
+
+  - selector:
+      element: list
+    declarations:
+      indent-left: 1.5em
+      first-indent: 0
+      space-before: 0.5em
+      space-after: 0.5em
+
+  - selector:
+      element: listItem
+    declarations:
+      indent-left: 1em
+
+  # A nested list steps in by 0.6em plus its item column (1em total 1.6em),
+  # so the third level still has a usable measure.
+  - selector:
+      element: list
+      within: list
+    declarations:
+      indent-left: 0.6em
+      space-before: 0.15em
+      space-after: 0.15em
+
+  # A negative `first-indent` is a hanging indent: the marker sits 1em left
+  # of the item's text column, and every line after the first starts at the
+  # text column (ADR-0058).
+  - selector:
+      element: paragraph
+      within: listItem
+    declarations:
+      first-indent: -1em
+      space-before: 0.15em
+
+  # A quotation is indented on both sides; that indent is the "this is another
+  # voice" signal, so its paragraphs do not add a first-line indent on top.
+  - selector:
+      element: paragraph
+      within: blockQuote
+    declarations:
+      first-indent: 0
+
+  - selector:
+      element: paragraph
+    declarations:
+      first-indent: 2em
+      space-before: 0
+      space-after: 0
+
+  # Chapter titles: centred, generous space above. Level 1 opens a page;
+  # level 2 is a section heading inside a chapter.
+  - selector:
+      element: heading
+    declarations:
+      family: sans
+      weight: bold
+      font-size: 17pt
+      line-height: 1.6
+      align: center
+      space-before: 0
+      space-after: 1.1em
+      keep-with-next: true
+
+  - selector:
+      element: heading
+      level: 1
+    declarations:
+      page-break-before: true
+
+  - selector:
+      element: heading
+      level: 2
+    declarations:
+      font-size: 13pt
+      line-height: 1.6
+      align: left
+      space-before: 1em
+      space-after: 0.4em
+
+  # Table cells are ragged, not justified: a two-character cell must not be
+  # stretched to the column width.
+  - selector:
+      element: paragraph
+      within: cell
+    declarations:
+      font-size: 9.5pt
+      line-height: 1.4
+      first-indent: 0
+      align: left
+
+  - selector:
+      element: figureCaption
+    declarations:
+      font-size: 9pt
+      line-height: 1.4
+      align: center
+      first-indent: 0
+      space-before: 0.3em
+      space-after: 1em
+
+  - selector:
+      element: tableCaption
+    declarations:
+      font-size: 9pt
+      line-height: 1.4
+      align: center
+      first-indent: 0
+      space-before: 1em
+      space-after: 0.3em
+
+  - selector:
+      element: indexEntry
+    declarations:
+      font-size: 9pt
+      line-height: 1.8
+      first-indent: 0
+
+  - selector:
+      element: indexTitle
+    declarations:
+      font-size: 17pt
+      align: center
+      space-after: 1.2em
+
+  - selector:
+      element: toc
+    declarations:
+      font-size: 9.5pt
+      line-height: 1.8
+      first-indent: 0
+
+  # Contents rows: the chapter row is the group heading; section rows are
+  # lighter and set in. The spacing, not a divider, makes the grouping.
+  - selector:
+      element: tocChapter
+    declarations:
+      font-size: 10pt
+      weight: bold
+      line-height: 2
+      space-before: 0.5em
+      first-indent: 0
+
+  - selector:
+      element: tocSection
+    declarations:
+      font-size: 9.5pt
+      line-height: 1.8
+      space-before: 0.15em
+      first-indent: 0
+
+  - selector:
+      element: tocListTitle
+    declarations:
+      font-size: 11.5pt
+      weight: bold
+      align: left
+      space-before: 1.2em
+      space-after: 0.4em
+
+  - selector:
+      element: tocTitle
+    declarations:
+      font-size: 17pt
+      align: center
+      space-after: 1.2em
+
+  - selector:
+      element: coverTitle
+    declarations:
+      font-size: 26pt
+      line-height: 1.2
+      align: center
+      space-before: 52mm
+      space-after: 3mm
+
+  - selector:
+      element: coverSubtitle
+    declarations:
+      font-size: 12pt
+      line-height: 1.4
+      align: center
+      space-after: 45mm
+
+  - selector:
+      element: coverAuthor
+    declarations:
+      font-size: 10pt
+      align: center
+      space-after: 2mm
+
+  - selector:
+      element: coverDate
+    declarations:
+      font-size: 9.5pt
+      align: center
+
+  - selector:
+      element: coverColophon
+    declarations:
+      font-size: 8pt
+      line-height: 1.5
+      color: "#666666"
+      letter-spacing: 0.04em
+      align: center
+      space-before: 0
+
+  # The hairline above the colophon: a quiet 40% rule, not a full frame.
+  - selector:
+      element: coverColophonRule
+    declarations:
+      color: "#b3b3b3"
+      space-before: 34mm
+      space-after: 1em
+
+  # Page furniture has a fixed, quiet style: it must not inherit a heading's
+  # weight or size.
+  - selector:
+      element: runningHead
+    declarations:
+      family: sans
+      font-size: 8.5pt
+      weight: normal
+      color: "#666666"
+      letter-spacing: 0.05em
+      align: left
+
+  - selector:
+      element: folio
+    declarations:
+      family: sans
+      font-size: 9pt
+      weight: normal
+      color: "#666666"
+      align: center
+
+  - selector:
+      element: footnote
+    declarations:
+      font-size: 8pt
+      line-height: 1.5
+      first-indent: 0

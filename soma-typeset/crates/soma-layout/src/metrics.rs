@@ -10,8 +10,8 @@
 //!
 //! Both are pure functions of `(table, style)`; no state, no cache, no fonts.
 
-use soma_core::{LineMetrics, Metrics, StyleId, Width};
-use soma_metrics::MetricsTable;
+use soma_core::{LineMetrics, MathParam, MathVariant, Metrics, StyleId, Width};
+use soma_metrics::{Face, MetricsTable};
 use soma_template::{ComputedStyle, FontWeight, StyledDoc};
 
 /// Em size used by the kernel: one em is 4096 units.
@@ -78,6 +78,43 @@ impl Metrics for TableMetrics<'_> {
         }
     }
 
+    fn math_param(&self, param: MathParam, _style: StyleId) -> Option<i32> {
+        self.table.math_face()?.math().constant(param.index())
+    }
+
+    fn math_ink(&self, text: &str, _style: StyleId) -> Option<(Width, Width)> {
+        math_ink(self.table.math_face()?, text, self.size)
+    }
+
+    fn math_italic(&self, text: &str, _style: StyleId) -> Width {
+        match self.table.math_face() {
+            Some(face) => math_italic(face, text, self.size),
+            None => Width::ZERO,
+        }
+    }
+
+    fn math_variant_count(&self, text: &str, _style: StyleId) -> u16 {
+        math_variant_count(self.table.math_face(), text)
+    }
+
+    fn math_variant(&self, text: &str, index: u16, _style: StyleId) -> Option<MathVariant> {
+        math_variant_of(self.table.math_face()?, text, index, self.size)
+    }
+
+    fn math_top_accent(&self, text: &str, _style: StyleId) -> Option<Width> {
+        math_top_accent(self.table.math_face()?, text, self.size)
+    }
+
+    fn math_has_glyph(&self, character: char, _style: StyleId) -> bool {
+        self.table
+            .math_face()
+            .is_some_and(|face| face.has(character as u32))
+    }
+
+    fn math_glyph_bottom(&self, text: &str, _style: StyleId) -> Option<Width> {
+        math_glyph_bottom(self.table.math_face()?, text, self.size)
+    }
+
     fn ink_right(&self, text: &str, _style: StyleId) -> Option<Width> {
         let face = self.face()?;
         let codepoint = last_codepoint(text)?;
@@ -124,9 +161,10 @@ impl<'a> StyledMetrics<'a> {
     }
 
     /// The face that draws `text`: the style's own face when it has every
-    /// glyph, otherwise the first rescue face that does. `None` when even the
-    /// rescue faces cannot draw it, and the caller falls back to the style face
-    /// (which will render `.notdef`, but the widths stay sane).
+    /// glyph, otherwise the first rescue face that does, then the math face
+    /// (which carries most symbols a text face omits, such as the micro sign).
+    /// `None` when nothing can draw it, and the caller falls back to the style
+    /// face (which will render `.notdef`, but the widths stay sane).
     fn face_for(&self, text: &str, computed: &ComputedStyle) -> Option<&soma_metrics::Face> {
         let primary = self.face_of(computed)?;
         if primary.covers(text) {
@@ -137,18 +175,37 @@ impl<'a> StyledMetrics<'a> {
             .iter()
             .filter(|face| face.family == soma_metrics::FAMILY_FALLBACK)
             .find(|face| face.covers(text))
+            .or_else(|| self.table.math_face().filter(|face| face.covers(text)))
             // No rescue face either: keep the style's face so widths stay
             // sane. The glyph will render as .notdef, which is visible.
             .or(Some(primary))
     }
 
-    fn face_of(&self, computed: &ComputedStyle) -> Option<&soma_metrics::Face> {
-        let index = face_index(computed);
-        // Faces are laid out as regular(serif, sans), bold(serif, sans).
-        // Fall back to the same family when the bold face is missing.
-        self.table
-            .face(index)
-            .or_else(|| self.table.face(index % 2))
+    fn face_of(&self, computed: &ComputedStyle) -> Option<&Face> {
+        // Search by family and weight rather than by slot: a table written in
+        // any order then still answers with the face the style asked for.
+        let role = soma_template::family_role(computed.family.as_deref());
+        let family = match role {
+            soma_template::FamilyRole::Serif => soma_metrics::FAMILY_SERIF,
+            soma_template::FamilyRole::Sans => soma_metrics::FAMILY_SANS,
+            soma_template::FamilyRole::Mono => soma_metrics::FAMILY_MONO,
+        };
+        let bold = computed.weight == FontWeight::Bold;
+        let faces = self.table.faces();
+        let by_family = |family: u8| {
+            faces
+                .iter()
+                .find(|face| face.family == family && (face.weight != 0) == bold)
+                .or_else(|| faces.iter().find(|face| face.family == family))
+        };
+        // A table measured without a mono face still has to lay out code: a
+        // mono template falls back to the sans face, then to the body face.
+        by_family(family)
+            .or_else(|| {
+                (role == soma_template::FamilyRole::Mono)
+                    .then(|| by_family(soma_metrics::FAMILY_SANS))
+                    .flatten()
+            })
             .or_else(|| self.table.face(0))
     }
 }
@@ -196,12 +253,50 @@ impl Metrics for StyledMetrics<'_> {
         }
     }
 
+    fn has_glyph(&self, character: char, style: StyleId) -> bool {
+        // A formula draws from the math face, whose coverage differs from the
+        // body face's; "can this document draw the character" is the union.
+        let computed = self.computed(style);
+        let math = self
+            .table
+            .math_face()
+            .is_some_and(|face| face.has(character as u32));
+        math || self
+            .face_of(&computed)
+            .is_some_and(|face| face.has(character as u32))
+    }
+
     fn math_advance(&self, text: &str, style: StyleId) -> Width {
         let computed = self.computed(style);
-        match self.table.math_face() {
-            Some(face) => Width(scale(face.advance(text), computed.font_size.0)),
-            None => self.advance(text, style),
+        let Some(math) = self.table.math_face() else {
+            return self.advance(text, style);
+        };
+        // A `\text{...}` run inside a formula is drawn from the *text* face:
+        // the math face carries no Han glyphs, and the PDF writer picks the
+        // face per character. Measure the same way or the formula's width and
+        // the drawn positions disagree.
+        let body = self.face_of(&computed);
+        let rescue = self
+            .table
+            .faces()
+            .iter()
+            .find(|face| face.family == soma_metrics::FAMILY_FALLBACK);
+        let mut total: i64 = 0;
+        for character in text.chars() {
+            let codepoint = character as u32;
+            let face = if math.has(codepoint) {
+                math
+            } else if let Some(face) = body.filter(|face| face.has(codepoint)) {
+                face
+            } else if let Some(face) = rescue.filter(|face| face.has(codepoint)) {
+                face
+            } else {
+                math
+            };
+            total += i64::from(face.advance_at(codepoint));
         }
+        let total = total.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+        Width(scale(total, computed.font_size.0))
     }
 
     fn math_metrics(&self, style: StyleId) -> LineMetrics {
@@ -214,6 +309,48 @@ impl Metrics for StyledMetrics<'_> {
             },
             None => self.line_metrics(style),
         }
+    }
+
+    fn math_param(&self, param: MathParam, _style: StyleId) -> Option<i32> {
+        self.table.math_face()?.math().constant(param.index())
+    }
+
+    fn math_ink(&self, text: &str, style: StyleId) -> Option<(Width, Width)> {
+        let computed = self.computed(style);
+        math_ink(self.table.math_face()?, text, computed.font_size)
+    }
+
+    fn math_italic(&self, text: &str, style: StyleId) -> Width {
+        let computed = self.computed(style);
+        match self.table.math_face() {
+            Some(face) => math_italic(face, text, computed.font_size),
+            None => Width::ZERO,
+        }
+    }
+
+    fn math_variant_count(&self, text: &str, _style: StyleId) -> u16 {
+        math_variant_count(self.table.math_face(), text)
+    }
+
+    fn math_variant(&self, text: &str, index: u16, style: StyleId) -> Option<MathVariant> {
+        let computed = self.computed(style);
+        math_variant_of(self.table.math_face()?, text, index, computed.font_size)
+    }
+
+    fn math_top_accent(&self, text: &str, style: StyleId) -> Option<Width> {
+        let computed = self.computed(style);
+        math_top_accent(self.table.math_face()?, text, computed.font_size)
+    }
+
+    fn math_has_glyph(&self, character: char, _style: StyleId) -> bool {
+        self.table
+            .math_face()
+            .is_some_and(|face| face.has(character as u32))
+    }
+
+    fn math_glyph_bottom(&self, text: &str, style: StyleId) -> Option<Width> {
+        let computed = self.computed(style);
+        math_glyph_bottom(self.table.math_face()?, text, computed.font_size)
     }
 
     fn uses_fallback(&self, text: &str, style: StyleId) -> bool {
@@ -249,36 +386,6 @@ impl Metrics for StyledMetrics<'_> {
     }
 }
 
-/// `sans`/`mono`/`hei`/`gothic` select the second face; everything else the
-/// first. Matching is ASCII case-insensitive and allocation-free.
-fn face_index(computed: &ComputedStyle) -> usize {
-    let family = computed.family.as_deref().unwrap_or("");
-    let sans = contains_ignore_ascii_case(family, "sans")
-        || contains_ignore_ascii_case(family, "mono")
-        || contains_ignore_ascii_case(family, "hei")
-        || contains_ignore_ascii_case(family, "gothic");
-    let base = if sans { 1 } else { 0 };
-    if computed.weight == FontWeight::Bold {
-        base + 2
-    } else {
-        base
-    }
-}
-
-fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
-    let haystack = haystack.as_bytes();
-    let needle = needle.as_bytes();
-    if needle.is_empty() {
-        return true;
-    }
-    if needle.len() > haystack.len() {
-        return false;
-    }
-    haystack
-        .windows(needle.len())
-        .any(|window| window.eq_ignore_ascii_case(needle))
-}
-
 /// The first glyph of an atom. A Latin atom is a whole run; its leading edge is
 /// the first character's.
 fn first_codepoint(text: &str) -> Option<u32> {
@@ -288,6 +395,83 @@ fn first_codepoint(text: &str) -> Option<u32> {
 /// The last glyph of an atom; its trailing edge is what a line end trims.
 fn last_codepoint(text: &str) -> Option<u32> {
     text.chars().last().map(|character| character as u32)
+}
+
+/// Vertical ink of a math run from the table's per-glyph records, scaled to
+/// `size`. `None` when any character has no record (a Han character inside
+/// `\text`, for example), so the caller falls back to the em box.
+fn math_ink(face: &soma_metrics::Face, text: &str, size: Width) -> Option<(Width, Width)> {
+    let mut above = 0i32;
+    let mut below = 0i32;
+    let mut any = false;
+    for character in text.chars() {
+        let (top, bottom, _) = face.math().glyph(character as u32)?;
+        above = above.max(top);
+        below = below.max(bottom);
+        any = true;
+    }
+    if !any {
+        return None;
+    }
+    Some((
+        Width(scale(above.max(0), size.0)),
+        Width(scale(below.max(0), size.0)),
+    ))
+}
+
+/// Italic correction of a math run's last glyph, scaled to `size`.
+fn math_italic(face: &soma_metrics::Face, text: &str, size: Width) -> Width {
+    let Some(codepoint) = last_codepoint(text) else {
+        return Width::ZERO;
+    };
+    face.math()
+        .glyph(codepoint)
+        .map(|(_, _, italic)| Width(scale(italic, size.0)))
+        .unwrap_or(Width::ZERO)
+}
+
+/// Number of vertical variants of the first glyph in `text`.
+fn math_variant_count(face: Option<&soma_metrics::Face>, text: &str) -> u16 {
+    let Some(face) = face else {
+        return 0;
+    };
+    let Some(codepoint) = first_codepoint(text) else {
+        return 0;
+    };
+    face.math().variants(codepoint).len().min(u16::MAX as usize) as u16
+}
+
+/// Signed ink bottom of the first glyph in `text`, scaled to `size`.
+fn math_glyph_bottom(face: &soma_metrics::Face, text: &str, size: Width) -> Option<Width> {
+    let codepoint = first_codepoint(text)?;
+    face.math()
+        .glyph(codepoint)
+        .map(|(_, bottom, _)| Width(scale(bottom, size.0)))
+}
+
+/// Top accent attachment of the first glyph in `text`, scaled to `size`.
+fn math_top_accent(face: &soma_metrics::Face, text: &str, size: Width) -> Option<Width> {
+    let codepoint = first_codepoint(text)?;
+    face.math()
+        .top_accent(codepoint)
+        .map(|value| Width(scale(value, size.0)))
+}
+
+/// One vertical variant of the first glyph in `text`, scaled to `size`.
+fn math_variant_of(
+    face: &soma_metrics::Face,
+    text: &str,
+    index: u16,
+    size: Width,
+) -> Option<MathVariant> {
+    let codepoint = first_codepoint(text)?;
+    let variant = face.math().variants(codepoint).get(index as usize)?;
+    Some(MathVariant {
+        advance: Width(scale(variant.advance, size.0)),
+        above: Width(scale(variant.above, size.0)),
+        below: Width(scale(variant.below, size.0)),
+        right_gap: Width(scale(variant.right_gap, size.0)),
+    })
 }
 
 /// Scale a table value (1/4096 em) by a font size (also 1/4096 em).

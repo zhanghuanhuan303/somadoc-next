@@ -62,6 +62,9 @@ pub struct Line {
     /// True when this line ends at a `Forced` boundary that is not the
     /// paragraph end. Such a line is not stretched and has no `short_score`.
     pub forced_end: bool,
+    /// True when the line ends at a hyphenation point: the renderer draws a
+    /// hyphen after the last box and the width already includes it (ADR-0059).
+    pub hyphenated: bool,
     pub boxes: Vec<AtomBox>,
 }
 
@@ -87,14 +90,13 @@ impl BreakerKind {
 }
 
 /// Which fallback stage produced the result. `total_cost` is only comparable
-/// within the same stage. `ForbiddenRescue` and `Overfull` are reserved for the
-/// full ladder; the current engine emits `Normal` or `Emergency`.
+/// within the same stage. `ForbiddenRescue` is the last resort of the full
+/// ladder; the current engine emits `Normal`, `Emergency` or `ForbiddenRescue`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FallbackStage {
     Normal,
     Emergency,
     ForbiddenRescue,
-    Overfull,
 }
 
 impl FallbackStage {
@@ -103,7 +105,6 @@ impl FallbackStage {
             Self::Normal => "normal",
             Self::Emergency => "emergency",
             Self::ForbiddenRescue => "forbiddenRescue",
-            Self::Overfull => "overfull",
         }
     }
 }
@@ -144,9 +145,15 @@ impl Line {
 
         write!(
             out,
-            "],\"cost\":{},\"overfull\":{},\"emergency\":{},\"forcedEnd\":{},\"boxes\":[",
+            "],\"cost\":{},\"overfull\":{},\"emergency\":{},\"forcedEnd\":{},",
             self.cost.0, self.overfull, self.emergency, self.forced_end
         )?;
+        // Only a hyphenated line writes the key, so every other line keeps its
+        // bytes from before hyphenation existed.
+        if self.hyphenated {
+            out.write_str("\"hyphenated\":true,")?;
+        }
+        out.write_str("\"boxes\":[")?;
 
         for (box_index, atom_box) in self.boxes.iter().enumerate() {
             if box_index > 0 {
@@ -253,6 +260,7 @@ mod tests {
                 overfull: false,
                 emergency: false,
                 forced_end: false,
+                hyphenated: false,
                 boxes: vec![AtomBox {
                     atom: 0,
                     x: Width::ZERO,

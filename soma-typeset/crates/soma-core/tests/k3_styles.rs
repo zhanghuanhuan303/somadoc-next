@@ -3,8 +3,8 @@
 
 use soma_core::{
     break_paragraph, break_paragraph_traced, Align, Atom, AtomKind, Boundary, BoundaryKind,
-    BoundaryRole, BreakConfig, Breakability, Glue, GlyphMetrics, LineMetrics, Metrics, Paragraph,
-    ParagraphStyle, PunctClass, StyleId, SyntheticMetrics, Weight, Width,
+    BoundaryRole, BreakConfig, Breakability, Decorations, Glue, GlyphMetrics, LineMetrics, Metrics,
+    Paragraph, ParagraphStyle, PunctClass, StyleId, SyntheticMetrics, Weight, Width,
 };
 
 struct StyleMetrics;
@@ -57,6 +57,8 @@ fn atom(text: &str, kind: AtomKind, style: StyleId) -> Atom {
         kind,
         class: PunctClass::None,
         style,
+        decor: Decorations::NONE,
+        link: None,
         compress_left: Width::ZERO,
         compress_right: Width::ZERO,
     }
@@ -77,6 +79,8 @@ fn paragraph(width: Width, atoms: Vec<Atom>, boundaries: Vec<Boundary>) -> Parag
         style: ParagraphStyle {
             width,
             first_indent: Width::ZERO,
+            hang: Width::ZERO,
+            tracking: Width::ZERO,
             line_height: Width::from_em_frac(3, 2),
             align: Align::Justify,
         },

@@ -1,0 +1,18 @@
+<h1>HTML 前端补充</h1>
+
+<p>主样张由 LaTeX 前端解析；这一页用 HTML 前端，补上只有 HTML 才有的两项：<code>&lt;colgroup&gt;</code> 的相对列宽与原生 <code>&lt;ruby&gt;</code> 注音。两者都落到同一套 DocIR，再由同一个排版内核处理。</p>
+
+<table>
+  <caption>列宽来自 colgroup：第一列 25%，第二列按内容</caption>
+  <colgroup>
+    <col width="25%">
+    <col>
+  </colgroup>
+  <tr><th>序号</th><th>说明</th></tr>
+  <tr><td>1</td><td>短列按 25% 的提示占四分之一，长列拿走剩余宽度；列宽仍保留内容下限。</td></tr>
+  <tr><td>2</td><td>同样的表格如果去掉 colgroup，两列会按内容重新分配，而不是各占一半。</td></tr>
+</table>
+
+<p>注音来自 HTML 原生语法：<ruby>汉字<rt>hàn zì</rt></ruby> 的读音落在基字正上方，基字保持一个原子；换行时注音不会与它分开。</p>
+
+<p>这一页同样走完整的排版管线：标题生成书签，表格有题注和重复表头，注音进入行盒，页面结果参与跨端哈希。</p>

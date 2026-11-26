@@ -5,9 +5,9 @@
 
 use soma_core::{
     break_paragraph, break_paragraph_greedy, break_paragraph_traced, Align, Atom, AtomKind,
-    Boundary, BoundaryKind, BoundaryRole, BreakConfig, Breakability, BreakerKind, FallbackStage,
-    Glue, GreedyMode, Paragraph, ParagraphStyle, ParamSet, PunctClass, StyleId, SyntheticMetrics,
-    Width,
+    Boundary, BoundaryKind, BoundaryRole, BreakConfig, Breakability, BreakerKind, Decorations,
+    FallbackStage, Glue, GreedyMode, Paragraph, ParagraphStyle, ParamSet, PunctClass, StyleId,
+    SyntheticMetrics, Width,
 };
 
 fn atom(text: &str) -> Atom {
@@ -16,6 +16,8 @@ fn atom(text: &str) -> Atom {
         kind: AtomKind::Cjk,
         class: PunctClass::None,
         style: StyleId(0),
+        decor: Decorations::NONE,
+        link: None,
         compress_left: Width::ZERO,
         compress_right: Width::ZERO,
     }
@@ -35,6 +37,8 @@ fn style(width: Width) -> ParagraphStyle {
     ParagraphStyle {
         width,
         first_indent: Width::ZERO,
+        hang: Width::ZERO,
+        tracking: Width::ZERO,
         line_height: Width::from_em_frac(3, 2),
         align: Align::Justify,
     }
@@ -123,6 +127,8 @@ fn fallback_reports_emergency_stage() {
             kind: AtomKind::LatinRun,
             class: PunctClass::None,
             style: StyleId(0),
+            decor: Decorations::NONE,
+            link: None,
             compress_left: Width::ZERO,
             compress_right: Width::ZERO,
         }],

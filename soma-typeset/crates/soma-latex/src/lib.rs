@@ -12,7 +12,14 @@
 //! `verbatim`, `tabular` (with `\hline`/booktabs rules, `\multicolumn`),
 //! `\title`/`\author`/`\date`, and `\newpage`/`\clearpage`.
 //!
-//! Not supported: macros, `\usepackage` semantics, counters/cross-references,
+//! User macros and counters are expanded at the source level before parsing:
+//! `\newcommand`/`\renewcommand`/`\providecommand`/`\def` (0–9 braced
+//! arguments), and `\newcounter`/`\setcounter`/`\stepcounter`/
+//! `\refstepcounter` with `\arabic`, `\roman`, `\Roman`, `\alph`, `\Alph`,
+//! `\value`, and `\the<name>` output.
+//!
+//! Not supported: `\newcommand*` variants, optional macro arguments, `\let`,
+//! `\newenvironment`, `\usepackage` semantics, cross-references,
 //! `\includegraphics`, bibliography, and a full math implementation (the math
 //! source is stored verbatim for a future math adapter).
 
@@ -21,19 +28,21 @@
 
 extern crate alloc;
 
+mod macros;
+
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
 use soma_doc::block::{
-    BlockQuote, Cell, CodeBlock, Column, Figure, Heading, List, ListItem, MathBlock, PageBreak,
-    Paragraph, Row, Table,
+    BlockQuote, Cell, CodeBlock, Column, DiagramBlock, DiagramDialect, Figure, Heading, List,
+    ListItem, MathBlock, PageBreak, Paragraph, Row, Table,
 };
 use soma_doc::inline::FootnoteRef;
 use soma_doc::inline::{
-    Container, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link, MathInline,
+    Container, Image, IndexRef, Inline, LineBreak, LineBreakKind, Link, MathInline, Ruby,
 };
-use soma_doc::meta::{Author, CoverData, Date, DocumentMeta, ImageRef};
+use soma_doc::meta::{Author, CoverData, Date, DocumentMeta, ImageRef, MetaField};
 use soma_doc::node::NodeMeta;
 use soma_doc::{Block, Code, Document, FootnoteDef, Text};
 
@@ -45,16 +54,32 @@ pub fn parse_latex(source: &str) -> Document {
     parse_latex_with_meta(source, DocumentMeta::new())
 }
 
+/// Parse one inline LaTeX fragment, such as `\textbf{粗体}` or
+/// `\href{url}{文字}`. The caller is a compound front end that has already
+/// found the command and its arguments.
+///
+/// The returned inlines use synthesized spans; footnote definitions are
+/// returned separately so the caller can merge or reject them before
+/// constructing a document. There is no implicit document and no metadata.
+pub fn parse_latex_inline_fragment(source: &str) -> (Vec<Inline>, Vec<FootnoteDef>) {
+    let cleaned = strip_comments(source);
+    let expanded = macros::expand(&cleaned);
+    let mut parser = Parser::new(&expanded);
+    let inlines = parser.parse_inlines(false);
+    (inlines, parser.footnotes)
+}
+
 /// Parse LaTeX into DocIR. Preamble `\title`/`\author`/`\date` fill the
 /// metadata when the caller did not set it.
 pub fn parse_latex_with_meta(source: &str, mut meta: DocumentMeta) -> Document {
     let cleaned = strip_comments(source);
-    let body = match cleaned.find("\\begin{document}") {
-        Some(offset) => &cleaned[offset + "\\begin{document}".len()..],
-        None => cleaned.as_str(),
+    let expanded = macros::expand(&cleaned);
+    let body = match expanded.find("\\begin{document}") {
+        Some(offset) => &expanded[offset + "\\begin{document}".len()..],
+        None => expanded.as_str(),
     };
     if meta.title.is_none() {
-        if let Some(title) = preamble_group(&cleaned, "title") {
+        if let Some(title) = preamble_group(&expanded, "title") {
             let mut parser = Parser::new(title);
             let inlines = parser.parse_inlines(false);
             if !inlines.is_empty() {
@@ -63,14 +88,14 @@ pub fn parse_latex_with_meta(source: &str, mut meta: DocumentMeta) -> Document {
         }
     }
     if meta.authors.is_empty() {
-        if let Some(authors) = preamble_group(&cleaned, "author") {
+        if let Some(authors) = preamble_group(&expanded, "author") {
             for author in split_authors(authors) {
                 meta.authors.push(Author::new(author));
             }
         }
     }
     if meta.date.is_none() {
-        if let Some(date) = preamble_group(&cleaned, "date") {
+        if let Some(date) = preamble_group(&expanded, "date") {
             if let Some(value) = parse_date(date.trim()) {
                 meta.date = Some(value);
             }
@@ -78,13 +103,37 @@ pub fn parse_latex_with_meta(source: &str, mut meta: DocumentMeta) -> Document {
     }
     // `\subtitle{...}` has no DocIR field of its own; it belongs to the cover,
     // which the layout generates from the metadata.
-    if let Some(subtitle) = preamble_group(&cleaned, "subtitle") {
+    if let Some(subtitle) = preamble_group(&expanded, "subtitle") {
         let text = subtitle.trim();
         if !text.is_empty() {
             let cover = meta.cover.get_or_insert_with(CoverData::new);
             if cover.subtitle.is_none() {
                 cover.subtitle = Some(String::from(text));
             }
+        }
+    }
+    // BCP 47 tag for the PDF `/Lang` entry and for CJK-specific defaults.
+    if meta.language.is_none() {
+        if let Some(language) = preamble_group(&expanded, "language") {
+            let tag = language.trim();
+            if !tag.is_empty() {
+                meta.language = Some(String::from(tag));
+            }
+        }
+    }
+    // A colophon is cover data, not body content. A `\\` in its group is a
+    // deliberate line break; the layout turns each line into a paragraph.
+    if let Some(colophon) = preamble_group(&expanded, "colophon") {
+        let text = colophon.replace("\\\\", "\n");
+        let text = text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<alloc::vec::Vec<_>>()
+            .join("\n");
+        if !text.is_empty() {
+            let cover = meta.cover.get_or_insert_with(CoverData::new);
+            cover.fields.push(MetaField::new("colophon", text));
         }
     }
 
@@ -552,7 +601,7 @@ impl<'a> Parser<'a> {
                     self.read_command();
                     continue;
                 }
-                Some(_) => {
+                Some(command) if !starts_inline_run(command) => {
                     // An unknown block command: keep a braced argument as text.
                     self.read_command();
                     if let Some(group) = self.read_group() {
@@ -566,7 +615,10 @@ impl<'a> Parser<'a> {
                     }
                     continue;
                 }
-                None => {}
+                // An inline command (`\textbf`, `\verb`, …) at the start of a
+                // block is not a block command: fall through and let
+                // `parse_inlines` read it as part of the paragraph.
+                Some(_) | None => {}
             }
 
             let before = self.pos;
@@ -648,7 +700,7 @@ impl<'a> Parser<'a> {
         let env = self.peek_env()?.to_string();
         self.consume_env_marker();
         let blocks = match env.as_str() {
-            "itemize" | "enumerate" => {
+            "itemize" | "enumerate" | "description" => {
                 let items = self.parse_items(&env);
                 if items.is_empty() {
                     Vec::new()
@@ -739,17 +791,48 @@ impl<'a> Parser<'a> {
                 }
                 vec![Block::Figure(figure)]
             }
-            "equation" | "equation*" | "displaymath" | "math" => {
-                let rest = &self.input[self.pos..];
-                let marker = alloc::format!("\\end{{{env}}}");
-                let (value, end) = match rest.find(&marker) {
-                    Some(offset) => (&rest[..offset], self.pos + offset + marker.len()),
-                    None => (rest, self.input.len()),
-                };
-                self.pos = end;
+            // Environments that own their display: the block keeps the
+            // `\begin{...}` wrapper so the math parser sees the rows and the
+            // layout can number the formula.
+            "equation" | "equation*" | "align" | "align*" | "gather" | "gather*" | "multline"
+            | "multline*" => {
+                let body = self.environment_body(&env);
+                let source = alloc::format!("\\begin{{{env}}}{}\\end{{{env}}}", body.trim());
                 vec![Block::MathBlock(MathBlock::new(
                     NodeMeta::synthesized(),
-                    value.trim().to_string(),
+                    source,
+                ))]
+            }
+            "displaymath" | "math" => {
+                let body = self.environment_body(&env);
+                vec![Block::MathBlock(MathBlock::new(
+                    NodeMeta::synthesized(),
+                    body.trim().to_string(),
+                ))]
+            }
+            // Diagram source is kept verbatim; the layout compiler recognises
+            // the dialect from the environment name (ADR-0102).
+            "mermaid" | "dot" | "graphviz" => {
+                let body = self.environment_body(&env);
+                let dialect = match env.as_str() {
+                    "mermaid" => DiagramDialect::Mermaid,
+                    _ => DiagramDialect::Graphviz,
+                };
+                vec![Block::Diagram(DiagramBlock::new(
+                    NodeMeta::synthesized(),
+                    dialect,
+                    body.trim(),
+                ))]
+            }
+            // TikZ is a display vector object, not text. Keeping the wrapper
+            // lets the layout recognise it before handing the source to the
+            // math parser (ADR-0092).
+            "tikzpicture" => {
+                let body = self.environment_body(&env);
+                let source = alloc::format!("\\begin{{{env}}}{body}\\end{{{env}}}");
+                vec![Block::MathBlock(MathBlock::new(
+                    NodeMeta::synthesized(),
+                    source,
                 ))]
             }
             _ => {
@@ -780,6 +863,18 @@ impl<'a> Parser<'a> {
         String::from(body)
     }
 
+    /// Compile one table cell. Cells used to be one literal text run, which
+    /// printed `\\textbf{...}` as `{...}`; they are inline content like any
+    /// other, so emphasis, code and maths work inside a table.
+    fn cell_inlines(&mut self, source: &str) -> Vec<Inline> {
+        let text = render_cell_text(source);
+        let mut parser = Parser::new(&text);
+        let inlines = parser.parse_inlines(true);
+        self.footnotes
+            .extend(core::mem::take(&mut parser.footnotes));
+        inlines
+    }
+
     /// Parse a caption body as inline content, lifting any footnotes into the
     /// document.
     fn caption_inlines(&mut self, source: &str) -> Vec<Inline> {
@@ -802,13 +897,44 @@ impl<'a> Parser<'a> {
                 self.consume_end(env);
                 break;
             }
+            let mut label = None;
             if self.peek_command() == Some("item") {
                 self.read_command();
-                self.read_optional();
+                // `\item[Term]` and `description` labels become a bold run-in
+                // label: the item model has no separate term box.
+                label = self.read_optional().map(|text| text.trim().to_string());
             }
-            let blocks = self.parse_blocks(Some(env), true);
+            let mut blocks = self.parse_blocks(Some(env), true);
+            let had_label = label.is_some();
+            if let Some(label) = label.filter(|label| !label.is_empty()) {
+                let mut label_inlines = vec![
+                    Inline::Strong(Container::new(
+                        NodeMeta::synthesized(),
+                        vec![Inline::Text(Text::new(NodeMeta::synthesized(), label))],
+                    )),
+                    // A term is a run-in label: one ideographic space keeps it
+                    // from touching the definition.
+                    Inline::Text(Text::new(NodeMeta::synthesized(), "\u{3000}")),
+                ];
+                match blocks.first_mut() {
+                    Some(Block::Paragraph(paragraph)) => {
+                        label_inlines.append(&mut paragraph.inlines);
+                        paragraph.inlines = label_inlines;
+                    }
+                    _ => blocks.insert(
+                        0,
+                        Block::Paragraph(Paragraph::new(NodeMeta::synthesized(), label_inlines)),
+                    ),
+                }
+            }
             if !blocks.is_empty() || !items.is_empty() {
-                items.push(ListItem::new(NodeMeta::synthesized(), blocks));
+                let mut meta = NodeMeta::synthesized();
+                // A description term is a run-in label, not a list marker:
+                // the layout prints no bullet and no hanging indent.
+                if env == "description" || had_label {
+                    meta.attrs.role = Some(String::from("description"));
+                }
+                items.push(ListItem::new(meta, blocks));
             }
             if self.peek_command() == Some("item") {
                 continue;
@@ -938,10 +1064,7 @@ impl<'a> Parser<'a> {
                     NodeMeta::synthesized(),
                     vec![Block::Paragraph(Paragraph::new(
                         NodeMeta::synthesized(),
-                        vec![Inline::Text(Text::new(
-                            NodeMeta::synthesized(),
-                            render_cell_text(text),
-                        ))],
+                        self.cell_inlines(text),
                     ))],
                 );
                 cell.colspan = span as u16;
@@ -1210,6 +1333,20 @@ impl<'a> Parser<'a> {
                     Command::One(Inline::Index(IndexRef::new(NodeMeta::synthesized(), term)))
                 }
             }
+            // `\ruby{汉字}{hàn zì}`: the reading is drawn above the base.
+            "ruby" => {
+                let base = self.read_group().unwrap_or("").trim().to_string();
+                let annotation = self.read_group().unwrap_or("").trim().to_string();
+                if base.is_empty() || annotation.is_empty() {
+                    Command::One(Inline::Text(Text::new(NodeMeta::synthesized(), &base)))
+                } else {
+                    Command::One(Inline::Ruby(Ruby::new(
+                        NodeMeta::synthesized(),
+                        base,
+                        annotation,
+                    )))
+                }
+            }
             "label" | "cite" | "ref" | "pageref" => {
                 let _ = self.read_group();
                 Command::None
@@ -1367,4 +1504,24 @@ fn read_group_at<'a>(source: &'a str, cursor: &mut usize) -> Option<&'a str> {
         index += 1;
     }
     None
+}
+
+/// Commands that begin an inline run rather than a block. `parse_blocks` must
+/// not treat them as unknown block commands when they open a paragraph — that
+/// split `\item \textbf{…}：rest` into two paragraphs.
+fn starts_inline_run(command: &str) -> bool {
+    matches!(
+        command,
+        "textbf"
+            | "emph"
+            | "textit"
+            | "textsl"
+            | "underline"
+            | "textsc"
+            | "textsuperscript"
+            | "textsubscript"
+            | "texttt"
+            | "verb"
+            | "href"
+    )
 }

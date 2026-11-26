@@ -41,14 +41,15 @@ pub mod inline;
 pub mod meta;
 pub mod node;
 pub mod raw;
+pub mod reader;
 pub mod text;
 pub mod validate;
 
 pub use attrs::{Attrs, MAX_ATTR_LEN, MAX_CLASSES};
 pub use block::{
-    Block, BlockQuote, Cell, CellAlign, CodeBlock, Column, Figure, GeneratedBlock, GeneratedKind,
-    Heading, List, ListItem, MathBlock, PageBreak, Paragraph, RawBlock, Row, Section, Table,
-    ThematicBreak,
+    Block, BlockQuote, Cell, CellAlign, CodeBlock, Column, DiagramBlock, DiagramDialect, Figure,
+    GeneratedBlock, GeneratedKind, Heading, List, ListItem, MathBlock, PageBreak, Paragraph,
+    RawBlock, Row, Section, Table, ThematicBreak,
 };
 pub use canonical::CanonicalMode;
 pub use doc::{Document, FootnoteDef, DOC_IR_VERSION, SCHEMA};
@@ -63,4 +64,5 @@ pub use meta::{
 };
 pub use node::NodeMeta;
 pub use raw::{RawCapability, RawContent};
+pub use reader::ReadError;
 pub use validate::{DocError, MAX_DEPTH};

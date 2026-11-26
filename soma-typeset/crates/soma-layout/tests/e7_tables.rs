@@ -71,8 +71,15 @@ fn a_rowspan_cell_covers_its_rows_without_overlap() {
 
     assert_eq!(block_text(&layout, tall), tall_text);
     assert_eq!(tall.x.0, 0);
-    assert_eq!(top.x.0, layout.page.content_width().0 / 2);
-    assert_eq!(bottom.x.0, layout.page.content_width().0 / 2);
+    // A long first column takes most of the measure (D90), so the second
+    // column starts where the first ends.
+    assert_eq!(top.x.0, tall.width.0);
+    assert_eq!(bottom.x.0, top.x.0);
+    assert_eq!(
+        top.x.0 + top.width.0,
+        layout.page.content_width().0,
+        "the table fills the measure"
+    );
     assert!(
         bottom.y.0 >= top.y.0 + top.height.0,
         "row 1 must start below row 0"
@@ -122,7 +129,10 @@ fn a_repeated_header_appears_on_every_table_page() {
             .iter()
             .find(|block| block_text(&layout, block) == "表头")
             .unwrap_or_else(|| panic!("page {} has no repeated header", page.number));
-        assert_eq!(header.y.0, 0, "the header sits at the top of the page");
+        assert_eq!(
+            header.y.0, 0,
+            "without rules the repeated header starts at the page top"
+        );
         assert_eq!(block_text(&layout, header), "表头");
         let first_content = cells
             .iter()
@@ -139,4 +149,98 @@ fn a_repeated_header_appears_on_every_table_page() {
         .pages
         .iter()
         .all(|page| page.used_height.0 <= layout.page.content_height().0));
+}
+
+#[test]
+fn a_repeated_header_keeps_its_rules_on_continuation_pages() {
+    let source = TIGHT.replace(
+        "styles:",
+        "table:\n  outer-rule-width: 0.8pt\n  header-rule-width: 0.6pt\nstyles:",
+    );
+    let (header, _) = cell_with_id("表头", 1, 1);
+    let mut rows = vec![Row::new(NodeMeta::synthesized(), true, vec![header])];
+    for index in 0..40 {
+        rows.push(Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![cell(&format!("第{index}行"), 1, 1)],
+        ));
+    }
+    let table = Table::new(NodeMeta::synthesized(), columns(1), rows);
+    let doc = document(vec![Block::Table(table)]);
+    let styled = styled(&doc, &source);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+
+    assert!(layout.page_count() >= 3, "the table must span pages");
+    for page in layout.pages.iter().skip(1) {
+        let cells: Vec<_> = page
+            .blocks
+            .iter()
+            .filter(|block| block.kind == BoxKind::TableCell)
+            .collect();
+        let first = cells
+            .iter()
+            .min_by_key(|block| block.y.0)
+            .unwrap_or_else(|| panic!("page {} has no table cells", page.number));
+        assert_eq!(
+            block_text(&layout, first),
+            "表头",
+            "page {} must start with the repeated header",
+            page.number
+        );
+        assert!(
+            page.blocks
+                .iter()
+                .any(|block| block.kind == BoxKind::TableRule && block.y.0 == 0),
+            "page {} must redraw the table's top rule above the header",
+            page.number
+        );
+    }
+}
+
+#[test]
+fn a_width_hint_widens_its_column() {
+    let narrow = Table::new(
+        NodeMeta::synthesized(),
+        columns(2),
+        vec![Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![cell("甲乙", 1, 1), cell("丙丁", 1, 1)],
+        )],
+    );
+    let hint = Table::new(
+        NodeMeta::synthesized(),
+        vec![
+            Column::new(NodeMeta::synthesized(), CellAlign::Default).with_share(700),
+            Column::new(NodeMeta::synthesized(), CellAlign::Default),
+        ],
+        vec![Row::new(
+            NodeMeta::synthesized(),
+            false,
+            vec![cell("甲乙", 1, 1), cell("丙丁", 1, 1)],
+        )],
+    );
+    let widths = |table: Table| {
+        let doc = document(vec![Block::Table(table)]);
+        let styled = styled(&doc, TIGHT);
+        let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+        let mut starts: Vec<i32> = layout.pages[0]
+            .blocks
+            .iter()
+            .filter(|block| block.kind == BoxKind::TableCell)
+            .map(|block| block.x.0)
+            .collect();
+        starts.sort_unstable();
+        starts
+    };
+
+    let plain = widths(narrow);
+    let shared = widths(hint);
+    assert_eq!(plain.len(), 2);
+    assert_eq!(shared.len(), 2);
+    assert!(
+        shared[1] > plain[1],
+        "a 700‰ hint makes the second column start further right: {plain:?} vs {shared:?}"
+    );
 }

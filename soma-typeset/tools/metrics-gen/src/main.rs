@@ -1,9 +1,11 @@
-//! Extract numeric font metrics into the `soma.metrics/2` blob.
+//! Extract numeric font metrics into the `soma.metrics/7` blob.
 //!
 //! The tool reads a TrueType/OpenType font (or a collection index) and writes
-//! advances, line metrics, per-codepoint widths, and — when the font has
-//! `glyf` outlines — the ink gap of punctuation. It never extracts outlines
-//! and never ships a font: the output is a table of integers.
+//! advances, line metrics, per-codepoint widths, ink gaps, the math face's
+//! `MATH` constants and its vertical design variants. The ink comes from the
+//! `glyf` bbox when the font has one, and from running the Type 2 charstring
+//! when the outlines are CFF (`cff.rs`). It never ships a font and never writes
+//! outlines: the output is a table of integers.
 //!
 //! Usage:
 //!
@@ -12,8 +14,14 @@
 //!   --face serif:normal:/path/NotoSerifCJK-Regular.ttc#2 \
 //!   --face sans:normal:/path/NotoSansCJK-Regular.ttc#2 \
 //!   --face serif:bold:/path/NotoSerifCJK-Bold.ttc#2 \
-//!   --face sans:bold:/path/NotoSansCJK-Bold.ttc#2
+//!   --face sans:bold:/path/NotoSansCJK-Bold.ttc#2 \
+//!   --face math:normal:/path/NotoSansMath-Regular.ttf
+//!
+//! `--leading 0` overrides every face's leading. The font's `lineGap` is a
+//! recommendation, not ink; a template that sets `line-height` can zero it.
 //! ```
+
+mod cff;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -22,7 +30,7 @@ use std::process::ExitCode;
 
 const UNIT: i32 = 4096;
 const MAGIC: u32 = 0x534d_5431; // "SMT1"
-const VERSION: u16 = 3;
+const VERSION: u16 = 7;
 
 /// Codepoint blocks whose advance is expected to be uniform (CJK).
 const UNIFORM_BLOCKS: &[(u32, u32)] = &[
@@ -92,11 +100,17 @@ struct FaceSpec {
     weight: u8,
     path: String,
     index: usize,
+    /// Record only non-CJK codepoints. A Latin face built this way leaves Han
+    /// to a rescue face, which is how one line gets two typefaces without a
+    /// new mechanism.
+    latin_only: bool,
 }
 
 struct Font<'a> {
     data: &'a [u8],
     base: usize,
+    /// Present when the outlines are CFF: `ink_box` then runs charstrings.
+    cff: Option<cff::Cff<'a>>,
 }
 
 impl<'a> Font<'a> {
@@ -114,13 +128,29 @@ impl<'a> Font<'a> {
                 ));
             }
             let offset = read_u32(data, 12 + index * 4)? as usize;
-            Ok(Self { data, base: offset })
+            Ok(Self {
+                data,
+                base: offset,
+                cff: None,
+            })
         } else {
             if index != 0 {
                 return Err("a single font has only face 0".into());
             }
-            Ok(Self { data, base: 0 })
+            Ok(Self {
+                data,
+                base: 0,
+                cff: None,
+            })
         }
+        .map(|mut font: Self| {
+            // CFF outlines carry no bbox; parse the charstring index once so
+            // `ink_box` can run a single glyph instead of the whole table.
+            font.cff = font
+                .table(b"CFF ")
+                .and_then(|(offset, _)| cff::Cff::parse(font.data, offset));
+            font
+        })
     }
 
     fn table(&self, tag: &[u8; 4]) -> Option<(usize, usize)> {
@@ -303,10 +333,35 @@ impl<'a> Font<'a> {
         Ok(out)
     }
 
-    /// Horizontal extent of a glyph's outline in font units. `None` for an
-    /// empty glyph (a space), for a composite that points at nothing, or for a
-    /// font whose outlines are CFF rather than `glyf`.
-    fn ink_bounds(&self, gid: u16) -> Result<Option<(i32, i32)>, String> {
+    /// Is this a CID-keyed CFF face? The PDF backend embeds that flavour and
+    /// only that flavour (ADR-0039), and it can be recognised without a
+    /// charstring interpreter: a CID-keyed Top DICT carries `ROS` (12 30).
+    fn cid_keyed_cff(&self) -> bool {
+        let Some((cff, _)) = self.table(b"CFF ") else {
+            return false;
+        };
+        let Some(header) = self.data.get(cff).copied() else {
+            return false;
+        };
+        let Some(name) = index_range(self.data, cff + header as usize) else {
+            return false;
+        };
+        let Some(top) = index_range(self.data, name.1) else {
+            return false;
+        };
+        let Some(dict) = self.data.get(top.0..top.1) else {
+            return false;
+        };
+        dict.windows(2).any(|pair| pair == [12, 30])
+    }
+
+    /// Full outline box of a glyph in font units: `(x_min, y_min, x_max, y_max)`.
+    /// `None` for an empty glyph or a composite that points at nothing. A CFF
+    /// face is measured by running its charstring (`cff::Cff`).
+    fn ink_box(&self, gid: u16) -> Result<Option<(i32, i32, i32, i32)>, String> {
+        if self.table(b"glyf").is_none() {
+            return Ok(self.cff.as_ref().and_then(|cff| cff.ink_box(gid)));
+        }
         let Some((head, _)) = self.table(b"head") else {
             return Ok(None);
         };
@@ -334,18 +389,241 @@ impl<'a> Font<'a> {
         if contours == 0 {
             return Ok(None);
         }
-        let x_min = read_i16(self.data, offset + 2)? as i32;
-        let x_max = read_i16(self.data, offset + 6)? as i32;
-        Ok(Some((x_min, x_max)))
+        Ok(Some((
+            read_i16(self.data, offset + 2)? as i32,
+            read_i16(self.data, offset + 4)? as i32,
+            read_i16(self.data, offset + 6)? as i32,
+            read_i16(self.data, offset + 8)? as i32,
+        )))
+    }
+
+    /// Horizontal extent of a glyph's outline in font units. `None` for an
+    /// empty glyph (a space) or a composite that points at nothing.
+    fn ink_bounds(&self, gid: u16) -> Result<Option<(i32, i32)>, String> {
+        Ok(self
+            .ink_box(gid)?
+            .map(|(x_min, _, x_max, _)| (x_min, x_max)))
+    }
+
+    /// The 41 constants `soma-math` reads, in `soma_core::MathParam` order, as
+    /// per-mille of one em. `None` when the face has no `MATH` table.
+    ///
+    /// OpenType stores four plain fields (`scriptPercentScaleDown`,
+    /// `scriptScriptPercentScaleDown`, `delimitedSubFormulaMinHeight`,
+    /// `displayOperatorMinHeight`), then 51 `MathValueRecord`s (a value plus a
+    /// device-table offset, four bytes each), then `radicalDegreeBottomRaisePercent`
+    /// as a plain `int16` (HarfBuzz reports that last field as enum 55).
+    /// Lengths become per-mille; percentages become percent x 10.
+    fn math_constants(&self, upem: i32) -> Result<Option<Vec<i32>>, String> {
+        let Some((math, _)) = self.table(b"MATH") else {
+            return Ok(None);
+        };
+        let start = math + read_u16(self.data, math + 4)? as usize;
+        let mut position = start;
+        let mut raw = [0i32; 56];
+        raw[0] = read_i16(self.data, position)? as i32;
+        position += 2;
+        raw[1] = read_i16(self.data, position)? as i32;
+        position += 2;
+        raw[2] = read_u16(self.data, position)? as i32;
+        position += 2;
+        raw[3] = read_u16(self.data, position)? as i32;
+        position += 2;
+        for slot in raw.iter_mut().take(55).skip(4) {
+            *slot = read_i16(self.data, position)? as i32;
+            position += 4;
+        }
+        raw[55] = read_i16(self.data, position)? as i32;
+
+        let upem = upem as i64;
+        let length = |value: i32| -> i32 {
+            let numerator = value as i64 * 1000;
+            if numerator >= 0 {
+                ((numerator + upem / 2) / upem) as i32
+            } else {
+                -(((-numerator) + upem / 2) / upem) as i32
+            }
+        };
+        let percent = |value: i32| value * 10;
+        // Indices are HarfBuzz `hb_ot_math_constant_t` values, except 55, the
+        // trailing `radicalDegreeBottomRaisePercent`.
+        // Order must match `soma_core::MathParam`.
+        Ok(Some(vec![
+            length(raw[5]),   // AxisHeight
+            length(raw[38]),  // RuleThickness (fractionRuleThickness)
+            percent(raw[0]),  // ScriptPercent
+            percent(raw[1]),  // ScriptScriptPercent
+            length(raw[11]),  // SupShift
+            length(raw[12]),  // SupShiftCramped
+            length(raw[8]),   // SubShift
+            length(raw[14]),  // SupDrop
+            length(raw[10]),  // SubDrop
+            length(raw[15]),  // SubSupGap
+            length(raw[13]),  // SupBottomMin
+            length(raw[16]),  // SupBottomMaxWithSub
+            length(raw[32]),  // NumShift
+            length(raw[33]),  // NumShiftDisplay
+            length(raw[34]),  // DenomShift
+            length(raw[35]),  // DenomShiftDisplay
+            length(raw[36]),  // NumGapMin
+            length(raw[39]),  // DenomGapMin
+            length(raw[18]),  // LimitAboveGap
+            length(raw[19]),  // LimitAboveRise
+            length(raw[20]),  // LimitBelowGap
+            length(raw[21]),  // LimitBelowDrop
+            length(raw[51]),  // RadicalRule
+            length(raw[52]),  // RadicalExtra
+            length(raw[53]),  // RadicalKernBefore
+            length(raw[54]),  // RadicalKernAfter
+            percent(raw[55]), // RadicalDegreeRaise
+            length(raw[3]),   // DisplayOperatorMin
+            length(raw[43]),  // OverbarGap
+            length(raw[44]),  // OverbarRule
+            length(raw[45]),  // OverbarExtra
+            length(raw[46]),  // UnderbarGap
+            length(raw[47]),  // UnderbarRule
+            length(raw[48]),  // UnderbarExtra
+            length(raw[6]),   // AccentBaseHeight
+            length(raw[49]),  // RadicalGap (radicalVerticalGap)
+            length(raw[50]),  // RadicalDisplayGap
+            length(raw[37]),  // NumDisplayGap
+            length(raw[40]),  // DenomDisplayGap
+            length(raw[9]),   // SubTopMax
+            length(raw[17]),  // SpaceAfterScript
+        ]))
+    }
+
+    /// Vertical `MathVariants` of the face, keyed by the smallest codepoint
+    /// that reaches the base glyph.
+    ///
+    /// A variant glyph is usually not encoded in the cmap (Noto Sans Math has
+    /// 119 unencoded variants against 13 encoded ones), so the table stores the
+    /// variant's measurements and lets the renderer resolve the ordinal in the
+    /// actual font. The list order is the font's order (increasing size), and
+    /// must never be reordered: `soma-math` and the PDF writer both address a
+    /// variant by its index.
+    ///
+    /// Each row is `(horizontal advance, ink top, ink bottom, right gap)`, all
+    /// in 1/4096 em. The horizontal advance comes from `hmtx`; the MATH
+    /// record's `advanceMeasurement` is the *vertical* design extent, which is
+    /// already the ink height for the fonts measured here.
+    fn math_variants(
+        &self,
+        upem: i32,
+        map: &BTreeMap<u32, u16>,
+        advances: &[u16],
+    ) -> Result<Vec<(u32, Vec<(i32, i32, i32, i32)>)>, String> {
+        let Some((math, _)) = self.table(b"MATH") else {
+            return Ok(Vec::new());
+        };
+        let variants = read_u16(self.data, math + 8)? as usize;
+        if variants == 0 {
+            return Ok(Vec::new());
+        }
+        let base = math + variants;
+        let coverage = base + read_u16(self.data, base + 2)? as usize;
+        let count = read_u16(self.data, base + 6)? as usize;
+        let glyphs = coverage_glyphs(self.data, coverage)?;
+
+        let mut reverse: BTreeMap<u16, u32> = BTreeMap::new();
+        for (&codepoint, &gid) in map {
+            reverse.entry(gid).or_insert(codepoint);
+        }
+
+        let mut out = Vec::new();
+        for (index, gid) in glyphs.into_iter().take(count).enumerate() {
+            let Some(&codepoint) = reverse.get(&gid) else {
+                continue;
+            };
+            let construction = base + read_u16(self.data, base + 10 + index * 2)? as usize;
+            let variant_count = read_u16(self.data, construction + 2)? as usize;
+            let mut rows = Vec::with_capacity(variant_count);
+            for variant in 0..variant_count {
+                let record = construction + 4 + variant * 4;
+                let glyph = read_u16(self.data, record)?;
+                let width = advances.get(glyph as usize).copied().unwrap_or(0) as i32;
+                let (top, bottom, right_gap) = match self.ink_box(glyph)? {
+                    Some((_x_min, y_min, x_max, y_max)) => (
+                        scale(y_max, upem),
+                        scale(-y_min, upem),
+                        scale(width - x_max, upem).max(0),
+                    ),
+                    None => (scale(width, upem), 0, 0),
+                };
+                rows.push((
+                    scale(width, upem),
+                    top.clamp(i16::MIN as i32, i16::MAX as i32),
+                    bottom.clamp(i16::MIN as i32, i16::MAX as i32),
+                    right_gap.clamp(0, i16::MAX as i32),
+                ));
+            }
+            out.push((codepoint, rows));
+        }
+        out.sort_unstable_by_key(|(codepoint, _)| *codepoint);
+        out.dedup_by_key(|(codepoint, _)| *codepoint);
+        Ok(out)
+    }
+
+    /// Per-glyph top accent attachment in font units, from
+    /// `MathGlyphInfo/MathTopAccentAttachment`.
+    fn top_accent_attachments(&self) -> Result<BTreeMap<u16, i32>, String> {
+        let Some((math, _)) = self.table(b"MATH") else {
+            return Ok(BTreeMap::new());
+        };
+        let glyph_info = read_u16(self.data, math + 6)? as usize;
+        if glyph_info == 0 {
+            return Ok(BTreeMap::new());
+        }
+        let info = math + glyph_info;
+        let attachments = read_u16(self.data, info + 2)? as usize;
+        if attachments == 0 {
+            return Ok(BTreeMap::new());
+        }
+        let base = info + attachments;
+        let coverage = base + read_u16(self.data, base)? as usize;
+        let count = read_u16(self.data, base + 2)? as usize;
+        let glyphs = coverage_glyphs(self.data, coverage)?;
+        let mut out = BTreeMap::new();
+        for (index, gid) in glyphs.into_iter().take(count).enumerate() {
+            out.insert(gid, read_i16(self.data, base + 4 + index * 4)? as i32);
+        }
+        Ok(out)
+    }
+
+    /// Per-glyph italic correction in font units, from `MathGlyphInfo`.
+    fn italic_corrections(&self) -> Result<BTreeMap<u16, i32>, String> {
+        let Some((math, _)) = self.table(b"MATH") else {
+            return Ok(BTreeMap::new());
+        };
+        let glyph_info = read_u16(self.data, math + 6)? as usize;
+        if glyph_info == 0 {
+            return Ok(BTreeMap::new());
+        }
+        let info = math + glyph_info;
+        let italics = read_u16(self.data, info)? as usize;
+        if italics == 0 {
+            return Ok(BTreeMap::new());
+        }
+        let base = info + italics;
+        let coverage = base + read_u16(self.data, base)? as usize;
+        let count = read_u16(self.data, base + 2)? as usize;
+        let glyphs = coverage_glyphs(self.data, coverage)?;
+        let mut out = BTreeMap::new();
+        for (index, gid) in glyphs.into_iter().take(count).enumerate() {
+            let value = read_i16(self.data, base + 4 + index * 4)? as i32;
+            out.insert(gid, value);
+        }
+        Ok(out)
     }
 }
 
 impl FaceSpec {
     fn parse(text: &str) -> Result<Self, String> {
-        let mut parts = text.splitn(3, ':');
+        let mut parts = text.splitn(4, ':');
         let family = parts.next().ok_or("missing family")?;
         let weight = parts.next().ok_or("missing weight")?;
         let rest = parts.next().ok_or("missing path")?;
+        let latin_only = parts.next() == Some("latin");
         let (path, index) = match rest.rsplit_once('#') {
             Some((path, index)) => (
                 path.to_string(),
@@ -356,6 +634,8 @@ impl FaceSpec {
         let family = match family {
             "serif" => 0,
             "sans" => 1,
+            // A monospaced text face (ADR-0089).
+            "mono" => 4,
             // A dedicated math face: used for formula symbols, not for text.
             "math" => 2,
             // A rescue face: measured with the body but drawn only for glyphs
@@ -373,6 +653,7 @@ impl FaceSpec {
             weight,
             path,
             index,
+            latin_only,
         })
     }
 }
@@ -393,6 +674,35 @@ fn read_u32(data: &[u8], offset: usize) -> Result<u32, String> {
         .get(offset..offset + 4)
         .ok_or_else(|| format!("read past end at {offset}"))?;
     Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+/// Glyph ids in a coverage table, in coverage-index order.
+fn coverage_glyphs(data: &[u8], offset: usize) -> Result<Vec<u16>, String> {
+    let format = read_u16(data, offset)?;
+    match format {
+        1 => {
+            let count = read_u16(data, offset + 2)? as usize;
+            let mut out = Vec::with_capacity(count);
+            for index in 0..count {
+                out.push(read_u16(data, offset + 4 + index * 2)?);
+            }
+            Ok(out)
+        }
+        2 => {
+            let count = read_u16(data, offset + 2)? as usize;
+            let mut out = Vec::new();
+            for index in 0..count {
+                let record = offset + 4 + index * 6;
+                let start = read_u16(data, record)?;
+                let end = read_u16(data, record + 2)?;
+                for gid in start..=end {
+                    out.push(gid);
+                }
+            }
+            Ok(out)
+        }
+        other => Err(format!("unknown coverage format {other}")),
+    }
 }
 
 fn scale(value: i32, upem: i32) -> i32 {
@@ -425,6 +735,12 @@ struct OutFace {
     entries: Vec<(u32, i32)>,
     ink: Vec<(u32, i32, i32)>,
     glyph_ink: Vec<(u32, u8, u8)>,
+    math_constants: Vec<i32>,
+    math_glyphs: Vec<(u32, i32, i32, i32)>,
+    /// `(base codepoint, [(advance, top, bottom, right gap)])`, in font order.
+    math_variants: Vec<(u32, Vec<(i32, i32, i32, i32)>)>,
+    /// `(codepoint, top accent attachment)`, in 1/4096 em.
+    math_top_accent: Vec<(u32, i32)>,
 }
 
 fn main() -> ExitCode {
@@ -562,6 +878,8 @@ fn face_count(data: &[u8]) -> usize {
 struct Measure {
     glyphs: usize,
     outlines: bool,
+    /// A CID-keyed CFF face: no `glyf` ink, but embeddable (ADR-0039).
+    cid_cff: bool,
     coverage: f64,
     uniform: f64,
     punct_em: f64,
@@ -589,6 +907,7 @@ fn measure(data: &[u8], index: usize) -> Option<Measure> {
     let advances = font.advances().ok()?;
     let (ascent, descent, _) = font.line_metrics().ok()?;
     let outlines = font.table(b"glyf").is_some() && font.table(b"loca").is_some();
+    let cid_cff = font.cid_keyed_cff();
 
     let glyphs = map.len();
     if glyphs == 0 {
@@ -759,6 +1078,7 @@ fn measure(data: &[u8], index: usize) -> Option<Measure> {
     Some(Measure {
         glyphs,
         outlines,
+        cid_cff,
         coverage,
         uniform: ratio(uniform, uniform_total),
         punct_em: ratio_f64(punct_em_sum, punctuation_total),
@@ -819,6 +1139,14 @@ fn row(measure: &Measure, path: String, face: usize) -> AuditRow {
         score,
         verdict,
     }
+}
+
+fn write_varint(out: &mut Vec<u8>, mut value: u32) {
+    while value >= 0x80 {
+        out.push((value as u8 & 0x7f) | 0x80);
+        value >>= 7;
+    }
+    out.push(value as u8);
 }
 
 /// One byte holds a bearing with 16 units of 1/4096 em of resolution.
@@ -933,6 +1261,34 @@ fn write_fingerprints(rows: &[(String, usize, Measure)], out: &str) -> Result<()
 /// Every non-whitespace character a document actually uses. Reading the source
 /// rather than the IR is deliberate: coverage is a property of the text, and
 /// this runs before any parsing.
+/// Data range of a CFF INDEX: from its first item to the end of the last.
+fn index_range(data: &[u8], offset: usize) -> Option<(usize, usize)> {
+    let count = u16::from_be_bytes([*data.get(offset)?, *data.get(offset + 1)?]) as usize;
+    if count == 0 {
+        return Some((offset + 2, offset + 2));
+    }
+    let size = *data.get(offset + 2)? as usize;
+    if !(1..=4).contains(&size) {
+        return None;
+    }
+    let table = offset + 3;
+    let base = table + (count + 1) * size - 1;
+    let first = index_offset(data, table, size)?;
+    let last = index_offset(data, table + count * size, size)?;
+    if first == 0 || first > last || base + last > data.len() {
+        return None;
+    }
+    Some((base + first, base + last))
+}
+
+fn index_offset(data: &[u8], at: usize, size: usize) -> Option<usize> {
+    let mut value = 0usize;
+    for byte in 0..size {
+        value = (value << 8) | *data.get(at + byte)? as usize;
+    }
+    Some(value)
+}
+
 fn read_char_set(path: &str) -> Result<Vec<char>, String> {
     let text = fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))?;
     let mut set: BTreeSet<u32> = BTreeSet::new();
@@ -1051,8 +1407,8 @@ fn fallback(spec: &FaceSpec, text_path: &str, directories: &[String]) -> Result<
                 continue;
             };
             // A rescue face has to be drawable by the backend, not just
-            // measurable: CFF outlines cannot be embedded.
-            if !measure.outlines {
+            // measurable: `glyf` or a CID-keyed CFF (ADR-0039).
+            if !measure.outlines && !measure.cid_cff {
                 continue;
             }
             let Ok(candidate) = Font::open(&candidate_data, face) else {
@@ -1228,6 +1584,7 @@ fn run() -> Result<(), String> {
     let mut fallback_spec: Option<FaceSpec> = None;
     let mut text_path: Option<String> = None;
     let mut library: Option<String> = None;
+    let mut leading_override: Option<i32> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -1235,6 +1592,18 @@ fn run() -> Result<(), String> {
             "--face" => specs.push(FaceSpec::parse(
                 &args.next().ok_or("--face needs a value")?,
             )?),
+            // Set the face's leading to a fixed value in 1/4096 em. A font's
+            // lineGap is a recommendation, not ink; a template that sets
+            // `line-height` should be able to ignore it. `--leading 0` is the
+            // escape hatch for faces such as IBM Plex with a one-em lineGap.
+            "--leading" => {
+                leading_override = Some(
+                    args.next()
+                        .ok_or("--leading needs a value")?
+                        .parse()
+                        .map_err(|_| "--leading needs a number".to_string())?,
+                )
+            }
             "--audit" => audit_dirs.push(args.next().ok_or("--audit needs a directory")?),
             "--top" => {
                 top = args
@@ -1301,7 +1670,10 @@ fn run() -> Result<(), String> {
         let data = fs::read(&spec.path).map_err(|error| format!("{}: {error}", spec.path))?;
         let font = Font::open(&data, spec.index)?;
         let upem = font.units_per_em()?;
-        let (ascent, descent, leading) = font.line_metrics()?;
+        let (ascent, descent, mut leading) = font.line_metrics()?;
+        if let Some(value) = leading_override {
+            leading = value;
+        }
         let map = font.cmap()?;
         let advances = font.advances()?;
 
@@ -1311,11 +1683,15 @@ fn run() -> Result<(), String> {
                 .map(|advance| scale(*advance as i32, upem))
         };
 
+        let outlines = font.table(b"glyf").is_some();
         let space = width(0x20).unwrap_or(scale(upem / 2, upem));
         let mut entries: Vec<(u32, i32)> = Vec::new();
         let mut blocks: Vec<(u32, u32, i32)> = Vec::new();
 
         for &(start, end) in UNIFORM_BLOCKS {
+            if spec.latin_only {
+                continue;
+            }
             let mut values = Vec::new();
             let mut covered = Vec::new();
             for cp in start..=end {
@@ -1327,14 +1703,50 @@ fn run() -> Result<(), String> {
             if covered.is_empty() {
                 continue;
             }
-            match modal(&values) {
-                Some((value, count)) if count * 10 >= values.len() * 9 => {
+            // A block says "every codepoint in this range exists and has this
+            // advance", because `Face::has` reads a block as coverage as well
+            // as a width. A `glyf` face can be generous — its per-glyph ink list
+            // is the authoritative coverage list (ADR-0039) — but a face without
+            // one must not claim codepoints it lacks: Noto CJK has no U+2A6A5,
+            // and a sparse extension-B block would swallow that hole and skip
+            // the rescue face.
+            //
+            // So a face without `glyf` emits one block per *run of consecutive
+            // covered codepoints* that share the mode advance. Holes break the
+            // run instead of hiding inside it (ADR-0074). That keeps the table
+            // small — 32 500 per-codepoint rows is what made it 1.1 MB — while
+            // staying exact.
+            let uniform = modal(&values);
+            match uniform {
+                Some((value, count)) if outlines && count * 10 >= values.len() * 9 => {
                     blocks.push((start, end, value));
                     for cp in covered {
                         let advance = width(cp).unwrap();
                         if advance != value {
                             entries.push((cp, advance));
                         }
+                    }
+                }
+                Some((value, count)) if count * 10 >= values.len() * 9 => {
+                    let mut run: Option<(u32, u32)> = None;
+                    for cp in start..=end {
+                        let advance = width(cp);
+                        if advance == Some(value) {
+                            run = Some(match run {
+                                Some((first, _)) => (first, cp),
+                                None => (cp, cp),
+                            });
+                        } else {
+                            if let Some((first, last)) = run.take() {
+                                blocks.push((first, last, value));
+                            }
+                            if let Some(advance) = advance {
+                                entries.push((cp, advance));
+                            }
+                        }
+                    }
+                    if let Some((first, last)) = run {
+                        blocks.push((first, last, value));
                     }
                 }
                 _ => {
@@ -1347,6 +1759,9 @@ fn run() -> Result<(), String> {
 
         for &(start, end) in ENUMERATED_RANGES {
             for cp in start..=end {
+                if spec.latin_only && cp >= 0x3000 {
+                    continue;
+                }
                 if let Some(advance) = width(cp) {
                     entries.push((cp, advance));
                 }
@@ -1357,12 +1772,18 @@ fn run() -> Result<(), String> {
         entries.dedup_by_key(|(cp, _)| *cp);
         blocks.sort_unstable();
 
-        // Ink is recorded for punctuation only, and only when the font has
-        // `glyf` outlines. The gaps say where the mark's ink ends inside its
-        // advance box, which is what a justified line pays for (ADR-0037).
+        // Ink is recorded for punctuation only. The gaps say where the mark's
+        // ink ends inside its advance box, which is what a justified line pays
+        // for (ADR-0037). A `glyf` face moves this list into the per-glyph
+        // section below; a CFF face keeps it, because its charstrings are
+        // measured one glyph at a time and a row per Han character would grow
+        // the table by an order of magnitude (ADR-0073).
         let mut ink: Vec<(u32, i32, i32)> = Vec::new();
         for &(start, end) in INK_RANGES {
             for cp in start..=end {
+                if spec.latin_only && cp >= 0x3000 {
+                    continue;
+                }
                 let Some(&gid) = map.get(&cp) else { continue };
                 let Some(&advance) = advances.get(gid as usize) else {
                     continue;
@@ -1370,21 +1791,33 @@ fn run() -> Result<(), String> {
                 let Some((x_min, x_max)) = font.ink_bounds(gid)? else {
                     continue;
                 };
-                let left = scale(x_min, upem).clamp(i16::MIN as i32, i16::MAX as i32);
-                let right =
-                    scale(advance as i32 - x_max, upem).clamp(i16::MIN as i32, i16::MAX as i32);
+                // A negative gap means the ink overhangs the advance; a trim
+                // budget is never negative (the IR validates it), so store it
+                // as zero like the per-glyph section does.
+                let left = scale(x_min, upem).clamp(0, i16::MAX as i32);
+                let right = scale(advance as i32 - x_max, upem).clamp(0, i16::MAX as i32);
                 ink.push((cp, left, right));
             }
         }
         ink.sort_unstable_by_key(|(cp, _, _)| *cp);
         ink.dedup_by_key(|(cp, _, _)| *cp);
 
+        // Version 4 carries punctuation ink inside the per-glyph section, so
+        // the version 2 section becomes redundant — but only for a face that
+        // has that section.
+        if VERSION >= 4 && outlines {
+            ink = Vec::new();
+        }
+
         // Every glyph's edges, quantised to a byte each. A line end can land on
         // any character, and with fallback it can land on a face other than the
         // body's (ADR-0038).
         let mut glyph_ink: Vec<(u32, u8, u8)> = Vec::new();
-        if font.table(b"glyf").is_some() {
+        if outlines {
             for (&codepoint, &gid) in &map {
+                if spec.latin_only && codepoint >= 0x3000 {
+                    continue;
+                }
                 let Some(&advance) = advances.get(gid as usize) else {
                     continue;
                 };
@@ -1403,8 +1836,58 @@ fn run() -> Result<(), String> {
             .map(|(_, _, advance)| *advance)
             .unwrap_or(UNIT);
 
+        // Math data: only the dedicated math face carries it. A face without a
+        // `MATH` table (or without `glyf`) writes empty sections, and
+        // `soma-math` falls back to its TeX constants.
+        let mut math_constants = Vec::new();
+        let mut math_glyphs: Vec<(u32, i32, i32, i32)> = Vec::new();
+        let mut math_variants: Vec<(u32, Vec<(i32, i32, i32, i32)>)> = Vec::new();
+        let mut math_top_accent: Vec<(u32, i32)> = Vec::new();
+        if spec.family == 2 {
+            if let Some(constants) = font.math_constants(upem)? {
+                math_constants = constants;
+            }
+            math_variants = font.math_variants(upem, &map, &advances)?;
+            let attachments = font.top_accent_attachments()?;
+            for (&codepoint, &gid) in &map {
+                if let Some(value) = attachments.get(&gid) {
+                    math_top_accent.push((codepoint, scale(*value, upem)));
+                }
+            }
+            math_top_accent.sort_unstable_by_key(|entry| entry.0);
+            math_top_accent.dedup_by_key(|entry| entry.0);
+            // A CFF math face can be measured too: `ink_box` runs its Type 2
+            // charstrings (ADR-0073), and `MATH` constants and variants do not
+            // need `glyf`. The ink is what lets a radical sit on its radicand
+            // and an operator centre on the axis, so a glyph the interpreter
+            // cannot measure is skipped rather than failing the whole table.
+            if outlines || font.cff.is_some() {
+                let italics = font.italic_corrections()?;
+                for (&codepoint, &gid) in &map {
+                    let ink = if outlines {
+                        font.ink_box(gid)?
+                    } else {
+                        font.ink_box(gid).ok().flatten()
+                    };
+                    let Some((_, y_min, _, y_max)) = ink else {
+                        continue;
+                    };
+                    let top = scale(y_max, upem).clamp(i16::MIN as i32, i16::MAX as i32);
+                    let bottom = scale(-y_min, upem).clamp(i16::MIN as i32, i16::MAX as i32);
+                    let italic = italics
+                        .get(&gid)
+                        .map(|value| scale(*value, upem))
+                        .unwrap_or(0)
+                        .clamp(i16::MIN as i32, i16::MAX as i32);
+                    math_glyphs.push((codepoint, top, bottom, italic));
+                }
+                math_glyphs.sort_unstable_by_key(|entry| entry.0);
+                math_glyphs.dedup_by_key(|entry| entry.0);
+            }
+        }
+
         println!(
-            "face {}/{}: upem={} ascii-entries={} blocks={} entries={} ink={} glyphs-ink={}",
+            "face {}/{}: upem={} ascii-entries={} blocks={} entries={} ink={} glyphs-ink={} math-constants={} math-glyphs={} math-variants={}",
             spec.family,
             spec.weight,
             upem,
@@ -1412,7 +1895,10 @@ fn run() -> Result<(), String> {
             blocks.len(),
             entries.len(),
             ink.len(),
-            glyph_ink.len()
+            glyph_ink.len(),
+            math_constants.len(),
+            math_glyphs.len(),
+            math_variants.iter().map(|(_, rows)| rows.len()).sum::<usize>()
         );
 
         faces.push(OutFace {
@@ -1427,6 +1913,10 @@ fn run() -> Result<(), String> {
             entries,
             ink,
             glyph_ink,
+            math_constants,
+            math_glyphs,
+            math_variants,
+            math_top_accent,
         });
     }
 
@@ -1469,10 +1959,51 @@ fn run() -> Result<(), String> {
             bytes.extend_from_slice(&(*right as i16).to_le_bytes());
         }
         bytes.extend_from_slice(&(face.glyph_ink.len() as u32).to_le_bytes());
+        let mut previous = 0u32;
         for (cp, left, right) in &face.glyph_ink {
-            bytes.extend_from_slice(&cp.to_le_bytes());
+            write_varint(&mut bytes, cp - previous);
+            previous = *cp;
             bytes.push(*left);
             bytes.push(*right);
+        }
+        // Version 5: the MATH constants and every glyph's vertical ink.
+        bytes.extend_from_slice(&(face.math_constants.len() as u16).to_le_bytes());
+        for value in &face.math_constants {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(&(face.math_glyphs.len() as u32).to_le_bytes());
+        let mut previous = 0u32;
+        for (cp, top, bottom, italic) in &face.math_glyphs {
+            write_varint(&mut bytes, cp - previous);
+            previous = *cp;
+            bytes.extend_from_slice(&(*top as i16).to_le_bytes());
+            bytes.extend_from_slice(&(*bottom as i16).to_le_bytes());
+            bytes.extend_from_slice(&(*italic as i16).to_le_bytes());
+        }
+        // Version 6: vertical MathVariants, keyed by base codepoint. The
+        // variant order is the font's and must not be reordered: layout and
+        // the PDF writer address a variant by its index.
+        bytes.extend_from_slice(&(face.math_variants.len() as u16).to_le_bytes());
+        let mut previous = 0u32;
+        for (cp, rows) in &face.math_variants {
+            write_varint(&mut bytes, cp - previous);
+            previous = *cp;
+            bytes.extend_from_slice(&(rows.len() as u16).to_le_bytes());
+            for (advance, top, bottom, right_gap) in rows {
+                bytes.extend_from_slice(&advance.to_le_bytes());
+                bytes.extend_from_slice(&(*top as i16).to_le_bytes());
+                bytes.extend_from_slice(&(*bottom as i16).to_le_bytes());
+                bytes.extend_from_slice(&(*right_gap as i16).to_le_bytes());
+            }
+        }
+        // Version 7: top accent attachments. An accent is aligned by these,
+        // not by its own advance: a combining mark has none (ADR-0076).
+        bytes.extend_from_slice(&(face.math_top_accent.len() as u32).to_le_bytes());
+        let mut previous = 0u32;
+        for (cp, value) in &face.math_top_accent {
+            write_varint(&mut bytes, cp - previous);
+            previous = *cp;
+            bytes.extend_from_slice(&(*value as i16).to_le_bytes());
         }
     }
 

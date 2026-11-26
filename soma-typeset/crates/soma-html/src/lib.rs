@@ -5,12 +5,18 @@
 //! document. Anything it does not recognise keeps its text and is otherwise
 //! ignored; it never drops content silently.
 //!
-//! Supported: `h1`–`h6`, `p`, `strong`/`b`, `em`/`i`, `u`, `s`/`del`/`strike`,
-//! `code`/`kbd`/`samp`/`var`, `a`, `img`, `br`, `sup`, `sub`, `ruby`/`rt`,
-//! `ul`/`ol`/`li`, `blockquote`, `pre`, `hr`, `table`/`thead`/`tbody`/`tr`/
-//! `th`/`td` (with `colspan`/`rowspan`), `figure`/`figcaption`, and the
-//! transparent containers `div`, `section`, `article`, `main`, `header`,
-//! `footer`, `nav`, `aside`, `body`, `html`.
+//! Supported: `h1`–`h6`, `p`, `strong`/`b`, `em`/`i`, `u`/`ins`,
+//! `s`/`del`/`strike`, `code`/`kbd`/`samp`/`var`, `a`, `img`, `br`, `sup`,
+//! `sub`, `ruby`/`rt`, `ul`/`ol`/`li`, `dl`/`dt`/`dd`, `blockquote`, `pre`,
+//! `hr`, `table`/`thead`/`tbody`/`tr`/`th`/`td` (with `colspan`/`rowspan`),
+//! `figure`/`figcaption`, `details`/`summary`, and the transparent containers
+//! `div`, `section`, `article`, `main`, `header`, `footer`, `nav`, `aside`,
+//! `body`, `html`.
+//!
+//! A definition list has no DocIR block of its own: `dl` becomes an unordered
+//! `List` and every direct `dt`/`dd` (or one nested in a grouping `div`)
+//! becomes one `ListItem`, in source order. DocIR carries no term/definition
+//! marker, so the two kinds share the item shape and none of the text is lost.
 //!
 //! Not supported: CSS layout, scripts, frames, forms, footnotes, and HTML
 //! entities beyond the common named set plus numeric references.
@@ -28,8 +34,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use soma_doc::block::{
-    BlockQuote, Cell, CodeBlock, Column, Figure, Heading, List, ListItem, Paragraph, Row, Table,
-    ThematicBreak,
+    BlockQuote, Cell, CodeBlock, Column, DiagramBlock, DiagramDialect, Figure, Heading, List,
+    ListItem, Paragraph, Row, Table, ThematicBreak,
 };
 use soma_doc::inline::{Container, Image, Inline, LineBreak, LineBreakKind, Link, Ruby};
 use soma_doc::meta::{DocumentMeta, ImageRef};
@@ -57,6 +63,7 @@ pub const SUPPORTED_TAGS: &[&str] = &[
     "s",
     "del",
     "strike",
+    "ins",
     "code",
     "kbd",
     "samp",
@@ -71,6 +78,9 @@ pub const SUPPORTED_TAGS: &[&str] = &[
     "ul",
     "ol",
     "li",
+    "dl",
+    "dt",
+    "dd",
     "blockquote",
     "pre",
     "hr",
@@ -121,6 +131,8 @@ const BLOCK_TAGS: &[&str] = &[
     "td",
     "figure",
     "figcaption",
+    "details",
+    "summary",
     "div",
     "section",
     "article",
@@ -198,6 +210,20 @@ pub fn parse_html_with_meta(source: &str, meta: DocumentMeta) -> Document {
     document.blocks = blocks;
     document.renumber();
     document
+}
+
+/// Parse an HTML fragment into blocks. The caller owns document metadata and
+/// node numbering; this is the seam a compound front end (for example a
+/// Markdown document with embedded HTML) uses so there is only one HTML
+/// semantic mapping.
+///
+/// Unsupported elements are transparent when they have children; their text is
+/// kept. The fragment parser never executes anything.
+pub fn parse_html_fragment(source: &str) -> Vec<Block> {
+    let nodes = parse_tree(source);
+    let mut blocks = Vec::new();
+    build_blocks(&nodes, &mut blocks);
+    blocks
 }
 
 fn root_lang(nodes: &[Node]) -> Option<String> {
@@ -326,8 +352,8 @@ fn closes(open: &str, new: &str) -> bool {
         || (open == "li" && new == "li")
         || ((open == "td" || open == "th") && (new == "td" || new == "th" || new == "tr"))
         || (open == "tr" && new == "tr")
-        || (open == "dt" && new == "dd")
-        || (open == "dd" && new == "dt")
+        || (open == "dt" && (new == "dt" || new == "dd"))
+        || (open == "dd" && (new == "dt" || new == "dd"))
 }
 
 fn skip_raw_text(source: &str, mut pos: usize, tag: &str) -> usize {
@@ -563,6 +589,18 @@ fn build_block(element: &Element, out: &mut Vec<Block>) {
                 out.push(Block::Paragraph(Paragraph::new(meta, content)));
             }
         }
+        "summary" => {
+            let content = build_inlines(&element.children);
+            if !content.is_empty() {
+                out.push(Block::Paragraph(Paragraph::new(
+                    meta,
+                    vec![Inline::Strong(Container::new(
+                        NodeMeta::synthesized(),
+                        content,
+                    ))],
+                )));
+            }
+        }
         "ul" | "ol" => {
             let ordered = element.tag == "ol";
             let start = element
@@ -583,6 +621,15 @@ fn build_block(element: &Element, out: &mut Vec<Block>) {
                 out.push(Block::List(List::new(meta, ordered, start, items)));
             }
         }
+        // DocIR has no definition-list block. Each term and each definition
+        // becomes one item of an unordered list; order and every block inside
+        // the item (including nested lists) survive.
+        "dl" => {
+            let items = definition_items(element);
+            if !items.is_empty() {
+                out.push(Block::List(List::unordered(meta, items)));
+            }
+        }
         "blockquote" => {
             let mut blocks = Vec::new();
             build_blocks(&element.children, &mut blocks);
@@ -593,11 +640,40 @@ fn build_block(element: &Element, out: &mut Vec<Block>) {
         "pre" => {
             let value = raw_text(&element.children);
             let value = value.strip_suffix('\n').unwrap_or(&value);
-            let lang = element
-                .class_names()
+            let classes: Vec<&str> = element.class_names().collect();
+            let lang = classes
+                .iter()
                 .find_map(|class| class.strip_prefix("language-"))
-                .map(|lang| lang.to_ascii_lowercase());
-            out.push(Block::CodeBlock(CodeBlock::new(meta, lang, value)));
+                .map(|lang| lang.to_ascii_lowercase())
+                .or_else(|| {
+                    classes
+                        .iter()
+                        .find(|class| {
+                            matches!(
+                                **class,
+                                "mermaid" | "mermaid-source" | "dot" | "dot-source" | "graphviz"
+                            )
+                        })
+                        .map(|class| String::from(*class))
+                });
+            if let Some(dialect) = DiagramDialect::detect(lang.as_deref(), value) {
+                out.push(Block::Diagram(DiagramBlock::new(meta, dialect, value)));
+            } else {
+                out.push(Block::CodeBlock(CodeBlock::new(meta, lang, value)));
+            }
+        }
+        "div"
+            if element
+                .class_names()
+                .any(|class| matches!(class, "mermaid" | "dot" | "graphviz")) =>
+        {
+            let value = raw_text(&element.children);
+            let value = value.strip_suffix('\n').unwrap_or(&value);
+            if let Some(dialect) = DiagramDialect::detect(None, value) {
+                out.push(Block::Diagram(DiagramBlock::new(meta, dialect, value)));
+            } else {
+                build_blocks(&element.children, out);
+            }
         }
         "hr" => out.push(Block::ThematicBreak(ThematicBreak::new(meta))),
         "table" => {
@@ -606,8 +682,13 @@ fn build_block(element: &Element, out: &mut Vec<Block>) {
             }
         }
         "figure" => {
-            if let Some(figure) = build_figure(element, meta) {
+            if let Some((figure, rest)) = build_figure(element, meta) {
                 out.push(Block::Figure(figure));
+                // DocIR's Figure carries one image and one caption. Anything
+                // else in the element still becomes ordinary blocks.
+                if !rest.is_empty() {
+                    build_blocks(&rest, out);
+                }
             } else {
                 build_blocks(&element.children, out);
             }
@@ -619,24 +700,138 @@ fn build_block(element: &Element, out: &mut Vec<Block>) {
     }
 }
 
-fn build_figure(element: &Element, meta: NodeMeta) -> Option<Figure> {
+/// One item per `dt`/`dd`. HTML5 permits `<div>` groups inside `<dl>`, so the
+/// walk descends through them. Content that is not a term or definition still
+/// becomes an item instead of being dropped.
+fn definition_items(element: &Element) -> Vec<ListItem> {
+    let mut items = Vec::new();
+    collect_definition_items(&element.children, &mut items);
+    items
+}
+
+fn collect_definition_items(nodes: &[Node], items: &mut Vec<ListItem>) {
+    for node in nodes {
+        match node {
+            Node::Element(child) if child.tag == "dt" || child.tag == "dd" => {
+                let mut blocks = Vec::new();
+                build_blocks(&child.children, &mut blocks);
+                items.push(ListItem::new(element_meta(child), blocks));
+            }
+            Node::Element(child) if child.tag == "div" => {
+                collect_definition_items(&child.children, items);
+            }
+            Node::Element(_) => {
+                let mut blocks = Vec::new();
+                build_blocks(core::slice::from_ref(node), &mut blocks);
+                if !blocks.is_empty() {
+                    items.push(ListItem::new(NodeMeta::synthesized(), blocks));
+                }
+            }
+            Node::Text(text) => {
+                let value = collapse(text);
+                let value = value.trim();
+                if !value.is_empty() {
+                    items.push(ListItem::new(
+                        NodeMeta::synthesized(),
+                        vec![Block::Paragraph(Paragraph::new(
+                            NodeMeta::synthesized(),
+                            vec![Inline::Text(Text::new(
+                                NodeMeta::synthesized(),
+                                value.to_string(),
+                            ))],
+                        ))],
+                    ));
+                }
+            }
+        }
+    }
+}
+
+fn build_figure(element: &Element, meta: NodeMeta) -> Option<(Figure, Vec<Node>)> {
     let mut image: Option<Image> = None;
+    let mut image_index: Option<usize> = None;
     let mut caption: Vec<Inline> = Vec::new();
-    for child in &element.children {
+    let mut caption_index: Option<usize> = None;
+    for (index, child) in element.children.iter().enumerate() {
         match child {
             Node::Element(candidate) if candidate.tag == "img" && image.is_none() => {
                 image = build_image(candidate);
+                if image.is_some() {
+                    image_index = Some(index);
+                }
             }
             Node::Element(candidate) if candidate.tag == "figcaption" => {
                 caption = build_inlines(&candidate.children);
+                caption_index = Some(index);
             }
             _ => {}
         }
     }
     let image = image?;
+    let rest = element
+        .children
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| Some(*index) != image_index && Some(*index) != caption_index)
+        .map(|(_, node)| node.clone())
+        .collect();
     let mut figure = Figure::new(meta, image);
     figure.caption = caption;
-    Some(figure)
+    Some((figure, rest))
+}
+
+/// Width hints from `<colgroup>`/`<col>`, one entry per grid column.
+///
+/// Percent widths become per-mille shares directly; a pixel or unitless width
+/// is used as a relative weight on the same scale. A `<colgroup span>` without
+/// child `<col>` repeats its own hint.
+fn column_shares(element: &Element) -> Vec<u16> {
+    let mut shares = Vec::new();
+    for child in &element.children {
+        let Node::Element(group) = child else {
+            continue;
+        };
+        if group.tag != "colgroup" {
+            continue;
+        }
+        let group_hint = width_share(group);
+        let mut saw_col = false;
+        for item in &group.children {
+            let Node::Element(col) = item else {
+                continue;
+            };
+            if col.tag != "col" {
+                continue;
+            }
+            saw_col = true;
+            let repeat = span(col, "span", 1000);
+            let hint = width_share(col).or(group_hint).unwrap_or(0);
+            for _ in 0..repeat {
+                shares.push(hint);
+            }
+        }
+        if !saw_col {
+            let repeat = span(group, "span", 1000);
+            for _ in 0..repeat {
+                shares.push(group_hint.unwrap_or(0));
+            }
+        }
+    }
+    shares
+}
+
+/// `width="25%"` → 250; `width="120"`/`"120px"` → 120. Anything else is no hint.
+fn width_share(element: &Element) -> Option<u16> {
+    let raw = element.attr("width")?.trim();
+    let (digits, per_mille) = match raw.strip_suffix('%') {
+        Some(digits) => (digits.trim(), true),
+        None => (raw.strip_suffix("px").unwrap_or(raw).trim(), false),
+    };
+    let value: u32 = digits.parse().ok()?;
+    let value = if per_mille { value * 10 } else { value };
+    // A single column may not claim the whole table; keep a floor for the
+    // others. Zero means "size from content".
+    Some(value.clamp(1, 999) as u16)
 }
 
 fn build_table(element: &Element, meta: NodeMeta) -> Option<Table> {
@@ -706,10 +901,27 @@ fn build_table(element: &Element, meta: NodeMeta) -> Option<Table> {
         rows.push(Row::new(NodeMeta::synthesized(), header_run, placed));
     }
 
+    // `<colgroup>` / `<col>` carry a relative width; the layout turns it into a
+    // share of the measure, keeping a content floor (ADR-0065).
+    let shares = column_shares(element);
     let columns = (0..columns)
-        .map(|_| Column::new(NodeMeta::synthesized(), soma_doc::CellAlign::Default))
+        .map(|index| {
+            Column::new(NodeMeta::synthesized(), soma_doc::CellAlign::Default)
+                .with_share(shares.get(index).copied().unwrap_or(0))
+        })
         .collect();
-    Some(Table::new(meta, columns, rows))
+    let mut table = Table::new(meta, columns, rows);
+    // `<caption>` is the table's title, and it is inline content like any
+    // other caption (the rendered order is "caption above the table").
+    for child in &element.children {
+        if let Node::Element(candidate) = child {
+            if candidate.tag == "caption" {
+                table.caption = build_inlines(&candidate.children);
+                break;
+            }
+        }
+    }
+    Some(table)
 }
 
 fn collect_rows(element: &Element, in_thead: bool, out: &mut Vec<(Vec<Element>, bool)>) {
@@ -815,7 +1027,7 @@ fn build_inline(element: &Element) -> Option<Inline> {
     let value = match element.tag.as_str() {
         "strong" | "b" => container(meta).map(Inline::Strong),
         "em" | "i" => container(meta).map(Inline::Emphasis),
-        "u" => container(meta).map(Inline::Underline),
+        "u" | "ins" => container(meta).map(Inline::Underline),
         "s" | "del" | "strike" => container(meta).map(Inline::Strikethrough),
         "sup" => container(meta).map(Inline::Superscript),
         "sub" => container(meta).map(Inline::Subscript),

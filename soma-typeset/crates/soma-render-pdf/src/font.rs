@@ -1,14 +1,16 @@
-//! TrueType parsing and subsetting for the PDF backend.
+//! TrueType and CFF parsing and subsetting for the PDF backend.
 //!
-//! Only fonts with `glyf` outlines are supported: a PDF font program is built
-//! by copying the used glyphs, rebuilding `loca`/`glyf`, and embedding the
-//! result as `FontFile2`. CFF/OTF faces are rejected with a clear error rather
-//! than emitting a font most readers cannot use.
+//! A TrueType program is built by copying the used glyphs, rebuilding
+//! `loca`/`glyf`, and embedding the result as `FontFile2`. A CFF program is
+//! rebuilt as CID-keyed Type 2 charstrings and embedded as `FontFile3`
+//! (ADR-0039). Both keep glyph ids, so one id space reaches the text operator.
 
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+
+use crate::cff::{self, CidSystem};
 
 /// A PDF renderer error (font, layout, or document size).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,14 +39,26 @@ struct Table {
     length: usize,
 }
 
+/// Where the outlines live.
+#[derive(Clone)]
+enum Outlines {
+    TrueType {
+        loca: Vec<u32>,
+        glyf_offset: usize,
+        glyf_length: usize,
+    },
+    Cff {
+        offset: usize,
+        length: usize,
+    },
+}
+
 /// Parsed tables that do not depend on the used glyph set.
 #[derive(Clone)]
 struct Face {
     tables: Vec<Table>,
-    loca: Vec<u32>,
+    outlines: Outlines,
     num_glyphs: u16,
-    glyf_offset: usize,
-    glyf_length: usize,
 }
 
 /// An embeddable TrueType face.
@@ -61,9 +75,15 @@ pub struct PdfFont {
     descent: i16,
     bbox: [i16; 4],
     italic_angle: i16,
+    underline_position: i16,
+    underline_thickness: i16,
     cap_height: i16,
     bold: bool,
     serif: bool,
+    cid: Option<CidSystem>,
+    /// Vertical `MathVariants`: base glyph id → variant glyph ids, in font
+    /// order. Empty for a face without `MATH` (ADR-0075).
+    math_variants: Vec<(u16, Vec<u16>)>,
 }
 
 impl PdfFont {
@@ -74,6 +94,7 @@ impl PdfFont {
     pub fn from_bytes(data: Vec<u8>, index: u32) -> Result<Self, PdfError> {
         let face = Face::open(&data, index)?;
         let cmap = parse_cmap(&data, &face)?;
+        let math_variants = parse_math_variants(&data, &face);
         let upem = read_u16(&data, face.required(b"head")?.offset + 18)?;
         if upem == 0 {
             return Err(PdfError::new("font unitsPerEm is zero"));
@@ -92,10 +113,24 @@ impl PdfFont {
         let descent = read_i16(&data, hhea + 6)?;
         let widths = parse_widths(&data, &face)?;
         let mut italic_angle = 0i16;
+        // `post`'s header carries the underline geometry in every version, so
+        // a version 3 face still answers with real values (ADR-0044).
+        let mut underline_position = -(upem as i16) / 10;
+        let mut underline_thickness = (upem as i16) / 20;
         if let Some(post) = face.find(b"post") {
             if post.length >= 8 {
                 let raw = read_u32(&data, post.offset + 4)?;
                 italic_angle = ((raw >> 16) & 0xFFFF) as u16 as i16;
+            }
+            if post.length >= 12 {
+                let position = read_i16(&data, post.offset + 8)?;
+                let thickness = read_i16(&data, post.offset + 10)?;
+                if position < 0 {
+                    underline_position = position;
+                }
+                if thickness > 0 {
+                    underline_thickness = thickness;
+                }
             }
         }
         let mut cap_height = ascent;
@@ -110,6 +145,10 @@ impl PdfFont {
                 }
             }
         }
+        let cid = match face.outlines {
+            Outlines::Cff { offset, length } => cff::cid_system(&data[offset..offset + length]),
+            Outlines::TrueType { .. } => None,
+        };
         Ok(Self {
             data,
             face,
@@ -120,9 +159,13 @@ impl PdfFont {
             descent,
             bbox,
             italic_angle,
+            underline_position,
+            underline_thickness,
             cap_height,
             bold,
             serif: false,
+            cid,
+            math_variants,
         })
     }
 
@@ -141,6 +184,52 @@ impl PdfFont {
         }
     }
 
+    /// Whether the face maps the codepoint to a glyph.
+    pub fn has_glyph(&self, codepoint: u32) -> bool {
+        self.cmap
+            .binary_search_by_key(&codepoint, |(cp, _)| *cp)
+            .is_ok()
+    }
+
+    /// Advance in 1/4096 em, rounded like `soma-metrics` stores it. `None`
+    /// when the face has no glyph for the codepoint.
+    ///
+    /// This is the unit a metrics table speaks, so a caller can check that a
+    /// font file is the face a table was measured from (ADR-0077) without
+    /// re-reading the table's own font.
+    pub fn advance_4096(&self, codepoint: u32) -> Option<i32> {
+        let index = self
+            .cmap
+            .binary_search_by_key(&codepoint, |(cp, _)| *cp)
+            .ok()?;
+        let glyph = self.cmap[index].1 as usize;
+        let advance = self.widths.get(glyph).copied().unwrap_or(0) as i64;
+        let upem = self.upem.max(1) as i64;
+        let numerator = advance * 4096;
+        Some(if numerator >= 0 {
+            ((numerator + upem / 2) / upem) as i32
+        } else {
+            -(((-numerator) + upem / 2) / upem) as i32
+        })
+    }
+
+    /// The nth vertical design variant of `codepoint`, in the font's order.
+    ///
+    /// The variant glyph is usually not in the cmap, so this is the only way to
+    /// address it. `None` when the face has no construction or no such ordinal;
+    /// the caller then draws the base glyph at its fallback size.
+    pub fn math_variant_glyph(&self, codepoint: u32, index: u16) -> Option<u16> {
+        let base = self.glyph(codepoint);
+        if base == 0 {
+            return None;
+        }
+        let at = self
+            .math_variants
+            .binary_search_by_key(&base, |(gid, _)| *gid)
+            .ok()?;
+        self.math_variants[at].1.get(index as usize).copied()
+    }
+
     pub fn is_bold(&self) -> bool {
         self.bold
     }
@@ -154,11 +243,49 @@ impl PdfFont {
         advance * 1000 / self.upem.max(1) as u32
     }
 
-    /// Build a standalone TrueType program containing only `used` glyphs.
+    /// Build a font program containing only `used` glyphs.
     ///
     /// Glyph ids are preserved (unused glyphs become empty), so `Identity-H`
     /// CIDs stay equal to the ids the shaper and this renderer already use.
-    pub fn subset(&self, used: &[u16]) -> Vec<u8> {
+    pub fn subset(&self, used: &[u16]) -> Result<Subset, PdfError> {
+        match self.face.outlines {
+            Outlines::Cff { offset, length } => Ok(Subset {
+                program: cff::subset(&self.data[offset..offset + length], used, self.num_glyphs())?,
+                kind: ProgramKind::CidCff,
+            }),
+            Outlines::TrueType { .. } => Ok(Subset {
+                program: self.subset_true_type(used),
+                kind: ProgramKind::TrueType,
+            }),
+        }
+    }
+
+    /// What kind of program [`PdfFont::subset`] builds for this face.
+    pub fn program_kind(&self) -> ProgramKind {
+        match self.face.outlines {
+            Outlines::Cff { .. } => ProgramKind::CidCff,
+            Outlines::TrueType { .. } => ProgramKind::TrueType,
+        }
+    }
+
+    /// `/CIDSystemInfo` values for an embedded CID-keyed program.
+    pub fn cid_system(&self) -> CidSystem {
+        self.cid.clone().unwrap_or_default()
+    }
+
+    fn num_glyphs(&self) -> u16 {
+        self.face.num_glyphs
+    }
+
+    fn subset_true_type(&self, used: &[u16]) -> Vec<u8> {
+        let (loca_table, glyf_offset, glyf_length) = match self.face.outlines {
+            Outlines::TrueType {
+                ref loca,
+                glyf_offset,
+                glyf_length,
+            } => (loca, glyf_offset, glyf_length),
+            Outlines::Cff { .. } => unreachable!("only called for TrueType outlines"),
+        };
         let mut include = vec![false; self.face.num_glyphs as usize];
         let mut queue: Vec<u16> = Vec::with_capacity(used.len() + 1);
         include[0] = true;
@@ -183,12 +310,10 @@ impl PdfFont {
         offsets.push(0u32);
         for (gid, &used) in include.iter().enumerate() {
             if used {
-                let start = self.face.loca[gid] as usize;
-                let end = self.face.loca[gid + 1] as usize;
-                if end > start && end <= self.face.glyf_length {
-                    glyf.extend_from_slice(
-                        &self.data[self.face.glyf_offset + start..self.face.glyf_offset + end],
-                    );
+                let start = loca_table[gid] as usize;
+                let end = loca_table[gid + 1] as usize;
+                if end > start && end <= glyf_length {
+                    glyf.extend_from_slice(&self.data[glyf_offset + start..glyf_offset + end]);
                     while glyf.len() % 4 != 0 {
                         glyf.push(0);
                     }
@@ -245,6 +370,8 @@ impl PdfFont {
                 scale(self.bbox[3]),
             ],
             italic_angle: self.italic_angle as i32,
+            underline_position: scale(self.underline_position),
+            underline_thickness: scale(self.underline_thickness).max(1),
             flags: 4 | if self.serif { 2 } else { 0 } | if self.bold { 262144 } else { 0 },
         }
     }
@@ -262,16 +389,24 @@ impl PdfFont {
     /// Composite glyph components, resolved from `glyf`.
     fn components(&self, gid: u16) -> Vec<u16> {
         let mut out = Vec::new();
+        let Outlines::TrueType {
+            ref loca,
+            glyf_offset,
+            glyf_length,
+        } = self.face.outlines
+        else {
+            return out;
+        };
         let index = gid as usize;
-        if index + 1 >= self.face.loca.len() {
+        if index + 1 >= loca.len() {
             return out;
         }
-        let start = self.face.loca[index] as usize;
-        let end = self.face.loca[index + 1] as usize;
-        if end <= start || end > self.face.glyf_length {
+        let start = loca[index] as usize;
+        let end = loca[index + 1] as usize;
+        if end <= start || end > glyf_length {
             return out;
         }
-        let data = &self.data[self.face.glyf_offset + start..self.face.glyf_offset + end];
+        let data = &self.data[glyf_offset + start..glyf_offset + end];
         if data.len() < 10 {
             return out;
         }
@@ -302,12 +437,32 @@ impl PdfFont {
     }
 }
 
+/// Which stream a subset has to be written as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProgramKind {
+    /// `glyf` outlines: `/FontFile2` and `/CIDFontType2`.
+    TrueType,
+    /// CID-keyed Type 2 charstrings: `/FontFile3` and `/CIDFontType0`.
+    CidCff,
+}
+
+/// A font program ready for `/FontFile2` or `/FontFile3`.
+#[derive(Clone, Debug)]
+pub struct Subset {
+    pub program: Vec<u8>,
+    pub kind: ProgramKind,
+}
+
 /// Descriptor values already scaled to 1000 units per em.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PdfFontDescriptor {
     pub ascent: i32,
     pub descent: i32,
     pub cap_height: i32,
+    /// Baseline-relative underline geometry, in 1000-unit space. The position
+    /// is negative below the baseline.
+    pub underline_position: i32,
+    pub underline_thickness: i32,
     pub bbox: [i32; 4],
     pub italic_angle: i32,
     pub flags: u32,
@@ -334,12 +489,7 @@ impl Face {
             0
         };
         let version = read_u32(data, base)?;
-        if version == 0x4F54_544F {
-            return Err(PdfError::new(
-                "PDF output needs a TrueType (glyf) font; CFF/OTF is not supported",
-            ));
-        }
-        if version != 0x0001_0000 && version != 0x7472_7565 {
+        if version != 0x0001_0000 && version != 0x7472_7565 && version != 0x4F54_544F {
             return Err(PdfError::new("unsupported sfnt version"));
         }
         let count = read_u16(data, base + 4)? as usize;
@@ -359,18 +509,34 @@ impl Face {
                 length,
             });
         }
-        let face = Self {
-            tables: tables.clone(),
-            loca: Vec::new(),
+        let mut face = Self {
+            tables,
+            outlines: Outlines::Cff {
+                offset: 0,
+                length: 0,
+            },
             num_glyphs: 0,
-            glyf_offset: 0,
-            glyf_length: 0,
         };
         let head = face.required(b"head")?;
         let maxp = face.required(b"maxp")?;
-        let loca = face.required(b"loca")?;
-        let glyf = face.required(b"glyf")?;
         let num_glyphs = read_u16(data, maxp.offset + 4)?;
+        face.num_glyphs = num_glyphs;
+        if let Some(table) = face.find(b"CFF2") {
+            let _ = table;
+            return Err(PdfError::new(
+                "CFF2 (variable) outlines are not supported; use a static OTF or a TrueType face",
+            ));
+        }
+        if let Some(table) = face.find(b"CFF ") {
+            face.outlines = Outlines::Cff {
+                offset: table.offset,
+                length: table.length,
+            };
+            return Ok(face);
+        }
+        let glyf = face.required(b"glyf")?;
+        let loca = face.required(b"loca")?;
+        let _ = head;
         let format = read_i16(data, head.offset + 50)?;
         let mut offsets = Vec::with_capacity(num_glyphs as usize + 1);
         for index in 0..=num_glyphs as usize {
@@ -386,13 +552,12 @@ impl Face {
                 return Err(PdfError::new("font loca is not monotonic"));
             }
         }
-        Ok(Self {
-            tables,
+        face.outlines = Outlines::TrueType {
             loca: offsets,
-            num_glyphs,
             glyf_offset: glyf.offset,
             glyf_length: glyf.length,
-        })
+        };
+        Ok(face)
     }
 
     fn find(&self, tag: &[u8; 4]) -> Option<Table> {
@@ -425,6 +590,85 @@ fn parse_widths(data: &[u8], face: &Face) -> Result<Vec<u16>, PdfError> {
         widths.push(last);
     }
     Ok(widths)
+}
+
+/// Vertical `MathVariants` of a face: `(base glyph, [variant glyph])`.
+///
+/// Only the vertical coverage and construction offsets are read; the variant
+/// glyphs themselves are usually unencoded, so the ordinal is resolved here at
+/// draw time rather than baked into the page result (ADR-0075). A malformed
+/// MATH table yields no variants instead of failing the whole PDF.
+fn parse_math_variants(data: &[u8], face: &Face) -> Vec<(u16, Vec<u16>)> {
+    let Some(math) = face.find(b"MATH") else {
+        return Vec::new();
+    };
+    let Ok(offset) = read_u16(data, math.offset + 8) else {
+        return Vec::new();
+    };
+    if offset == 0 {
+        return Vec::new();
+    }
+    let base = math.offset + offset as usize;
+    let Ok(coverage_offset) = read_u16(data, base + 2) else {
+        return Vec::new();
+    };
+    let Ok(count) = read_u16(data, base + 6) else {
+        return Vec::new();
+    };
+    let Ok(glyphs) = math_coverage(data, base + coverage_offset as usize) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (index, gid) in glyphs.into_iter().take(count as usize).enumerate() {
+        let Ok(construction) = read_u16(data, base + 10 + index * 2) else {
+            continue;
+        };
+        let construction = base + construction as usize;
+        let Ok(variant_count) = read_u16(data, construction + 2) else {
+            continue;
+        };
+        let mut variants = Vec::with_capacity(variant_count as usize);
+        for variant in 0..variant_count as usize {
+            let Ok(glyph) = read_u16(data, construction + 4 + variant * 4) else {
+                break;
+            };
+            variants.push(glyph);
+        }
+        out.push((gid, variants));
+    }
+    out.sort_by_key(|(gid, _)| *gid);
+    out.dedup_by_key(|(gid, _)| *gid);
+    out
+}
+
+/// Glyph ids of an OpenType coverage table, in coverage order.
+fn math_coverage(data: &[u8], offset: usize) -> Result<Vec<u16>, PdfError> {
+    match read_u16(data, offset)? {
+        1 => {
+            let count = read_u16(data, offset + 2)? as usize;
+            let mut out = Vec::with_capacity(count);
+            for index in 0..count {
+                out.push(read_u16(data, offset + 4 + index * 2)?);
+            }
+            Ok(out)
+        }
+        2 => {
+            let count = read_u16(data, offset + 2)? as usize;
+            let mut out = Vec::new();
+            for index in 0..count {
+                let record = offset + 4 + index * 6;
+                let start = read_u16(data, record)?;
+                let end = read_u16(data, record + 2)?;
+                for gid in start..=end {
+                    out.push(gid);
+                }
+            }
+            Ok(out)
+        }
+        other => Err(PdfError::new(format!(
+            "unsupported coverage format {other}"
+        ))),
+    }
 }
 
 fn parse_cmap(data: &[u8], face: &Face) -> Result<Vec<(u32, u16)>, PdfError> {

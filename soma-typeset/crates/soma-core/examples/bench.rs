@@ -10,7 +10,8 @@ use std::time::Instant;
 
 use soma_core::{
     break_paragraph, Align, Atom, AtomKind, Boundary, BoundaryKind, BreakConfig, Breakability,
-    Glue, Paragraph, ParagraphStyle, ParamSet, PunctClass, StyleId, SyntheticMetrics, Width,
+    Decorations, Glue, Paragraph, ParagraphStyle, ParamSet, PunctClass, StyleId, SyntheticMetrics,
+    Width,
 };
 
 fn paragraph(atom_count: usize) -> Paragraph {
@@ -20,6 +21,8 @@ fn paragraph(atom_count: usize) -> Paragraph {
             kind: AtomKind::Cjk,
             class: PunctClass::None,
             style: StyleId(0),
+            decor: Decorations::NONE,
+            link: None,
             compress_left: Width::ZERO,
             compress_right: Width::ZERO,
         })
@@ -39,6 +42,8 @@ fn paragraph(atom_count: usize) -> Paragraph {
         style: ParagraphStyle {
             width: Width::from_em(20),
             first_indent: Width::ZERO,
+            hang: Width::ZERO,
+            tracking: Width::ZERO,
             line_height: Width::from_em_frac(3, 2),
             align: Align::Justify,
         },

@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{document, engine, paragraph, styled, text, BOOK};
+use common::{document, engine, paragraph, paragraph_with, styled, text, BOOK};
 use soma_core::{Metrics, StyleId};
 use soma_doc::block::Heading;
 use soma_doc::node::NodeMeta;
@@ -38,6 +38,63 @@ fn advances_and_line_metrics_scale_with_the_resolved_font_size() {
 
     assert_eq!(metrics.version(), soma_metrics::VERSION);
     assert_eq!(metrics.hash(), table.hash());
+}
+
+#[test]
+fn han_inside_a_formula_measures_with_the_text_face() {
+    // A `\text{行宽}` run inside a formula is drawn from the text face: the
+    // math face has no Han glyphs. The layout must measure what will be drawn,
+    // or the formula's width and the drawn positions disagree.
+    let doc = document(vec![paragraph("中")]);
+    let styled = styled(&doc, BOOK);
+    let table = MetricsTable::embedded();
+    let metrics = StyledMetrics::new(&table, &styled);
+    let style = StyleId(0);
+    let size = styled.table().styles()[0].font_size.0;
+    let body = table.face(0).expect("body face");
+    let math = table.math_face().expect("math face");
+    assert!(!math.has('中' as u32), "the fixture's math face has no Han");
+    assert!(body.has('中' as u32), "the body face does");
+
+    assert_eq!(
+        metrics.math_advance("中", style).0,
+        scale(body.advance_at('中' as u32), size),
+        "Han inside a formula measures with the body face"
+    );
+    assert_eq!(
+        metrics.math_advance("∑", style).0,
+        scale(math.advance_at('∑' as u32), size),
+        "a math glyph still measures with the math face"
+    );
+}
+
+#[test]
+fn inline_code_is_measured_with_the_code_style() {
+    // The atom carries the `code` element's style, and the layout asks the
+    // metrics for that style: sans at 9 pt against a 10.5 pt serif body.
+    use soma_doc::inline::{Code, Inline};
+    let code = Inline::Code(Code::new(NodeMeta::synthesized(), "MMMM"));
+    let doc = document(vec![paragraph_with(vec![code])]);
+    let styled = styled(&doc, BOOK);
+    let table = MetricsTable::embedded();
+    let metrics = StyledMetrics::new(&table, &styled);
+    let layout = layout(&doc, &styled, &metrics, &engine()).expect("layout");
+    let advance = layout.pages[0].blocks[0].lines[0].line.boxes[0].advance.0;
+
+    let code_style = styled
+        .table()
+        .styles()
+        .iter()
+        .position(|style| style.font_size.0 < styled.table().styles()[0].font_size.0)
+        .map(|index| StyleId(index as u16));
+    let Some(code_style) = code_style else {
+        return; // the fixture has one size; nothing to distinguish
+    };
+    assert_eq!(advance, metrics.advance("MMMM", code_style).0);
+    assert!(
+        advance < metrics.advance("MMMM", StyleId(0)).0,
+        "code is set smaller than the body"
+    );
 }
 
 #[test]

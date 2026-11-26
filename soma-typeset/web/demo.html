@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>soma-kp · 浏览器断行演示</title>
+<style>
+  :root { --ink: #18201d; --muted: #6d7772; --rule: #d9d6c7; --accent: #2f5d50; --bg: #fbfaf4; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font-family: Palatino, "Source Han Serif SC", "Noto Serif CJK SC", serif; }
+  header { padding: 1.6rem 2rem 1rem; border-bottom: 2px solid var(--ink); }
+  h1 { margin: 0 0 .3rem; font-size: 1.5rem; font-weight: 400; letter-spacing: .01em; }
+  .kicker { font: .7rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+            letter-spacing: .2em; text-transform: uppercase; color: var(--accent); }
+  .sub { margin: .4rem 0 0; color: var(--muted); font-size: .86rem; max-width: 46rem; }
+  main { display: grid; grid-template-columns: 22rem 1fr; gap: 2rem; padding: 1.6rem 2rem 4rem; align-items: start; }
+  @media (max-width: 60rem) { main { grid-template-columns: 1fr; } }
+  .panel { border: 1px solid var(--rule); background: #fff; padding: 1rem; }
+  .panel h2 { margin: 0 0 .8rem; font-size: .74rem; letter-spacing: .16em; text-transform: uppercase;
+              color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-weight: 600; }
+  label { display: block; font: .74rem/1.6 ui-monospace, Menlo, monospace; color: var(--muted); margin-top: .7rem; }
+  input[type=range] { width: 100%; }
+  select, textarea, input[type=number] { width: 100%; font: .85rem/1.5 inherit; padding: .35rem .45rem;
+    border: 1px solid var(--rule); background: #fff; color: var(--ink); }
+  textarea { min-height: 9rem; resize: vertical; }
+  .row { display: flex; gap: .6rem; align-items: baseline; font: .74rem/1.4 ui-monospace, Menlo, monospace; color: var(--muted); }
+  .row b { color: var(--ink); font-weight: 600; }
+  .stats { display: flex; flex-wrap: wrap; gap: .4rem 1.1rem; margin-top: .9rem;
+           font: .74rem/1.4 ui-monospace, Menlo, monospace; color: var(--muted); }
+  .badge { border: 1px solid var(--rule); padding: .05rem .4rem; border-radius: 2px; }
+  .badge.warn { border-color: #d8c49a; background: #fbf7ec; color: #7a5a20; }
+  .badge.ok { border-color: #9fbfb2; background: #f2f8f5; color: var(--accent); }
+  #page { background: #fff; border: 1px solid var(--rule); padding: 2.2rem; min-height: 24rem; }
+  #lines { margin: 0; }
+  #lines .soma-line { text-align: left; }
+  #canvas-wrap { margin-top: 1.2rem; }
+  canvas { background: #fff; border: 1px solid var(--rule); width: 100%; height: auto; }
+  .hint { margin-top: .8rem; font: .72rem/1.5 ui-monospace, Menlo, monospace; color: var(--muted); }
+  code { font: .85em ui-monospace, Menlo, monospace; background: #f3f1e6; padding: .05em .25em; }
+</style>
+</head>
+<body>
+<header>
+  <div class="kicker">soma-typeset · web slice</div>
+  <h1>浏览器里的 Knuth–Plass 断行</h1>
+  <p class="sub">同一份 <code>soma-core</code> + <code>soma-rules</code> 编译成 32 KB 的 wasm，零 import。
+  宽度由浏览器自己量（canvas），断点由引擎给。改栏宽、字号、对齐，看它重排。</p>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>输入</h2>
+    <textarea id="text">中文排版的核心，是把「规则」变成可调的代价模型，而不是在西文引擎上打补丁。Knuth–Plass 的做法是全局最优：它不急着把当前行填满，而是考虑整段的代价，所以不会出现前松后紧的节奏。这一段混排了 English 与数字 2026，还有标点：「引号」、（括号）、；冒号、，逗号、。句号——以及省略号……</textarea>
+
+    <label>栏宽 <span class="row"><b id="w-label">32</b> em</span></label>
+    <input type="range" id="width" min="10" max="60" step="1" value="32">
+
+    <label>字号 <span class="row"><b id="size-label">16</b> px</span></label>
+    <input type="range" id="size" min="10" max="28" step="1" value="16">
+
+    <label>字体</label>
+    <select id="family">
+      <option value="serif">衬线（本地宋体/宋）</option>
+      <option value="sans-serif">无衬线</option>
+      <option value="ui-monospace, monospace">等宽</option>
+    </select>
+
+    <label>首行缩进 <span class="row"><b id="indent-label">2</b> em</span></label>
+    <input type="range" id="indent" min="0" max="4" step="1" value="2">
+
+    <label class="row"><span>两端对齐</span><input type="checkbox" id="justify" checked style="width:auto"></label>
+
+    <label class="row"><span>按 box 坐标画（canvas）</span><input type="checkbox" id="canvas-mode" style="width:auto"></label>
+
+    <div class="stats" id="stats"></div>
+    <p class="hint" id="hint">正在加载 wasm…</p>
+  </section>
+
+  <section id="page">
+    <div id="lines"></div>
+    <div id="canvas-wrap" hidden><canvas id="canvas" width="900" height="420"></canvas></div>
+  </section>
+</main>
+
+<script type="module">
+// `scripts/web-bundle.sh` inlines the module and the wasm into one file; when it
+// does, it sets these two globals before this script runs.
+const { Kp, UNITS_PER_EM, LINE_OVERFULL, LINE_EMERGENCY } =
+  await import(window.__somaKpUrl || './soma-kp.js');
+
+const ui = {
+  text: document.getElementById('text'),
+  width: document.getElementById('width'),
+  size: document.getElementById('size'),
+  family: document.getElementById('family'),
+  indent: document.getElementById('indent'),
+  justify: document.getElementById('justify'),
+  canvasMode: document.getElementById('canvas-mode'),
+  lines: document.getElementById('lines'),
+  canvas: document.getElementById('canvas'),
+  canvasWrap: document.getElementById('canvas-wrap'),
+  stats: document.getElementById('stats'),
+  hint: document.getElementById('hint'),
+  labels: {
+    width: document.getElementById('w-label'),
+    size: document.getElementById('size-label'),
+    indent: document.getElementById('indent-label'),
+  },
+};
+
+let kp = null;
+try {
+  if (window.__somaKpWasm) {
+    const bytes = Uint8Array.from(atob(window.__somaKpWasm), (c) => c.charCodeAt(0));
+    kp = await Kp.fromBytes(bytes);
+  } else {
+    kp = await Kp.load('./soma-kp.wasm');
+  }
+  ui.hint.textContent = '已加载。改任何一项都会重排；数字是最近一次断行的耗时。';
+} catch (error) {
+  ui.hint.textContent = `加载失败：${error.message}。请用 HTTP 打开本页（file:// 下浏览器禁止 fetch wasm）。`;
+  throw error;
+}
+
+function fontSizePx() {
+  return Number(ui.size.value);
+}
+function face() {
+  const px = fontSizePx();
+  return { font: `400 ${px}px ${ui.family.value}`, sizePx: px };
+}
+
+function layout() {
+  const px = fontSizePx();
+  const em = UNITS_PER_EM;
+  const widthEm = Number(ui.width.value);
+  const indentEm = Number(ui.indent.value);
+  const style = {
+    width: Math.round(widthEm * em),
+    firstIndent: Math.round(indentEm * em),
+    lineHeight: Math.round(1.65 * em),
+    align: ui.justify.checked ? 'justify' : 'left',
+  };
+  ui.labels.width.textContent = widthEm;
+  ui.labels.size.textContent = px;
+  ui.labels.indent.textContent = indentEm;
+
+  const compiled = kp.compile(ui.text.value.replace(/\n+/g, '\n'), style);
+  let result;
+  let ms;
+  try {
+    kp.measure(compiled, face());
+    const started = performance.now();
+    result = kp.break(compiled);
+    ms = performance.now() - started;
+    if (result.fallback) {
+      // Same policy the worker uses: the ladder can cost 10x for a visual
+      // difference nobody can see on one paragraph.
+      result = kp.break(compiled, { greedy: true });
+    }
+  } catch (error) {
+    compiled.free();
+    ui.lines.textContent = `断行失败：${error.message}`;
+    ui.stats.textContent = '';
+    return;
+  }
+
+  ui.lines.style.width = `${widthEm * px}px`;
+  ui.lines.style.font = `400 ${px}px ${ui.family.value}`;
+  ui.lines.style.lineHeight = '1.65';
+  kp.renderToDOM(ui.lines, compiled, result, { sizePx: px });
+
+  const overfull = result.lines.filter((line) => line.flags & LINE_OVERFULL).length;
+  const emergency = result.lines.filter((line) => line.flags & LINE_EMERGENCY).length;
+  const atoms = compiled.atoms.length;
+  const stats = [
+    `<span class="badge">${atoms} atoms</span>`,
+    `<span class="badge">${result.lines.length} 行</span>`,
+    `<span class="badge ${ms > 8 ? 'warn' : 'ok'}">${ms.toFixed(2)} ms</span>`,
+    result.lengthLimited ? '<span class="badge warn">greedy（超长段）</span>' : '<span class="badge ok">K-P</span>',
+  ];
+  if (overfull) stats.push(`<span class="badge warn">${overfull} 行溢宽</span>`);
+  if (emergency) stats.push(`<span class="badge warn">${emergency} 行 emergency</span>`);
+  ui.stats.innerHTML = stats.join('');
+
+  if (ui.canvasMode.checked) {
+    ui.canvasWrap.hidden = false;
+    const canvas = ui.canvas;
+    const scale = px / UNITS_PER_EM;
+    const height = Math.max(result.lines.length * 1.65 * px, 120) + 20;
+    canvas.width = Math.round(widthEm * px * 1.08);
+    canvas.height = Math.round(height);
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#18201d';
+    kp.renderToCanvas(ctx, compiled, result, {
+      sizePx: px,
+      font: `400 ${px}px ${ui.family.value}`,
+      x: 6,
+      y: 6,
+    });
+  } else {
+    ui.canvasWrap.hidden = true;
+  }
+
+  compiled.free();
+}
+
+let pending = 0;
+function schedule() {
+  if (pending) cancelAnimationFrame(pending);
+  pending = requestAnimationFrame(() => {
+    pending = 0;
+    layout();
+  });
+}
+
+for (const element of [ui.text, ui.width, ui.size, ui.family, ui.indent, ui.justify, ui.canvasMode]) {
+  element.addEventListener('input', schedule);
+  element.addEventListener('change', schedule);
+}
+document.fonts.ready.then(schedule);
+schedule();
+</script>
+</body>
+</html>

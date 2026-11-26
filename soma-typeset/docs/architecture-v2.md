@@ -92,7 +92,7 @@ flowchart TB
   SRC[Markdown / HTML / LaTeX / Word] --> AST[Syntax AST]
   AST --> DOC[DocIR 语义 IR]
   META[文档元数据 / frontmatter] --> DOC
-  TPL[模板 manifest + styles.yaml] --> RESOLVE[样式解析 / 规则级联]
+  TPL[模板 YAML] --> RESOLVE[样式解析 / 规则级联]
   DOC --> RESOLVE
   RESOLVE --> BOX[Layout Box Tree]
   ENG[EngineConfig / preset] --> ALGO[K-P / 分页 / 其他算法]
@@ -217,7 +217,7 @@ pub trait SyntaxFrontend {
 
 | 前端 | 解析器 | 首版范围 | 明确不做 |
 |---|---|---|---|
-| `soma-md` | `comrak` AST（后续可换） | CommonMark 基础、GFM 表格/删除线、数学扩展、原始 HTML/LaTeX inline | 完整 CommonMark 边界、扩展语法全集 |
+| `soma-md` | 自研子集；嵌入片段复用 `soma-html` / `soma-latex` | CommonMark 基础、GFM 表格/删除线、行内/行间数学、语义 HTML、LaTeX 命令与环境 | 完整 CommonMark 边界、扩展语法全集、行内 LaTeX 脚注定义 |
 | `soma-html` | `html5ever`/`scraper` | 语义白名单：标题、段落、列表、强调、链接、图、表、脚注、上下标、`u`/`s`、`ruby` | 不执行 CSS 布局；不执行脚本 |
 | `soma-latex` | 自研子集或成熟解析器 | 标题、段落、强调、下划线、上下标、公式、脚注、图、表、引用 | 不实现完整 TeX 宏展开 |
 | `soma-docx` | docx XML/zip | 段落样式、字符样式、标题、列表、脚注、图、表 | 不做 Word 版式保真 |
@@ -258,86 +258,71 @@ pub trait SyntaxFrontend {
 模板文件：
 
 ```text
-template/
-  manifest.yaml     # 页面、槽位、封面、页眉页脚、字体引用、资源
-  styles.yaml       # YAML 规则：match -> properties
-  assets/           # 字体、图片、装饰
+template.yaml        # 单文件：页面、封面、目录、编号、样式规则、母版
 ```
 
-两份都是纯 YAML 数据，不是 CSS，也不是可执行脚本。
+它是一份纯 YAML 数据，不是 CSS，也不是可执行脚本；字体与图片由宿主通过
+CLI/度量表注入，模板只声明族名、字号与样式。参考实现见
+`examples/templates/plex.yaml`。
 
-### 7.2 Manifest 示例
+### 7.2 模板示例（当前实现）
+
+早期设计把模板拆成 `manifest.yaml` + `styles.yaml`，并带一个 `schema:` 字段。
+实现按 ADR-0003/0009 收敛为**一份纯 YAML 文件**；版本由 `soma.template/9`
+常量标识，文件里不再写 `schema:`。实际形状如下（完整字段见
+[`docs/template.md`](template.md)）：
 
 ```yaml
-schema: soma.template/1
 name: book-a5
-version: 1
-locale: zh-CN
+version: "1"
 
 page:
   size: A5
-  margin: { top: 18mm, bottom: 20mm, inner: 16mm, outer: 14mm }
-  masters:
-    - name: body
-      header: { left: chapter-title, right: page-number }
-      footer: { center: none }
-    - name: first
-      header: none
-      footer: { center: page-number }
+  margin: 16mm
+  margin-top: 18mm
+  header: 6mm
+  footer: 6mm
+  header-text: running-title
+  folio: "{page}"
+  start-master: chapter
+  front-matter: roman
 
-slots:
-  cover: { required: true, blocks: [title, subtitle, author, imprint] }
-  toc: { required: false, title: 目录 }
-  footnote-area: { style: footnote }
+cover:
+  master: cover
 
-fonts:
-  serif: { family: "Noto Serif CJK SC", metrics: noto-serif-cjk }
-  sans: { family: "Noto Sans CJK SC", metrics: noto-sans-cjk }
-```
+toc:
+  depth: 2
+  title: 目录
 
-### 7.3 Style rules 示例（纯 YAML）
-
-```yaml
-schema: soma.styles/1
-
-rules:
-  - match: { kind: paragraph, role: body }
-    properties:
-      font: serif
-      size: 10.5pt
-      line_height: 1.6
-      first_indent: 2em
+styles:
+  - selector:
+      element: paragraph
+      role: body
+    declarations:
+      font-size: 10.5pt
+      line-height: 1.6
+      first-indent: 2em
       align: justify
 
-  - match: { kind: heading, level: 1 }
-    properties:
-      font: sans
-      size: 20pt
-      line_height: 1.3
-      margin_before: 18pt
-      margin_after: 12pt
-      keep_with_next: true
-      page_break_before: auto
-
-  - match: { kind: inline, semantic: strong }
-    properties:
-      weight: 700
-
-  - match: { kind: inline, semantic: underline }
-    properties:
-      underline: single
-
-  - match: { kind: footnote }
-    properties:
-      size: 8pt
-      line_height: 1.35
+  - selector:
+      element: heading
+      level: 1
+    declarations:
+      font-size: 20pt
+      line-height: 1.3
+      space-before: 18pt
+      space-after: 12pt
+      keep-with-next: true
 ```
 
 规则模型是**数据驱动的 YAML 规则表**，不是 CSS：
 
-- 匹配字段：`kind`、`role`、`class`、`level`、`lang`、`section`、`page-master`。
-- 属性：字体族/字重/字形/字号、行高、段前段后、首行缩进、对齐、断页/保持、孤行寡行、下划线/删除线、上下标、颜色（渲染层）。
-- 兼容规则：可选 `priority` 整数（默认 0）；`priority` 高者覆盖低者，同 `priority` 按列表顺序后者覆盖前者。
+- `selector` 字段：`element`、`role`、`class`/`classes`、`level`、`lang`、
+  `section`、`page-master`、`within`。
+- `declarations` 字段：字体族/字重/字形/字号、行高、段前段后、首行缩进、对齐、
+  断页/保持、孤行寡行、下划线/删除线、上下标、颜色（渲染层）。
+- 可选 `priority` 整数（默认 0）；`priority` 高者覆盖低者，同 `priority`
+  按列表顺序后者覆盖前者。
 - 不支持 CSS 选择器、组合、伪类、媒体查询、CSS 函数或脚本。
 - 未知属性 → 诊断；不静默忽略。
 - 级联顺序：引擎默认 < 模板 base < 模板 rules < 文档级命名角色（可选）。内容里的表现型属性不参与。
@@ -577,21 +562,33 @@ LayoutResult
 crates/
   soma-core/        # units, metrics seam, inline K-P, canonical line result
   soma-rules/       # segmentation + CJK punctuation/gap/trim -> inline sequence
+  soma-highlight/   # code lexer -> SyntaxClass spans (ADR-0091)
+  soma-tikz/        # core PGF drawing language -> integer vector paths (ADR-0092)
+  soma-diagram/     # Mermaid/DOT -> the same integer vector box (ADR-0102)
   soma-doc/         # DocIR, source map, document schema
   soma-template/    # manifest, YAML style rules, validation, page masters
   soma-layout/      # box tree, paragraph adapter, pagination, footnotes
-  soma-md/          # Markdown -> DocIR
+  soma-math/        # TeX subset -> integer math boxes
+  soma-metrics/     # soma.metrics/7 table reader + adapters
+  soma-md/          # Markdown -> DocIR, with embedded LaTeX/HTML fragments
   soma-html/        # HTML -> DocIR
   soma-latex/       # LaTeX subset -> DocIR
+  soma-docx/        # Word .docx -> DocIR
   soma-render-html/ # LayoutResult -> HTML
-  soma-render-svg/  # later
-  soma-render-pdf/  # later
-  soma-eval/
-  soma-demo/
-  soma-wasm/
+  soma-render-svg/  # LayoutResult -> SVG
+  soma-render-pdf/  # LayoutResult -> PDF
+  soma-engine/      # soma.engine/1 configuration
+  soma-collate/     # pinyin order for the index
+  soma-hyphen/      # Liang hyphenation
+  soma-web/         # browser C ABI slice (rules + K-P)
+  soma-wasm/        # native/WASI fixture for byte parity
+  soma-eval/        # benchmark, sweeps, blind statistics, scorecard
+  soma-demo/        # static HTML renderer
+  soma-cli/         # `soma` binary
 ```
 
-不建议一开始就拆二十个 crate。先落地 `soma-doc`、`soma-template`、`soma-layout`、`soma-md`、`soma-render-html`，其余按需增加。
+最初建议先落地五个 crate；现在上表 24 个已全部落地，且 `soma-core` 保持
+最底层的依赖边界（ADR-0007/0009）。
 
 ### 15.2 迁移顺序
 

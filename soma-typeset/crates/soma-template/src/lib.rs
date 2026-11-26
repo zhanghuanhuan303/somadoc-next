@@ -26,15 +26,17 @@ pub mod units;
 mod yaml;
 
 pub use style::{
-    resolve, ComputedStyle, ResolvedMaster, ResolvedPage, StyleTable, StyledDoc, TableRules,
+    family_is_sans, family_role, resolve, ComputedStyle, FamilyRole, ResolvedMaster, ResolvedPage,
+    StyleTable, StyledDoc, TableRules,
 };
 pub use template::{
-    parse_template, CoverSpec, Declaration, FontSlant, FontWeight, FootnoteNumbering, FootnoteSpec,
-    FrontMatterNumbering, HeadingNumbering, IndexSpec, MasterSpec, NumberingSpec, PageSize,
-    PageSpec, Property, PropertyValue, RuleStyle, Selector, StyleRule, TableSpec, Template,
-    TocSpec, ELEMENTS, SCHEMA,
+    parse_template, parse_template_inherit, CoverSpec, Declaration, FigureAlign, FigureSpec,
+    FigureWidth, FontSlant, FontWeight, FootnoteNumbering, FootnoteSpec, FrontMatterNumbering,
+    HeadingNumbering, IndexSort, IndexSpec, LayoutMode, MasterSpec, NumberingSpec, PageSize,
+    PageSpec, Property, PropertyValue, RuleStyle, Selector, StyleRule, SyntaxPalette, TableSpec,
+    TableWidth, Template, TocSpec, ELEMENTS, SCHEMA,
 };
-pub use units::{LengthSpec, LineHeightSpec, Rational, Unit, UNITS_PER_EM};
+pub use units::{LengthSpec, LineHeightSpec, PageLength, Percent, Rational, Unit, UNITS_PER_EM};
 
 use alloc::string::String;
 use core::fmt;

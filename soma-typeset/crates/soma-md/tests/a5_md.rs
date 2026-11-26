@@ -48,6 +48,22 @@ fn parses_emphasis_and_inline_code() {
 }
 
 #[test]
+fn parses_strikethrough() {
+    let document = parse_markdown("前 ~~删除~~ 后。\n");
+    let paragraph = match &document.blocks[0] {
+        Block::Paragraph(paragraph) => paragraph,
+        other => panic!("expected a paragraph, got {other:?}"),
+    };
+    assert!(
+        paragraph
+            .inlines
+            .iter()
+            .any(|inline| matches!(inline, Inline::Strikethrough(_))),
+        "GFM `~~` is a strikethrough, and the IR carries it"
+    );
+}
+
+#[test]
 fn parses_links_and_images() {
     let document = parse_markdown("见 [链接](https://example.com) 与 ![图](a.png)。\n");
     let paragraph = match &document.blocks[0] {
@@ -204,4 +220,175 @@ fn an_index_extension_becomes_a_marker() {
     );
     assert_eq!(document.plain_text().trim(), "正文  后文");
     document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn a_ruby_extension_becomes_an_annotation() {
+    let document = parse_markdown("正文 [[ruby:汉字|hànzì]] 后文\n");
+    let Block::Paragraph(paragraph) = &document.blocks[0] else {
+        panic!("paragraph")
+    };
+    assert!(
+        paragraph.inlines.iter().any(|inline| matches!(
+            inline,
+            Inline::Ruby(node) if node.base == "汉字" && node.annotation == "hànzì"
+        )),
+        "the annotation is in the inline sequence"
+    );
+    assert_eq!(document.plain_text().trim(), "正文 汉字 后文");
+    document.validate().expect("valid DocIR");
+}
+
+#[test]
+fn front_matter_becomes_document_metadata() {
+    let source = "---\ntitle: 中文排版案例集\nsubtitle: 九篇语料\nauthor: 张三, 李四\ndate: 2026-11-20\nlanguage: zh-Hans\nkeywords: 排版, 中文\n---\n\n正文第一段。\n";
+    let document = parse_markdown(source);
+
+    assert_eq!(document.meta.authors.len(), 2);
+    assert_eq!(document.meta.authors[0].name, "张三");
+    assert_eq!(document.meta.language.as_deref(), Some("zh-Hans"));
+    assert_eq!(document.meta.keywords.len(), 2);
+    let cover = document.meta.cover.as_ref().expect("cover data");
+    assert_eq!(cover.subtitle.as_deref(), Some("九篇语料"));
+    assert_eq!(cover.authors.len(), 2);
+    assert!(cover.date.is_some());
+    // The body starts after the closing marker, not at the title.
+    assert!(!document.blocks.is_empty());
+}
+
+#[test]
+fn an_unterminated_front_matter_block_is_ordinary_text() {
+    let document = parse_markdown("---\ntitle: 没有结束标记\n\n正文。\n");
+    assert!(document.meta.title.is_none());
+    assert!(document.meta.cover.is_none());
+    assert!(!document.blocks.is_empty());
+}
+
+#[test]
+fn setext_underlines_make_headings() {
+    let document = parse_markdown("一级标题\n===\n\n二级标题\n---\n\n正文。\n");
+    document.validate().expect("valid DocIR");
+
+    match &document.blocks[0] {
+        Block::Heading(heading) => assert_eq!(heading.level, 1),
+        other => panic!("expected a level-1 heading, got {other:?}"),
+    }
+    match &document.blocks[1] {
+        Block::Heading(heading) => assert_eq!(heading.level, 2),
+        other => panic!("expected a level-2 heading, got {other:?}"),
+    }
+    assert!(matches!(document.blocks[2], Block::Paragraph(_)));
+}
+
+#[test]
+fn a_nested_list_is_a_list_inside_an_item() {
+    let document = parse_markdown("- 甲\n  - 甲一\n  - 甲二\n- 乙\n");
+    document.validate().expect("valid DocIR");
+    let Block::List(list) = &document.blocks[0] else {
+        panic!("expected a list");
+    };
+    assert_eq!(list.items.len(), 2);
+    let Block::List(nested) = &list.items[0].blocks[1] else {
+        panic!(
+            "the first item holds a nested list: {:?}",
+            list.items[0].blocks
+        );
+    };
+    assert_eq!(nested.items.len(), 2);
+    assert!(nested.items[0].meta.id.0 > 0);
+    assert!(list.items[1]
+        .blocks
+        .iter()
+        .all(|block| matches!(block, Block::Paragraph(_))));
+}
+
+#[test]
+fn a_nested_ordered_list_keeps_its_own_numbering() {
+    let document = parse_markdown("- 甲\n  3. 三\n  4. 四\n");
+    let Block::List(list) = &document.blocks[0] else {
+        panic!("expected a list");
+    };
+    let Block::List(nested) = &list.items[0].blocks[1] else {
+        panic!("nested ordered list");
+    };
+    assert!(nested.ordered);
+    assert_eq!(nested.start, 3);
+    assert_eq!(nested.items.len(), 2);
+}
+
+#[test]
+fn a_gfm_table_becomes_a_table_block() {
+    let document = parse_markdown("| 名称 | 数值 |\n| :--- | ---: |\n| 甲 | 1 |\n| 乙 | 22 |\n");
+    document.validate().expect("valid DocIR");
+    let Block::Table(table) = &document.blocks[0] else {
+        panic!("expected a table");
+    };
+    assert_eq!(table.columns.len(), 2);
+    assert_eq!(table.columns[0].align, soma_doc::CellAlign::Left);
+    assert_eq!(table.columns[1].align, soma_doc::CellAlign::Right);
+    assert_eq!(
+        (table.columns[0].share, table.columns[1].share),
+        (0, 0),
+        "equal dashes keep the measured widths"
+    );
+    assert_eq!(table.rows.len(), 3);
+    assert!(table.rows[0].header);
+    assert_eq!(table.rows[2].cells.len(), 2);
+    assert!(document.plain_text().contains("22"));
+}
+
+#[test]
+fn table_dashes_become_column_shares() {
+    let document = parse_markdown("| 短 | 长 |\n| --- | -------- |\n| 甲 | 乙 |\n");
+    let Block::Table(table) = &document.blocks[0] else {
+        panic!("expected a table");
+    };
+    assert_eq!(
+        (table.columns[0].share, table.columns[1].share),
+        (272, 728),
+        "the longer dash run gets the wider column"
+    );
+}
+
+#[test]
+fn a_table_cell_can_hold_an_escaped_bar() {
+    let document = parse_markdown("| 表达式 |\n| --- |\n| a \\| b |\n");
+    let Block::Table(table) = &document.blocks[0] else {
+        panic!("expected a table");
+    };
+    let cell = &table.rows[1].cells[0];
+    let text = cell
+        .blocks
+        .first()
+        .and_then(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph.inlines.as_slice()),
+            _ => None,
+        })
+        .expect("cell paragraph");
+    assert!(matches!(
+        &text[0],
+        Inline::Text(node) if node.value.contains("a | b")
+    ));
+}
+
+#[test]
+fn a_table_needs_a_delimiter_row() {
+    let document = parse_markdown("| 甲 | 乙 |\n| 丙 | 丁 |\n");
+    assert!(matches!(document.blocks[0], Block::Paragraph(_)));
+}
+
+#[test]
+fn recognises_diagram_fences_and_keeps_text_codes() {
+    let document = parse_markdown(
+        "```mermaid\nflowchart TD\n  A[开始] --> B[结束]\n```\n\n\
+         ```\nflowchart LR\n  X --> Y\n```\n\n\
+         ```text\nflowchart TD\n  A --> B\n```\n",
+    );
+    assert!(matches!(document.blocks[0], Block::Diagram(_)));
+    assert!(matches!(document.blocks[1], Block::Diagram(_)));
+    assert!(matches!(document.blocks[2], Block::CodeBlock(_)));
+    assert_eq!(
+        soma_doc::block::DiagramDialect::detect(Some("text"), "flowchart TD\nA --> B"),
+        None
+    );
 }

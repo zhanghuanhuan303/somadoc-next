@@ -13,7 +13,7 @@
 
 \begin{figure}
 \centering
-\includegraphics[width=0.7\linewidth]{fig/pipeline.pdf}
+\includegraphics[width=1.0\linewidth]{fig/rendering-pipeline.png}
 \caption{渲染管线：语法层、统一 IR 与排版引擎}
 \end{figure}
 
@@ -88,7 +88,7 @@
 \begin{table}
 \caption{三个阶段与可见后果}
 \begin{tabular}{lll}
-\textbf{阶段} & \textbf{触发条件} & \textbf{可见后果} \\ \midrule
+阶段 & 触发条件 & 可见后果 \\ \midrule
 正常 & 比例在容忍度内 & 无 \\
 应急 & 比例超出容忍度 & 行标记为 emergency \\
 救援 & 硬禁则无解 & 允许跨越禁则并告警 \\

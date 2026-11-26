@@ -110,6 +110,23 @@ fn links_and_images_do_not_create_external_references() {
         text_of(&html).contains("链接"),
         "link text must still be drawn"
     );
+
+    // The invariant is "no external reference", not "no attribute": a figure
+    // whose asset resolves is inlined as a `data:` URI (ADR-0048), and nothing
+    // else may appear.
+    for attribute in ["src=\"", "href=\""] {
+        let mut rest = html.as_str();
+        while let Some(at) = rest.find(attribute) {
+            let value = &rest[at + attribute.len()..];
+            let end = value.find('"').unwrap_or(0);
+            assert!(
+                value[..end].starts_with("data:"),
+                "external reference emitted: {}",
+                &value[..end]
+            );
+            rest = &value[end..];
+        }
+    }
 }
 
 #[test]

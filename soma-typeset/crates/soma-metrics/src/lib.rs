@@ -4,7 +4,7 @@
 //! committed as bytes. Nothing here opens a font, parses outlines, or performs
 //! text shaping: lookups are integer-only and identical on every target.
 //!
-//! The blob is `soma.metrics/2`:
+//! The blob is `soma.metrics/7`:
 //!
 //! ```text
 //! u32 magic ("SMT1") | u16 version | u16 unit | u16 face_count | u16 reserved
@@ -17,9 +17,36 @@
 //!   per entry: u32 codepoint | i32 advance
 //!   u32 ink_count
 //!   per ink: u32 codepoint | i16 ink_left | i16 ink_right
-//!   u32 glyph_ink_count                         (version 3)
-//!   per glyph: u32 codepoint | u8 left | u8 right
+//!   u32 glyph_ink_count                         (version 3+)
+//!   per glyph: varint(codepoint delta) | u8 left | u8 right
+//!   u16 math_constant_count                     (version 5+)
+//!   per constant: i32 value in per-mille of one em
+//!   u32 math_glyph_count                        (version 5+)
+//!   per glyph: varint(delta) | i16 top | i16 bottom | i16 italic
+//!   u16 math_variant_base_count                 (version 6+)
+//!   per base: varint(codepoint delta) | u16 count
+//!     per variant: i32 advance | i16 top | i16 bottom | i16 right_gap
+//!   u32 math_top_accent_count                   (version 7+)
+//!   per glyph: varint(codepoint delta) | i16 attachment
 //! ```
+//!
+//! Version 5 adds the math face's OpenType `MATH` constants and every glyph's
+//! vertical ink. Version 6 adds the vertical `MathVariants` of the math face:
+//! the list order is the font's (increasing design size), it is addressed by
+//! ordinal, and it is what `soma-math` uses instead of scaling a text-size
+//! glyph (ADR-0075). Version 7 appends six constants (the two radical gaps,
+//! the two display-style fraction gaps, `subscriptTopMax` and
+//! `spaceAfterScript`) and the `MATH` top accent attachments, which align
+//! combining accents (ADR-0076). A face without variants writes one zero
+//! count.
+//!
+//! `top`/`bottom`/`italic` are 1/4096 em; `top` is positive
+//! upwards from the baseline and `bottom` positive downwards. A face with no
+//! math data writes two zero counts, so a normal text face pays eight bytes.
+//!
+//! Version 3 stored the codepoint as a `u32`; version 4 uses a delta from the
+//! previous entry as a LEB128 varint. Adjacent Han glyphs cost one byte instead
+//! of four, which halves the blob without changing a single measurement.
 //!
 //! `ink_left`/`ink_right` are the gaps between the glyph outline and its
 //! advance box. Version 2 recorded them for punctuation only (ADR-0037);
@@ -39,7 +66,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 pub const MAGIC: u32 = 0x534d_5431;
-pub const VERSION: u16 = 3;
+pub const VERSION: u16 = 7;
 /// Oldest blob layout this parser still reads.
 pub const VERSION_MIN: u16 = 1;
 pub const UNIT: i32 = 4096;
@@ -50,6 +77,8 @@ pub const FAMILY_SANS: u8 = 1;
 pub const FAMILY_MATH: u8 = 2;
 /// A rescue face: used when the style's face has no glyph for a character.
 pub const FAMILY_FALLBACK: u8 = 3;
+/// A monospaced text face (ADR-0089). Old blobs simply have none.
+pub const FAMILY_MONO: u8 = 4;
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -60,6 +89,102 @@ pub struct FaceBlock {
     pub start: u32,
     pub end: u32,
     pub advance: i32,
+}
+
+/// One vertical variant of a math glyph, in 1/4096 em at the face's design
+/// size. `advance` is horizontal (the cursor step); `above`/`below` are the
+/// glyph's ink; `right_gap` is `advance - ink right`, clamped at zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MathVariant {
+    pub advance: i32,
+    pub above: i32,
+    pub below: i32,
+    pub right_gap: i32,
+}
+
+/// Math data from a face's OpenType `MATH` table.
+///
+/// `constants` are per-mille of one em in the order of
+/// `soma_core::MathParam`. `glyphs` are
+/// `(codepoint, top, bottom, italic)`, all in 1/4096 em, sorted by codepoint.
+/// `variants` maps a base codepoint to its vertical `MathVariants`, in the
+/// font's order (increasing design size). `top_accent` maps a codepoint to its
+/// `MathTopAccentAttachment`, also 1/4096 em.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MathFace {
+    constants: Vec<i32>,
+    glyphs: Vec<(u32, i32, i32, i32)>,
+    variants: Vec<(u32, Vec<MathVariant>)>,
+    top_accent: Vec<(u32, i32)>,
+}
+
+impl MathFace {
+    /// One constant in per-mille of one em. `None` when the table has fewer
+    /// constants than the caller asked for (a text face, or an older blob).
+    pub fn constant(&self, index: usize) -> Option<i32> {
+        self.constants.get(index).copied()
+    }
+
+    /// Vertical ink and italic correction of one glyph, in 1/4096 em.
+    pub fn glyph(&self, codepoint: u32) -> Option<(i32, i32, i32)> {
+        self.glyphs
+            .binary_search_by_key(&codepoint, |(cp, _, _, _)| *cp)
+            .ok()
+            .map(|index| {
+                let (_, top, bottom, italic) = self.glyphs[index];
+                (top, bottom, italic)
+            })
+    }
+
+    pub fn constant_count(&self) -> usize {
+        self.constants.len()
+    }
+
+    /// Vertical variants of the first character of `text`, in the font's order.
+    /// Empty when the face has none (a text face, an older blob, or a glyph
+    /// without design variants).
+    pub fn variants(&self, codepoint: u32) -> &[MathVariant] {
+        match self
+            .variants
+            .binary_search_by_key(&codepoint, |(cp, _)| *cp)
+        {
+            Ok(index) => &self.variants[index].1,
+            Err(_) => &[],
+        }
+    }
+
+    /// Number of base codepoints with variants (diagnostics).
+    pub fn variant_base_count(&self) -> usize {
+        self.variants.len()
+    }
+
+    /// Top accent attachment of a glyph, in 1/4096 em at the design size.
+    /// `None` when the face has no `MATH` attachment for it.
+    pub fn top_accent(&self, codepoint: u32) -> Option<i32> {
+        self.top_accent
+            .binary_search_by_key(&codepoint, |(cp, _)| *cp)
+            .ok()
+            .map(|index| self.top_accent[index].1)
+    }
+
+    pub fn glyph_count(&self) -> usize {
+        self.glyphs.len()
+    }
+
+    /// Codepoint of the nth glyph row. Rows are sorted by codepoint, so this
+    /// walks the face from Latin through symbols to the CJK rescue glyphs.
+    pub fn glyph_at(&self, index: usize) -> Option<u32> {
+        self.glyphs
+            .get(index)
+            .map(|(codepoint, _, _, _)| *codepoint)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.constants.is_empty()
+            && self.glyphs.is_empty()
+            && self.variants.is_empty()
+            && self.top_accent.is_empty()
+    }
 }
 
 /// One face: metrics for a family/weight/slant combination.
@@ -81,6 +206,8 @@ pub struct Face {
     /// Every glyph's `(codepoint, ink_left, ink_right)` sorted by codepoint,
     /// dequantised from one byte each. Empty before version 3.
     glyph_ink: Vec<(u32, i32, i32)>,
+    /// Math constants and glyph ink. Empty before version 5.
+    math: MathFace,
 }
 
 impl Face {
@@ -90,7 +217,15 @@ impl Face {
     /// range whose advances agree, not a promise that every codepoint in the
     /// range exists (extension B is sparsely covered even in a large face).
     /// Version 1 and 2 blobs fall back to blocks and can over-report.
+    ///
+    /// The space is not stored in the character table: every face records its
+    /// advance in [`Self::space`] instead, so it is covered by definition.
+    /// Without this, a code atom with a trailing space would look unsupported
+    /// and the layout would switch to a rescue face (ADR-0113).
     pub fn has(&self, codepoint: u32) -> bool {
+        if codepoint == u32::from(b' ') {
+            return true;
+        }
         if !self.glyph_ink.is_empty() {
             return self
                 .glyph_ink
@@ -115,16 +250,83 @@ impl Face {
     }
 
     /// Advance of one codepoint, in 1/4096 em.
+    ///
+    /// The space is the face's own `space` width, not the face-wide default:
+    /// the generator records it in the face header. A run that contains a
+    /// space (`"sample "` in inline code) must measure the space it draws.
     pub fn advance_at(&self, codepoint: u32) -> i32 {
-        if let Ok(index) = self.entries.binary_search_by_key(&codepoint, |(cp, _)| *cp) {
-            return self.entries[index].1;
+        if let Some(value) = self.advance_recorded(codepoint) {
+            return value;
         }
-        for block in &self.blocks {
-            if codepoint >= block.start && codepoint <= block.end {
-                return block.advance;
-            }
+        if codepoint == u32::from(b' ') {
+            return self.space;
         }
         self.default_advance
+    }
+
+    /// Advance of one codepoint when the table records it explicitly (an
+    /// entry or a uniform block). `None` when [`Self::advance_at`] would fall
+    /// back to the face-wide default.
+    ///
+    /// The generator records proportional scripts up to U+2FFF and the
+    /// mathematical alphanumeric block; a sparse math codepoint outside those
+    /// ranges has no width in the table, so a font check must skip it rather
+    /// than compare it with 4096 (ADR-0077).
+    pub fn advance_recorded(&self, codepoint: u32) -> Option<i32> {
+        if let Ok(index) = self.entries.binary_search_by_key(&codepoint, |(cp, _)| *cp) {
+            return Some(self.entries[index].1);
+        }
+        self.blocks
+            .iter()
+            .find(|block| codepoint >= block.start && codepoint <= block.end)
+            .map(|block| block.advance)
+    }
+
+    /// Whether a candidate face's advances agree with this face's math metrics.
+    ///
+    /// `advance` returns the candidate's advance in 1/4096 em for a codepoint,
+    /// or `None` when it has no such glyph. Math rows are sampled evenly across
+    /// the codepoint-sorted list, a codepoint the table does not record
+    /// explicitly is skipped, and at least 16 comparisons must agree exactly.
+    ///
+    /// This is how the CLI recognises the installed face a table was measured
+    /// from (ADR-0077). A name is not a metric: a different math face resolves
+    /// the same variant ordinals at other sizes, and a subset build keeps the
+    /// family name.
+    pub fn math_matches<F>(&self, advance: F) -> bool
+    where
+        F: Fn(u32) -> Option<i32>,
+    {
+        let rows = self.math.glyph_count();
+        if rows < 16 {
+            return false;
+        }
+        let sample = rows.min(48);
+        let mut compared = 0usize;
+        for index in 0..sample {
+            let at = if sample == 1 {
+                0
+            } else {
+                index * (rows - 1) / (sample - 1)
+            };
+            let Some(codepoint) = self.math.glyph_at(at) else {
+                continue;
+            };
+            if !self.has(codepoint) {
+                continue;
+            }
+            let Some(expected) = self.advance_recorded(codepoint) else {
+                continue;
+            };
+            let Some(actual) = advance(codepoint) else {
+                continue;
+            };
+            if expected != actual {
+                return false;
+            }
+            compared += 1;
+        }
+        compared >= 16
     }
 
     /// Sum of advances, in 1/4096 em.
@@ -175,6 +377,12 @@ impl Face {
     /// Number of uniform blocks (diagnostics).
     pub fn block_count(&self) -> usize {
         self.blocks.len()
+    }
+
+    /// The face's math constants and glyph ink. Empty before version 5 and for
+    /// every text face.
+    pub fn math(&self) -> &MathFace {
+        &self.math
     }
 
     /// True when the face was built for a bold weight.
@@ -271,7 +479,13 @@ impl MetricsTable {
                 glyph_ink.reserve(count.min(1 << 18));
                 let mut previous = 0u32;
                 for index in 0..count {
-                    let codepoint = cursor.u32()?;
+                    let codepoint = if version >= 4 {
+                        previous
+                            .checked_add(cursor.varint()?)
+                            .ok_or(MetricsError::new("codepoint delta overflows"))?
+                    } else {
+                        cursor.u32()?
+                    };
                     let left = dequantise(cursor.u8()?);
                     let right = dequantise(cursor.u8()?);
                     if index > 0 && codepoint <= previous {
@@ -279,6 +493,71 @@ impl MetricsTable {
                     }
                     previous = codepoint;
                     glyph_ink.push((codepoint, left, right));
+                }
+            }
+            let mut math = MathFace::default();
+            if version >= 5 {
+                let constant_count = cursor.u16()? as usize;
+                math.constants.reserve(constant_count.min(256));
+                for _ in 0..constant_count {
+                    math.constants.push(cursor.i32()?);
+                }
+                let glyph_count = cursor.u32()? as usize;
+                math.glyphs.reserve(glyph_count.min(1 << 18));
+                let mut previous = 0u32;
+                for index in 0..glyph_count {
+                    let codepoint = previous
+                        .checked_add(cursor.varint()?)
+                        .ok_or(MetricsError::new("math codepoint delta overflows"))?;
+                    let top = cursor.i16()? as i32;
+                    let bottom = cursor.i16()? as i32;
+                    let italic = cursor.i16()? as i32;
+                    if index > 0 && codepoint <= previous {
+                        return Err(MetricsError::new("math glyph entries are not sorted"));
+                    }
+                    previous = codepoint;
+                    math.glyphs.push((codepoint, top, bottom, italic));
+                }
+            }
+            if version >= 6 {
+                let count = cursor.u16()? as usize;
+                math.variants.reserve(count.min(1 << 12));
+                let mut previous = 0u32;
+                for index in 0..count {
+                    let codepoint = previous
+                        .checked_add(cursor.varint()?)
+                        .ok_or(MetricsError::new("math variant delta overflows"))?;
+                    let rows = cursor.u16()? as usize;
+                    let mut variants = Vec::with_capacity(rows.min(1 << 10));
+                    for _ in 0..rows {
+                        variants.push(MathVariant {
+                            advance: cursor.i32()?,
+                            above: cursor.i16()? as i32,
+                            below: cursor.i16()? as i32,
+                            right_gap: cursor.i16()? as i32,
+                        });
+                    }
+                    if index > 0 && codepoint <= previous {
+                        return Err(MetricsError::new("math variant entries are not sorted"));
+                    }
+                    previous = codepoint;
+                    math.variants.push((codepoint, variants));
+                }
+            }
+            if version >= 7 {
+                let count = cursor.u32()? as usize;
+                math.top_accent.reserve(count.min(1 << 16));
+                let mut previous = 0u32;
+                for index in 0..count {
+                    let codepoint = previous
+                        .checked_add(cursor.varint()?)
+                        .ok_or(MetricsError::new("top accent delta overflows"))?;
+                    let value = cursor.i16()? as i32;
+                    if index > 0 && codepoint <= previous {
+                        return Err(MetricsError::new("top accent entries are not sorted"));
+                    }
+                    previous = codepoint;
+                    math.top_accent.push((codepoint, value));
                 }
             }
             faces.push(Face {
@@ -294,6 +573,7 @@ impl MetricsTable {
                 entries,
                 ink,
                 glyph_ink,
+                math,
             });
         }
         if cursor.remaining() != 0 {
@@ -414,6 +694,22 @@ impl<'a> Cursor<'a> {
         Ok(self.u32()? as i32)
     }
 
+    fn varint(&mut self) -> Result<u32, MetricsError> {
+        let mut value = 0u32;
+        let mut shift = 0u32;
+        loop {
+            let byte = self.u8()?;
+            value |= ((byte & 0x7f) as u32) << shift;
+            if byte & 0x80 == 0 {
+                return Ok(value);
+            }
+            shift += 7;
+            if shift >= 35 {
+                return Err(MetricsError::new("varint is too long"));
+            }
+        }
+    }
+
     fn remaining(&self) -> usize {
         self.bytes.len() - self.at
     }
@@ -446,6 +742,41 @@ mod tests {
         MetricsTable::embedded()
     }
 
+    fn write_varint(out: &mut Vec<u8>, value: u32) {
+        let mut remaining = value;
+        loop {
+            let byte = (remaining & 0x7f) as u8;
+            remaining >>= 7;
+            if remaining == 0 {
+                out.push(byte);
+                break;
+            }
+            out.push(byte | 0x80);
+        }
+    }
+
+    #[test]
+    fn embedded_table_never_claims_a_codepoint_it_lacks() {
+        // A block is both a width and a coverage claim, so a face without a
+        // per-glyph list must split its blocks at holes (ADR-0074). Noto CJK SC
+        // has no U+2A6A5: if the extension-B block swallowed it, the rescue face
+        // would be skipped and the Character would render as .notdef.
+        let table = MetricsTable::embedded();
+        let cjk: Vec<_> = table
+            .faces()
+            .iter()
+            .filter(|face| face.has(0x4e00))
+            .collect();
+        assert_eq!(cjk.len(), 4, "serif/sans, regular/bold");
+        for face in cjk {
+            assert!(!face.has(0x2a6a5), "no face claims the U+2A6A5 hole");
+            assert!(
+                face.ink(0xff0c).is_some(),
+                "the full-width comma carries ink"
+            );
+        }
+    }
+
     #[test]
     fn embedded_table_has_regular_and_bold_faces() {
         let table = table();
@@ -466,7 +797,7 @@ mod tests {
     fn the_math_face_covers_operators_and_radicals() {
         let table = table();
         let math = table.math_face().expect("math face");
-        // Noto Sans Math sets the summation sign and the radical wider than
+        // Latin Modern Math sets the summation sign and the radical wider than
         // one em, which is what makes formula widths right.
         assert!(math.advance_at('∑' as u32) > 0, "summation");
         assert!(math.advance_at('√' as u32) > 0, "radical");
@@ -545,6 +876,11 @@ mod tests {
         assert_eq!(face.ink(0x3002), Some((128, 3072)));
         assert_eq!(face.ink_right(0xFF0C), Some(2900));
         assert_eq!(face.ink(0x4E2D), None, "Han characters carry no ink entry");
+        // The space lives in the face header, not in the character table; a run
+        // that contains one must measure the face's own space (ADR-0113).
+        assert!(face.has(' ' as u32));
+        assert_eq!(face.advance_at(' ' as u32), UNIT / 4);
+        assert_eq!(face.advance("a b"), UNIT + UNIT / 4 + UNIT);
     }
 
     #[test]
@@ -597,6 +933,75 @@ mod tests {
     }
 
     #[test]
+    fn a_version_five_blob_carries_math_constants_and_glyph_ink() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC.to_le_bytes());
+        bytes.extend_from_slice(&5u16.to_le_bytes());
+        bytes.extend_from_slice(&(UNIT as u16).to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&[FAMILY_MATH, 0, 0, 0]);
+        for value in [UNIT, 0, 0, 0, UNIT] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        // Three constants: axis height 250, rule 40, script 700 (per-mille).
+        bytes.extend_from_slice(&3u16.to_le_bytes());
+        for value in [250i32, 40, 700] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        // Two glyphs: x and π, with vertical ink and an italic correction.
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        for (cp, top, bottom, italic) in [(0x78u32, 2600i16, 0i16, -80i16), (0x3c0, 2400, 0, 0)] {
+            let delta = cp - if cp == 0x78 { 0 } else { 0x78 };
+            write_varint(&mut bytes, delta);
+            bytes.extend_from_slice(&top.to_le_bytes());
+            bytes.extend_from_slice(&bottom.to_le_bytes());
+            bytes.extend_from_slice(&italic.to_le_bytes());
+        }
+
+        let table = MetricsTable::parse(&bytes).expect("v5 blob parses");
+        let face = table.face(0).expect("face");
+        assert_eq!(face.math().constant_count(), 3);
+        assert_eq!(face.math().constant(0), Some(250));
+        assert_eq!(face.math().constant(2), Some(700));
+        assert_eq!(face.math().constant(3), None);
+        assert_eq!(face.math().glyph(0x78), Some((2600, 0, -80)));
+        assert_eq!(face.math().glyph(0x3c0), Some((2400, 0, 0)));
+        assert_eq!(face.math().glyph(0x3b1), None);
+    }
+
+    #[test]
+    fn a_version_four_blob_has_no_math_data() {
+        // Version 4 ends after the per-glyph ink list; only version 5 appends
+        // the `MATH` constants. A parser that read that far anyway would see
+        // the next face's header as math data.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC.to_le_bytes());
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(&(UNIT as u16).to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&[FAMILY_SERIF, 0, 0, 0]);
+        for value in [UNIT * 4 / 5, UNIT / 5, 0, UNIT / 4, UNIT] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // blocks
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // entries
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // punctuation ink
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // per-glyph ink
+
+        let table = MetricsTable::parse(&bytes).expect("v4 blob parses");
+        assert_eq!(table.face_count(), 1);
+        assert!(table.faces()[0].math().is_empty());
+    }
+
+    #[test]
     fn unknown_codepoints_fall_back_to_the_default() {
         let table = table();
         let face = table.face(0).unwrap();
@@ -609,12 +1014,10 @@ mod tests {
         let second = table().hash();
         assert_eq!(first, second);
 
-        let bytes: &[u8] = include_bytes!("../data/noto-cjk.smt");
-        let mut mutated = bytes.to_vec();
-        let last = mutated.len() - 1;
-        mutated[last] ^= 0xff;
-        let changed = MetricsTable::parse(&mutated).unwrap();
-        assert_ne!(first, changed.hash());
+        // A second, committed table: the hash must separate content, not paths.
+        let other: &[u8] = include_bytes!("../../../examples/book/metrics-lxgw.smt");
+        let other = MetricsTable::parse(other).expect("lxgw table");
+        assert_ne!(first, other.hash());
     }
 
     #[test]
@@ -632,8 +1035,8 @@ mod tests {
             assert!(face.ascent > 0);
             assert!(face.descent > 0);
             assert!(face.leading >= 0);
-            // The math face gets its extents from Noto Sans Math, which is
-            // taller than the CJK faces; body faces are normalised to 1em.
+            // The math face gets its extents from Latin Modern Math; body faces
+            // are normalised to 1em.
             let slack = if face.family == FAMILY_MATH {
                 UNIT
             } else {
@@ -650,5 +1053,146 @@ mod tests {
             assert!(face.entry_count() > 100);
             assert!(face.block_count() >= if face.family == FAMILY_MATH { 0 } else { 4 });
         }
+    }
+
+    #[test]
+    fn a_version_six_blob_carries_math_variants() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC.to_le_bytes());
+        bytes.extend_from_slice(&6u16.to_le_bytes());
+        bytes.extend_from_slice(&(UNIT as u16).to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&[FAMILY_MATH, 0, 0, 0]);
+        for value in [UNIT * 4 / 5, UNIT / 5, 0, UNIT / 4, UNIT] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // blocks
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // reserved
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // entries
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // v2 ink
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // v3 glyph ink
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // constants
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // math glyphs
+                                                      // Two bases; the deltas are relative.
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        for (cp, rows) in [
+            (
+                0x2211u32,
+                [(954i32, 714i16, 240i16, 0i16), (1336, 905, 431, 0)],
+            ),
+            (0x221A, [(1057, 1057, 0, 156), (1419, 1419, 0, 578)]),
+        ] {
+            let mut previous = if cp == 0x2211 { 0 } else { 0x2211 };
+            write_varint(&mut bytes, cp - previous);
+            previous = cp;
+            let _ = previous;
+            bytes.extend_from_slice(&(rows.len() as u16).to_le_bytes());
+            for (advance, top, bottom, right_gap) in rows {
+                bytes.extend_from_slice(&advance.to_le_bytes());
+                bytes.extend_from_slice(&top.to_le_bytes());
+                bytes.extend_from_slice(&bottom.to_le_bytes());
+                bytes.extend_from_slice(&right_gap.to_le_bytes());
+            }
+        }
+
+        let table = MetricsTable::parse(&bytes).expect("v6 blob parses");
+        let face = table.face(0).expect("face");
+        assert_eq!(face.math().variant_base_count(), 2);
+        let sum = face.math().variants(0x2211);
+        assert_eq!(sum.len(), 2);
+        assert_eq!(sum[1].advance, 1336);
+        assert_eq!(sum[1].above, 905);
+        assert_eq!(sum[1].below, 431);
+        let radical = face.math().variants(0x221A);
+        assert_eq!(radical[1].right_gap, 578, "the bar starts at the ink edge");
+        assert!(face.math().variants(0x222B).is_empty());
+    }
+
+    #[test]
+    fn the_embedded_math_face_carries_the_v7_constants() {
+        let table = table();
+        let math = table.math_face().expect("math face").math();
+        assert_eq!(math.constant_count(), 41);
+        for index in 35..=40 {
+            assert!(
+                math.constant(index).is_some_and(|value| value >= 0),
+                "constant {index}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_embedded_math_face_carries_accent_attachments() {
+        let table = table();
+        let math = table.math_face().expect("math face");
+        // The mark's attachment is signed: Latin Modern places the combining
+        // circumflex to the left of its origin, so only presence is required.
+        assert!(math.math().top_accent(0x0302).is_some());
+        let x = math.math().top_accent('x' as u32);
+        assert!(x.is_some_and(|value| value > 0));
+        assert!(
+            math.math().top_accent(0x2211).is_none(),
+            "a large operator is not an accent base"
+        );
+    }
+
+    #[test]
+    fn the_embedded_math_face_has_design_variants() {
+        let table = table();
+        let math = table.math_face().expect("math face");
+        let sum = math.math().variants('∑' as u32);
+        assert!(sum.len() >= 2, "a display sum has a larger design glyph");
+        assert!(
+            sum.windows(2)
+                .all(|pair| pair[0].above + pair[0].below <= pair[1].above + pair[1].below),
+            "variants are ordered by increasing height"
+        );
+        let radical = math.math().variants('√' as u32);
+        assert!(radical.len() >= 3, "a radical has several designs");
+        assert!(radical[0].advance > 0 && radical[0].above > 0);
+        assert!(
+            math.math().variants('x' as u32).is_empty(),
+            "letters have no vertical variants"
+        );
+    }
+
+    #[test]
+    fn math_matches_accepts_the_face_its_advances_come_from() {
+        let table = table();
+        let face = table.math_face().expect("math face");
+        assert!(face.math_matches(|codepoint| face.advance_recorded(codepoint)));
+    }
+
+    #[test]
+    fn math_matches_rejects_a_single_wrong_advance() {
+        let table = table();
+        let face = table.math_face().expect("math face");
+        let rows = face.math().glyph_count();
+        let sample = rows.min(48);
+        let target = (0..sample)
+            .find_map(|index| {
+                let at = index * (rows - 1) / (sample - 1);
+                let codepoint = face.math().glyph_at(at)?;
+                face.advance_recorded(codepoint).map(|_| codepoint)
+            })
+            .expect("a recorded sample");
+        assert!(!face.math_matches(|codepoint| {
+            let value = face.advance_recorded(codepoint);
+            if codepoint == target {
+                value.map(|advance| advance + 1)
+            } else {
+                value
+            }
+        }));
+    }
+
+    #[test]
+    fn math_matches_rejects_a_face_without_math_metrics() {
+        let table = table();
+        let face = table.face(0).expect("body face");
+        assert!(!face.math_matches(|_| Some(4096)));
+        let math = table.math_face().expect("math face");
+        assert!(!math.math_matches(|_| None));
     }
 }

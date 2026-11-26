@@ -11,7 +11,7 @@ use soma_core::Align;
 
 use crate::style::{ComputedStyle, StyledDoc};
 use crate::template::{Declaration, FontSlant, FontWeight, PropertyValue, Selector, Template};
-use crate::units::{LengthSpec, LineHeightSpec, Rational};
+use crate::units::{LengthSpec, LineHeightSpec, PageLength, Rational};
 use crate::StyleHash;
 use crate::TemplateHash;
 
@@ -85,13 +85,13 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
     out.write_str(",\"height\":")?;
     write_length_object(out, height)?;
     out.write_str(",\"marginTop\":")?;
-    write_length_object(out, template.page.margin_top)?;
+    write_page_length(out, template.page.margin_top)?;
     out.write_str(",\"marginBottom\":")?;
-    write_length_object(out, template.page.margin_bottom)?;
+    write_page_length(out, template.page.margin_bottom)?;
     out.write_str(",\"marginLeft\":")?;
-    write_length_object(out, template.page.margin_left)?;
+    write_page_length(out, template.page.margin_left)?;
     out.write_str(",\"marginRight\":")?;
-    write_length_object(out, template.page.margin_right)?;
+    write_page_length(out, template.page.margin_right)?;
     out.write_str(",\"header\":")?;
     write_length_object(out, template.page.header)?;
     out.write_str(",\"footer\":")?;
@@ -121,6 +121,14 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
         Some(index) => {
             out.write_str("{\"title\":")?;
             write_opt_string(out, index.title.as_deref())?;
+            // The default order writes no key, so templates that do not ask
+            // for pinyin keep the canonical bytes they had before the field
+            // existed.
+            if index.sort != crate::template::IndexSort::default() {
+                out.write_str(",\"sort\":\"")?;
+                out.write_str(index.sort.as_str())?;
+                out.write_char('\"')?;
+            }
             out.write_char('}')?;
         }
         None => out.write_str("null")?,
@@ -158,7 +166,45 @@ fn write_template(out: &mut impl Write, template: &Template) -> fmt::Result {
         }
         None => out.write_str("null")?,
     }
+    // Keep the key out of the canonical form for the default so templates
+    // that do not opt in keep their historical bytes.
+    if template.table.width != crate::template::TableWidth::Justify {
+        out.write_str(",\"width\":\"")?;
+        out.write_str(template.table.width.as_str())?;
+        out.write_char('"')?;
+    }
     out.write_char('}')?;
+
+    // Book is the historical default; omit it so existing templates keep
+    // their canonical bytes. A sample sheet opts in explicitly.
+    if template.layout != crate::template::LayoutMode::Book {
+        out.write_str(",\"layout\":{\"mode\":\"")?;
+        out.write_str(template.layout.as_str())?;
+        out.write_str("\"}")?;
+    }
+
+    // Full-width, centred figures are the historical behaviour; only an
+    // explicit policy changes the canonical form.
+    if template.figure != crate::template::FigureSpec::default() {
+        out.write_str(",\"figure\":{\"width\":\"")?;
+        out.write_str(template.figure.width.as_str())?;
+        out.write_str("\",\"align\":\"")?;
+        out.write_str(template.figure.align.as_str())?;
+        out.write_str("\"}")?;
+    }
+
+    if !template.syntax.is_empty() {
+        out.write_str(",\"syntax\":{")?;
+        for (index, (class, color)) in template.syntax.entries().enumerate() {
+            if index > 0 {
+                out.write_char(',')?;
+            }
+            write!(out, "\"{}\":\"", class.as_str())?;
+            write_color(out, Some(color))?;
+            out.write_char('"')?;
+        }
+        out.write_char('}')?;
+    }
 
     out.write_str(",\"masters\":[")?;
     for (index, master) in template.masters.iter().enumerate() {
@@ -218,6 +264,22 @@ fn write_selector(out: &mut impl Write, selector: &Selector) -> fmt::Result {
         Some(level) => write!(out, "{level}")?,
         None => out.write_str("null")?,
     }
+    // Combinators are omitted when absent so selectors that predate them keep
+    // their canonical bytes.
+    if let Some(parent) = selector.parent.as_deref() {
+        out.write_str(",\"parent\":")?;
+        write_string(out, parent)?;
+    }
+    if !selector.ancestors.is_empty() {
+        out.write_str(",\"ancestors\":[")?;
+        for (index, ancestor) in selector.ancestors.iter().enumerate() {
+            if index > 0 {
+                out.write_char(',')?;
+            }
+            write_string(out, ancestor)?;
+        }
+        out.write_char(']')?;
+    }
     out.write_str("}")
 }
 
@@ -231,6 +293,8 @@ fn write_numbering(out: &mut impl Write, spec: &crate::template::NumberingSpec) 
     write_opt_string(out, spec.figures.as_deref())?;
     out.write_str(",\"tables\":")?;
     write_opt_string(out, spec.tables.as_deref())?;
+    out.write_str(",\"equations\":")?;
+    write_opt_string(out, spec.equations.as_deref())?;
     out.write_char('}')
 }
 
@@ -244,6 +308,11 @@ fn write_declaration(out: &mut impl Write, declaration: &Declaration) -> fmt::Re
             write_length(out, *length)?;
             out.write_char('}')?;
         }
+        PropertyValue::Percent(percent) => {
+            out.write_str("{\"type\":\"percent\",")?;
+            write_rational(out, percent.value())?;
+            out.write_char('}')?;
+        }
         PropertyValue::LineHeight(LineHeightSpec::Multiple(value)) => {
             out.write_str("{\"type\":\"multiple\",")?;
             write_rational(out, *value)?;
@@ -252,6 +321,11 @@ fn write_declaration(out: &mut impl Write, declaration: &Declaration) -> fmt::Re
         PropertyValue::LineHeight(LineHeightSpec::Length(length)) => {
             out.write_str("{\"type\":\"length\",")?;
             write_length(out, *length)?;
+            out.write_char('}')?;
+        }
+        PropertyValue::LineHeight(LineHeightSpec::Percent(percent)) => {
+            out.write_str("{\"type\":\"percent\",")?;
+            write_rational(out, percent.value())?;
             out.write_char('}')?;
         }
         PropertyValue::Align(align) => {
@@ -297,6 +371,19 @@ fn write_length_object(out: &mut impl Write, length: LengthSpec) -> fmt::Result 
     out.write_char('{')?;
     write_length(out, length)?;
     out.write_char('}')
+}
+
+/// A page margin: lengths keep the historical `{num, den, unit}` object;
+/// percentages add `"unit":"%"` and carry the fraction as `num/den`.
+fn write_page_length(out: &mut impl Write, length: PageLength) -> fmt::Result {
+    match length {
+        PageLength::Length(length) => write_length_object(out, length),
+        PageLength::Percent(percent) => {
+            out.write_char('{')?;
+            write_rational(out, percent.value())?;
+            out.write_str(",\"unit\":\"%\"}")
+        }
+    }
 }
 
 fn write_rational(out: &mut impl Write, value: Rational) -> fmt::Result {
@@ -381,6 +468,19 @@ fn write_style(out: &mut impl Write, styled: &StyledDoc) -> fmt::Result {
     }
     out.write_str("]")?;
 
+    if !styled.table().syntax().is_empty() {
+        out.write_str(",\"syntax\":{")?;
+        for (index, (class, color)) in styled.table().syntax().entries().enumerate() {
+            if index > 0 {
+                out.write_char(',')?;
+            }
+            write!(out, "\"{}\":\"", class.as_str())?;
+            write_color(out, Some(color))?;
+            out.write_char('"')?;
+        }
+        out.write_char('}')?;
+    }
+
     out.write_str(",\"styles\":[")?;
     for (index, style) in styled.table().styles().iter().enumerate() {
         if index > 0 {
@@ -437,7 +537,25 @@ fn write_computed_style(out: &mut impl Write, style: &ComputedStyle) -> fmt::Res
     write!(out, "\",\"underline\":{}", style.underline)?;
     write!(out, ",\"smallCaps\":{}", style.small_caps)?;
     write!(out, ",\"keepWithNext\":{}", style.keep_with_next)?;
-    write!(out, ",\"pageBreakBefore\":{}}}", style.page_break_before)
+    write!(out, ",\"pageBreakBefore\":{}", style.page_break_before)?;
+    if let Some(background) = style.background {
+        out.write_str(",\"background\":\"")?;
+        write_color(out, Some(background))?;
+        out.write_char('"')?;
+    }
+    if style.padding_top.0 != 0 {
+        write!(out, ",\"paddingTop\":{}", style.padding_top.0)?;
+    }
+    if style.padding_right.0 != 0 {
+        write!(out, ",\"paddingRight\":{}", style.padding_right.0)?;
+    }
+    if style.padding_bottom.0 != 0 {
+        write!(out, ",\"paddingBottom\":{}", style.padding_bottom.0)?;
+    }
+    if style.padding_left.0 != 0 {
+        write!(out, ",\"paddingLeft\":{}", style.padding_left.0)?;
+    }
+    out.write_char('}')
 }
 
 fn write_color(out: &mut impl Write, color: Option<u32>) -> fmt::Result {

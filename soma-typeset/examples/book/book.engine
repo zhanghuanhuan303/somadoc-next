@@ -1,0 +1,6 @@
+# The book's engine preset: Chinese publishing defaults.
+# The K-P kernel and cost model are the frozen ones; only the preset pins the
+# tolerance and the short-last-line charge. The command-line default stays
+# `latex-v1` for LaTeX compatibility.
+schema: soma.engine/1
+preset: book-v1

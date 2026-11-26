@@ -1,0 +1,15 @@
+[package]
+name = "soma-web"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Browser slice: K-P line breaking over a C ABI, no imports, no wasm-bindgen"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soma-core = { path = "../soma-core" }
+soma-rules = { path = "../soma-rules" }

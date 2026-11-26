@@ -27,7 +27,14 @@ contains public-domain excerpts (Tao Yuanming, Fan Zhongyan, Han Yu, Ouyang
 Xiu, Wang Xizhi, Su Shi) with modern punctuation, not a critical edition. The
 table, math, and book fixtures are built in code because `soma-md` does not
 parse tables or math yet. The corpus is dedicated to the project under
-CC-BY-4.0, matching the sample-document policy in `prd.md`.
+CC-BY-4.0.
+
+## License
+
+The prose corpus is licensed under Creative Commons Attribution 4.0
+International (CC-BY-4.0): <https://creativecommons.org/licenses/by/4.0/>.
+The public-domain classical excerpts remain public domain. Code and the
+engine are Apache-2.0; see the repository `LICENSE`.
 
 Rules:
 

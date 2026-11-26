@@ -103,6 +103,18 @@ fn table(caption: Vec<Inline>) -> Block {
 }
 
 #[test]
+fn a_figure_without_alt_uses_its_caption() {
+    let (layout, _) = build(vec![figure(vec![text("架构")])]);
+    let block = layout.pages[0]
+        .blocks
+        .iter()
+        .find(|block| block.kind == soma_layout::BoxKind::Figure)
+        .expect("figure block");
+
+    assert_eq!(layout.text.block_alt(block.node), Some("架构"));
+}
+
+#[test]
 fn figure_and_table_captions_use_their_own_elements() {
     let (layout, styled) = build(vec![figure(vec![text("架构")]), table(vec![text("参数")])]);
     let figure = caption(&layout, "架构");
@@ -173,9 +185,9 @@ fn emphasis_inside_a_caption_keeps_the_caption_base_size() {
 
     let mut found = None;
     for (node, spans) in layout.text.blocks() {
-        for (atom_text, style) in spans {
-            if atom_text == "note" {
-                found = Some((*node, *style));
+        for entry in spans {
+            if entry.text == "note" {
+                found = Some((*node, entry.style));
             }
         }
     }

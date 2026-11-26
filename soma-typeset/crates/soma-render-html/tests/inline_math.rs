@@ -74,18 +74,20 @@ fn an_inline_formula_is_drawn_at_the_atom_origin() {
         .find(|atom| atom.atom == formula.atom)
         .expect("the formula atom");
 
-    let left = layout.page.margin_left.0 + block.x.0 + atom.x.0;
-    let baseline = layout.page.margin_top.0 + block.y.0 + placed.y.0 + placed.line.ascent.0;
-
     assert_eq!(
         html.matches("class=\"math\"").count(),
         formula.math.items.len()
     );
     for item in &formula.math.items {
-        let x = left + item.x.0;
-        let top = baseline + item.y.0 - item.size.0 / 8 * 7;
+        let x = atom.x.0 + item.x.0;
+        let top = placed.y.0 + placed.line.ascent.0 + placed.line.leading.0 / 2 + item.y.0
+            - item.size.0 / 8 * 7;
         assert!(
-            html.contains(&format!("left:{};top:{};", em(x), em(top))),
+            html.contains(&format!(
+                "left:{};top:{};",
+                pct(x, block.width.0),
+                pct(top, block.height.0)
+            )),
             "item {} at {x}/{top} is drawn",
             item.text
         );
@@ -106,13 +108,9 @@ fn a_malformed_formula_keeps_its_source_text() {
     assert!(html.contains("frac"));
 }
 
-fn em(value: i32) -> String {
-    let sign = if value < 0 { "-" } else { "" };
-    let absolute = value.abs();
-    format!(
-        "{}{}.{:03}em",
-        sign,
-        absolute / 4096,
-        (absolute % 4096) * 1000 / 4096
-    )
+fn pct(value: i32, total: i32) -> String {
+    let scaled = value as i64 * 1_000_000 / total as i64;
+    let sign = if scaled < 0 { "-" } else { "" };
+    let absolute = scaled.abs();
+    format!("{}{}.{:04}%", sign, absolute / 10_000, absolute % 10_000)
 }

@@ -65,16 +65,61 @@ fn fixture() -> Fixture {
 }
 
 fn attr<'a>(line: &'a str, name: &str) -> Option<&'a str> {
-    let needle = format!("{name}=\"");
+    let needle = format!(" {name}=\"");
     let start = line.find(&needle)? + needle.len();
     let rest = &line[start..];
     let end = rest.find('"')?;
     Some(&rest[..end])
 }
 
+fn is_mark(layout: &PagedLayout, node: u32, atom: u32) -> bool {
+    layout
+        .pages
+        .iter()
+        .flat_map(|page| page.blocks.iter())
+        .filter(|block| block.node.0 == node)
+        .flat_map(|block| block.marks.iter())
+        .any(|mark| mark.atom == atom)
+}
+
+/// Baseline and body font size of a marked atom.
+fn mark_frame(fixture: &Fixture, node: u32, atom: u32) -> Option<(i32, i32)> {
+    for page in &fixture.layout.pages {
+        for block in &page.blocks {
+            if block.node.0 != node || !block.marks.iter().any(|mark| mark.atom == atom) {
+                continue;
+            }
+            for placed in &block.lines {
+                if atom < placed.line.start || atom >= placed.line.end {
+                    continue;
+                }
+                let baseline = fixture.layout.page.margin_top.0
+                    + block.y.0
+                    + placed.y.0
+                    + placed.line.ascent.0
+                    + placed.line.leading.0 / 2;
+                let style_id = fixture
+                    .layout
+                    .text
+                    .atom_style(block.node, atom)
+                    .unwrap_or(block.style);
+                let size = fixture
+                    .styled
+                    .table()
+                    .get(style_id)
+                    .or_else(|| fixture.styled.table().get(block.style))?
+                    .font_size
+                    .0;
+                return Some((baseline, size));
+            }
+        }
+    }
+    None
+}
+
 fn text_elements(svg: &str) -> Vec<(&str, &str, &str, &str)> {
     svg.lines()
-        .filter(|line| line.starts_with("<text "))
+        .filter(|line| line.starts_with("<text ") && !line.contains("data-footnote-number"))
         .map(|line| {
             (
                 attr(line, "data-node").expect("node"),
@@ -87,15 +132,7 @@ fn text_elements(svg: &str) -> Vec<(&str, &str, &str, &str)> {
 }
 
 fn em(width: Width) -> String {
-    let units = width.0;
-    let sign = if units < 0 { "-" } else { "" };
-    let absolute = units.abs();
-    format!(
-        "{}{}.{:03}em",
-        sign,
-        absolute / 4096,
-        (absolute % 4096) * 1000 / 4096
-    )
+    soma_render_svg::units(width)
 }
 
 fn find_atom(
@@ -186,9 +223,15 @@ fn svg_coordinates_equal_the_layout_coordinates() {
     );
 
     let mut checked = 0;
-    for line in svg.lines().filter(|line| line.starts_with("<text ")) {
+    for line in svg
+        .lines()
+        .filter(|line| line.starts_with("<text ") && !line.contains("data-footnote-number"))
+    {
         let node: u32 = attr(line, "data-node").unwrap().parse().unwrap();
         let atom: u32 = attr(line, "data-atom").unwrap().parse().unwrap();
+        if is_mark(&fixture.layout, node, atom) {
+            continue;
+        }
         let x = attr(line, "x").unwrap();
         let y = attr(line, "y").unwrap();
 
@@ -205,6 +248,41 @@ fn svg_coordinates_equal_the_layout_coordinates() {
         checked += 1;
     }
     assert!(checked > 20);
+}
+
+#[test]
+fn footnote_marks_are_smaller_and_raised() {
+    let fixture = fixture();
+    let svg = render(
+        &fixture.layout,
+        fixture.styled.table(),
+        &fixture.layout.text,
+    );
+
+    let mut checked = 0;
+    for line in svg
+        .lines()
+        .filter(|line| line.starts_with("<text ") && !line.contains("data-footnote-number"))
+    {
+        let node: u32 = attr(line, "data-node").unwrap().parse().unwrap();
+        let atom: u32 = attr(line, "data-atom").unwrap().parse().unwrap();
+        let Some((baseline, size)) = mark_frame(&fixture, node, atom) else {
+            continue;
+        };
+        // ADR-0096: two thirds of the body size, raised two fifths of an em.
+        assert_eq!(
+            attr(line, "font-size").unwrap(),
+            em(Width(size * 2 / 3)),
+            "mark size for node {node} atom {atom}"
+        );
+        assert_eq!(
+            attr(line, "y").unwrap(),
+            em(Width(baseline - size * 2 / 5)),
+            "mark baseline for node {node} atom {atom}"
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "the fixture must contain a footnote mark");
 }
 
 #[test]
@@ -244,6 +322,31 @@ fn html_and_svg_cover_the_same_atoms() {
 }
 
 #[test]
+fn page_fragments_are_embeddable_and_keep_the_layout() {
+    let fixture = fixture();
+    let pages = soma_render_svg::render_fragments(
+        &fixture.layout,
+        fixture.styled.table(),
+        &fixture.layout.text,
+    );
+    assert_eq!(pages.len(), fixture.layout.page_count() as usize);
+
+    for (index, page) in pages.iter().enumerate() {
+        let number = index + 1;
+        assert!(
+            page.body.starts_with(&format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"page\" data-page=\"{number}\" width=\"100%\" height=\"100%\""
+            )),
+            "page {number} root"
+        );
+        assert!(page.body.contains("viewBox=\"0 0 "));
+        assert!(page.body.contains("<g class=\"block\""), "block groups");
+        assert!(!page.body.contains("<script"), "no scripts");
+        assert!(!page.body.contains("href=\"http"), "no external links");
+    }
+}
+
+#[test]
 fn svg_bytes_are_a_visual_regression_lock() {
     let fixture = fixture();
     let svg = render(
@@ -261,4 +364,24 @@ fn svg_bytes_are_a_visual_regression_lock() {
 }
 
 /// Updated deliberately when the visual output changes.
-const GOLDEN_SVG_HASH: u64 = 12285066011052527538;
+/// 2026-11-20: a footnote marker is a small superscript object, not a one-em
+/// glyph, and it is drawn as its number.
+/// 2026-11-20: a space shrinks by at most a third of its advance (D86), which
+/// moves the justified atoms inside their lines by at most 0.006 em. Line
+/// breaks are unchanged.
+/// 2026-11-20: every coordinate is now a unitless layout unit instead of an
+/// `em` length. The old form made each position scale with the surrounding
+/// font size, so a page extracted on its own rendered wrong; the root
+/// viewport is in pixels at one em = 16 px, and the `viewBox` is unchanged.
+/// The layout, and therefore every coordinate's *value*, is identical (D87).
+/// 2026-11-21: a footer line sits at the bottom of its band and a header at the
+/// top, so the folio no longer touches the text block. Only margin-block
+/// position changes; every body coordinate is untouched.
+/// 2026-11-25: the footnote area gains a separator rule and a note number,
+/// and table cells gain vertical padding (ADR-0082/0083/0084).
+/// 2026-11-25: footnote marks are two thirds of the body size and raised two
+/// fifths of an em, matching the PDF and LaTeX (ADR-0096).
+/// 2026-11-26: each block is a `<g class="block">`, text carries its family
+/// and bold/italic attributes so the SVG can be a standalone Studio proof
+/// (ADR-0109).
+const GOLDEN_SVG_HASH: u64 = 6291207987599973007;
