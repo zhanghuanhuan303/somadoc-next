@@ -5163,6 +5163,7 @@ fn apply_punctuation_spacing(
         }
         let left = &paragraph.atoms[index];
         let right = &paragraph.atoms[index + 1];
+        let existing_shrink = boundary.glue.shrink.0;
         if left.class == PunctClass::Dash || right.class == PunctClass::Dash {
             continue;
         }
@@ -5212,7 +5213,7 @@ fn apply_punctuation_spacing(
         let (extra_cap, min_gap) = punct_shrink_budget(full_width);
         let extra_cap = scale_units(extra_cap.0, size).max(0);
         let min_gap = scale_units(min_gap.0, size).max(0);
-        let extra = (gap - pair_squeeze - min_gap).clamp(0, extra_cap);
+        let extra = (gap - pair_squeeze - existing_shrink - min_gap).clamp(0, extra_cap);
 
         let boundary = &mut paragraph.boundaries[index];
         boundary.pair_squeeze = Width(pair_squeeze);
