@@ -9,7 +9,8 @@ normative contracts with historical reports; the distinction matters.
 |---|---|
 | [`soma-atlas.html`](soma-atlas.html) | Single-file current map: capability, architecture, gates, numbers, pitfalls, boundaries |
 | [`architecture-v2.md`](architecture-v2.md) | Frozen layer contract and dependency rules |
-| [`adr/README.md`](adr/README.md) | All accepted decisions (ADR-0001–0120) |
+| [`adr/README.md`](adr/README.md) | All accepted decisions (ADR-0001–0121) |
+| [`notes/README.md`](notes/README.md) | Three hardcore notes: static `/api` removal, browser file open, wasm verification truth |
 | [`debt.md`](debt.md) | Explicit not-done register (D01–D119, N1–N6) |
 | [`studio.md`](studio.md) | The browser/Studio boundary, flags and security |
 | [`engine.md`](engine.md) | `soma.engine/1`: presets, windows, fallback |
@@ -25,9 +26,9 @@ normative contracts with historical reports; the distinction matters.
 ## Historical / non-normative
 
 The `a*-report.md`, `k*-report.md`, `e1-q-report.md`, `proposal-*.md`,
-`blind-*.md`, `first-release.md`, `roadmap-v2.md` and `archive/` files record how
-the project got here. They are useful context, but if they disagree with the
-atlas, an ADR, or the code, the latter wins.
+`blind-*.md`, `first-release.md`, `roadmap-v2.md`, `notes/` and `archive/` files
+record how the project got here. They are useful context, but if they disagree
+with the atlas, an ADR, or the code, the latter wins.
 
 ## Open-source notes
 
