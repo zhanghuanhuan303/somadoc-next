@@ -128,9 +128,9 @@ pub const RULES: &[RuleInfo] = &[
         source: "W3C clreq §6.3.2.1/§6.3.2.3; ratio Tbd",
     },
     RuleInfo {
-        id: "trim.pair",
+        id: "punct.pair.gap",
         status: RuleStatus::ParamOnly,
-        source: "W3C clreq §6.3.2.2 (adjacent punctuation); ratio Tbd",
+        source: "W3C clreq §6.3.2.2 / GB/T 15834-2011; target Tbd",
     },
     RuleInfo {
         id: "hard_break.forced",
@@ -160,9 +160,56 @@ pub const MIDDLE_TRIM_RIGHT: Width = Width::from_em_frac(1, 2);
 /// amount would push it into the margin.
 pub const LATIN_TRIM: Width = Width::from_em_frac(1, 8);
 
-/// Extra left-side compression for a punctuation mark that directly follows
-/// another punctuation mark (`。」`, `），`, `？！」`).
-pub const PAIR_TRIM: Width = Width::from_em_frac(1, 4);
+/// Ideal ink gap between two adjacent punctuation marks, and the maximum
+/// amount a pair may be tightened.
+///
+/// The target is a *visual* gap: the empty space between the two outlines, not
+/// the distance between their advance boxes. `soma-layout` measures the real
+/// ink gap from the metrics table and reduces it to this target, so the same
+/// rule produces the same optical spacing in every face. A face without outline
+/// data falls back to the class side bearings in `trim_caps`.
+pub const PAIR_TARGET_FULL: Width = Width::from_em_frac(1, 4);
+pub const PAIR_TARGET_HALF: Width = Width::from_em_frac(1, 8);
+pub const PAIR_TARGET_TIGHT_FULL: Width = Width::from_em_frac(1, 8);
+pub const PAIR_TARGET_TIGHT_HALF: Width = Width::from_em_frac(1, 16);
+pub const PAIR_CAP_FULL: Width = Width::from_em_frac(1, 2);
+pub const PAIR_CAP_HALF: Width = Width::from_em_frac(1, 8);
+pub const PAIR_CAP_TIGHT_FULL: Width = Width::from_em_frac(1, 4);
+pub const PAIR_CAP_TIGHT_HALF: Width = Width::from_em_frac(1, 8);
+
+/// Target ink gap and squeeze cap for an adjacent punctuation pair.
+///
+/// Only pairs whose nominal side bearings leave a visible hole are listed.
+/// `Dash` (ellipsis, em dash, middle dot) is deliberately absent: those marks
+/// carry their own space and must not be squeezed. An unsupported pair keeps
+/// its natural spacing.
+pub fn pair_gap(left: PunctClass, right: PunctClass, full_width: bool) -> Option<(Width, Width)> {
+    let tight = matches!((left, right), (PunctClass::Open, PunctClass::Close));
+    let supported = matches!(
+        (left, right),
+        (PunctClass::Close, PunctClass::Open)
+            | (PunctClass::Close, PunctClass::Close)
+            | (PunctClass::Close, PunctClass::Middle)
+            | (PunctClass::Middle, PunctClass::Open)
+            | (PunctClass::Middle, PunctClass::Close)
+            | (PunctClass::Open, PunctClass::Open)
+            | (PunctClass::Open, PunctClass::Close)
+    );
+    if !supported {
+        return None;
+    }
+    Some(if full_width {
+        if tight {
+            (PAIR_TARGET_TIGHT_FULL, PAIR_CAP_TIGHT_FULL)
+        } else {
+            (PAIR_TARGET_FULL, PAIR_CAP_FULL)
+        }
+    } else if tight {
+        (PAIR_TARGET_TIGHT_HALF, PAIR_CAP_TIGHT_HALF)
+    } else {
+        (PAIR_TARGET_HALF, PAIR_CAP_HALF)
+    })
+}
 
 /// Break penalty on a hyphenation point, in the kernel's penalty units. A
 /// space has none, so the breaker only hyphenates when a line would otherwise
@@ -749,6 +796,7 @@ pub fn paragraph_from_lines(
                     role: BoundaryRole::Plain,
                     glue: Glue::default(),
                     penalty: 0,
+                    pair_squeeze: Width::ZERO,
                 });
                 paragraph.atoms.extend(part.atoms);
                 paragraph.boundaries.extend(part.boundaries);
@@ -772,16 +820,7 @@ fn push_atom(
     link: Option<&str>,
 ) {
     let full_width = text.chars().next().is_some_and(is_full_width_punct);
-    let (mut compress_left, compress_right) = trim_caps(class, full_width);
-    // Pair compression is about two marks set against each other. A space or a
-    // forced break between them breaks the pair.
-    if class != PunctClass::None && join == Join::Normal {
-        if let Some(previous) = atoms.last() {
-            if previous.class != PunctClass::None {
-                compress_left = compress_left.saturating_add(PAIR_TRIM);
-            }
-        }
-    }
+    let (compress_left, compress_right) = trim_caps(class, full_width);
     let atom = Atom {
         text,
         kind,
@@ -803,6 +842,7 @@ fn push_atom(
                 role: BoundaryRole::Plain,
                 glue: Glue::default(),
                 penalty: 0,
+                pair_squeeze: Width::ZERO,
             },
             Join::Attach => Boundary {
                 breakable: Breakability::Forbidden,
@@ -810,6 +850,7 @@ fn push_atom(
                 role: BoundaryRole::Plain,
                 glue: Glue::default(),
                 penalty: 0,
+                pair_squeeze: Width::ZERO,
             },
             Join::Hyphen => Boundary {
                 breakable: Breakability::Allowed,
@@ -819,6 +860,7 @@ fn push_atom(
                 // Lower than a space but not free: a break inside a word is a
                 // last resort before overfull, not a preferred break.
                 penalty: HYPHEN_PENALTY,
+                pair_squeeze: Width::ZERO,
             },
             Join::Math(width, penalty) => Boundary {
                 breakable: Breakability::Allowed,
@@ -829,6 +871,7 @@ fn push_atom(
                     ..Glue::default()
                 },
                 penalty,
+                pair_squeeze: Width::ZERO,
             },
             Join::Code => {
                 let mut boundary = normal_boundary(previous, &atom);
@@ -941,6 +984,7 @@ fn normal_boundary(previous: &Atom, next: &Atom) -> Boundary {
         },
         glue,
         penalty: 0,
+        pair_squeeze: Width::ZERO,
     }
 }
 
@@ -964,6 +1008,7 @@ fn space_boundary(previous: &Atom, next: &Atom) -> Boundary {
             shrink: SPACE_SHRINK,
         },
         penalty: 0,
+        pair_squeeze: Width::ZERO,
     }
 }
 
@@ -1244,10 +1289,7 @@ mod tests {
         assert_eq!(paragraph.atoms[1].compress_right, Width::ZERO);
         assert_eq!(paragraph.atoms[2].compress_left, Width::ZERO);
         assert_eq!(paragraph.atoms[2].compress_right, CLOSE_TRIM_RIGHT);
-        assert_eq!(
-            paragraph.atoms[3].compress_left,
-            MIDDLE_TRIM_LEFT.saturating_add(PAIR_TRIM)
-        );
+        assert_eq!(paragraph.atoms[3].compress_left, MIDDLE_TRIM_LEFT);
         assert_eq!(paragraph.atoms[3].compress_right, MIDDLE_TRIM_RIGHT);
     }
 
@@ -1282,18 +1324,26 @@ mod tests {
     }
 
     #[test]
-    fn adjacent_punctuation_gets_extra_compression() {
+    fn adjacent_punctuation_keeps_its_class_budget() {
         let paragraph = compile("（（字）。");
 
-        assert_eq!(
-            paragraph.atoms[1].compress_left,
-            OPEN_TRIM_LEFT.saturating_add(PAIR_TRIM)
-        );
-        assert_eq!(
-            paragraph.atoms[4].compress_left,
-            MIDDLE_TRIM_LEFT.saturating_add(PAIR_TRIM)
-        );
+        assert_eq!(paragraph.atoms[1].compress_left, OPEN_TRIM_LEFT);
+        assert_eq!(paragraph.atoms[4].compress_left, MIDDLE_TRIM_LEFT);
         assert_eq!(paragraph.atoms[2].compress_left, Width::ZERO);
+    }
+
+    #[test]
+    fn pair_gap_is_table_driven_and_leaves_dash_alone() {
+        assert_eq!(
+            pair_gap(PunctClass::Close, PunctClass::Open, true),
+            Some((PAIR_TARGET_FULL, PAIR_CAP_FULL))
+        );
+        assert_eq!(
+            pair_gap(PunctClass::Open, PunctClass::Close, false),
+            Some((PAIR_TARGET_TIGHT_HALF, PAIR_CAP_TIGHT_HALF))
+        );
+        assert_eq!(pair_gap(PunctClass::Dash, PunctClass::Open, true), None);
+        assert_eq!(pair_gap(PunctClass::Middle, PunctClass::Middle, true), None);
     }
 
     #[test]

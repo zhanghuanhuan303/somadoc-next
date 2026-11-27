@@ -24,7 +24,7 @@
 | D05 | ~~Tier A 权重~~ | **已关闭（publish-v1）**：proxy 扫描的 `tolerance=1500` 已作为 `publish-v1` 落地（`default-v1` 仍冻结）；无人工数据前不再新增 preset | — | ✅ 已关闭 | 否 |
 | D06 | ~~真实字体度量~~ | **已关闭（E1）**：`soma-metrics`（零依赖、no_std）+ `tools/metrics-gen` + Noto CJK SC 整数表；`TableMetrics`/`StyledMetrics` 按字号缩放；`metricsHash` 进入 `soma.pages/2`。覆盖范围与 bold 近似见 D61/D63 | — | ✅ 已关闭 | 否 |
 | D07 | ~~wasm 执行时延~~ | **已关闭（ADR-0071 / Gate W4）**：`scripts/web.sh` 每次重跑 Node/Chromium harness，记录 1800 atoms 中位 7.2 ms、180 atoms 0.18 ms | — | ✅ 已关闭 | 否 |
-| D08 | ~~叠标点挤压 / 按字号缩放 trim~~ | **已关闭（E3）**：`trim.pair`（1/4em，ParamOnly）+ trim 按 atom 字号缩放 + 行尾悬挂标点（`hanging-punctuation`，opt-in） | — | ✅ 已关闭 | 否 |
+| D08 | ~~叠标点挤压 / 按字号缩放 trim~~ | **已关闭（E3；v2 由 ADR-0124 取代）**：`trim.pair` 的 1/4em 预算已删除，改为 `Boundary.pair_squeeze`（字体 ink 目标墨距）；trim 按 atom 字号缩放；行尾悬挂标点仍为 `hanging-punctuation`（opt-in） | — | ✅ 已关闭 | 否 |
 | D09 | ~~无 hyphenation~~ | **已关闭（ADR-0059）**：`soma-hyphen`（Liang 算法，模式集外置），CLI `--hyphenation`；内核新增 `BoundaryKind::Hyphen` 与 `Line.hyphenated`，连字符宽度计入行宽。URL/路径/全大写词不参与 | — | ✅ 已关闭 | 否 |
 | D10 | ~~`boundary_deviation` 假设无自动告警~~ | **已关闭**：`scripts/gate-q.sh` 解析 scorecard 的 `bdev_rel_error_p95`，超过 20‰ 直接失败；当前为 0 | — | ✅ 已关闭 | 否 |
 | D11 | ~~active-node 剪枝~~ | **已关闭（不做了）**：候选窗口已足够，`bench --check` PASS（混排 4000 atoms p95 2.26 ms）；没有质量或时延触发条件 | — | ✅ 已关闭 | 否 |

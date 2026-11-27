@@ -77,6 +77,7 @@ fn paragraph(atoms: Vec<Atom>) -> Paragraph {
                 shrink: Width::ZERO,
             },
             penalty: 0,
+            pair_squeeze: Width::ZERO,
         })
         .collect();
     Paragraph {

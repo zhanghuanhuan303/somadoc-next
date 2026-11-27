@@ -30,6 +30,7 @@ fn boundary() -> Boundary {
         role: BoundaryRole::Plain,
         glue: Glue::default(),
         penalty: 0,
+        pair_squeeze: Width::ZERO,
     }
 }
 

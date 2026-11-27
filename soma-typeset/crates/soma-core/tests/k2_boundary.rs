@@ -30,6 +30,7 @@ fn cjk_latin_boundary() -> Boundary {
             shrink: Width::from_em_frac(1, 2),
         },
         penalty: 0,
+        pair_squeeze: Width::ZERO,
     }
 }
 

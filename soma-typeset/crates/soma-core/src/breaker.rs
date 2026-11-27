@@ -164,6 +164,10 @@ pub struct LineTrace {
     pub height: i64,
     pub trim_left: i32,
     pub trim_right: i32,
+    /// Total fixed punctuation-pair tightening inside this line.
+    pub pair_squeeze: i64,
+    /// Number of pair boundaries that were tightened.
+    pub pair_squeeze_count: u32,
     pub compression_cost: i64,
     pub boundary_deviation: i64,
     /// Exact mean absolute deviation recomputed from the emitted boundary
@@ -217,6 +221,14 @@ pub fn break_paragraph_traced(
         };
 
         let vertical = shaped.line_vertical(start, end);
+        let pair_squeeze = shaped.pair[start..end.saturating_sub(1)]
+            .iter()
+            .copied()
+            .sum::<i64>();
+        let pair_squeeze_count = shaped.pair[start..end.saturating_sub(1)]
+            .iter()
+            .filter(|squeeze| **squeeze > 0)
+            .count() as u32;
         let cjk_count = line.cjk_latin_adjustments.len() as i64;
         let boundary_deviation_exact = if cjk_count > 0 {
             line.cjk_latin_adjustments
@@ -244,6 +256,8 @@ pub fn break_paragraph_traced(
             height: vertical.height,
             trim_left: eval.trim_left,
             trim_right: eval.trim_right,
+            pair_squeeze,
+            pair_squeeze_count,
             compression_cost: eval.compression_cost,
             boundary_deviation: line.boundary_deviation,
             boundary_deviation_exact,
@@ -407,6 +421,9 @@ struct Shaped<'a> {
     shrink: Vec<i64>,
     atom_prefix: Vec<i64>,
     glue_prefix: Vec<i64>,
+    /// Fixed punctuation-pair tightening per boundary.
+    pair: Vec<i64>,
+    pair_prefix: Vec<i64>,
     /// Hyphen glyph width per boundary, else zero. Only the boundary a line
     /// actually breaks at contributes its width.
     hyphen: Vec<i64>,
@@ -423,6 +440,7 @@ struct Shaped<'a> {
     max_shrink: i64,
     max_trim_left: i64,
     max_trim_right: i64,
+    max_pair_squeeze: i64,
 }
 
 impl<'a> Shaped<'a> {
@@ -445,13 +463,14 @@ impl<'a> Shaped<'a> {
             atom_width.push(width);
         }
 
-        let mut glue = Vec::with_capacity(boundary_count);
         let mut stretch = Vec::with_capacity(boundary_count);
         let mut shrink = Vec::with_capacity(boundary_count);
         let mut cjk_latin_stretch = Vec::with_capacity(boundary_count);
         let mut cjk_latin_shrink = Vec::with_capacity(boundary_count);
         let mut cjk_latin_glue = Vec::with_capacity(boundary_count);
         let mut cjk_latin_count = Vec::with_capacity(boundary_count);
+        let mut glue = Vec::with_capacity(boundary_count);
+        let mut pair = Vec::with_capacity(boundary_count);
         for (index, boundary) in paragraph.boundaries.iter().enumerate() {
             let width = match boundary.kind {
                 BoundaryKind::Space => metrics.space_width(paragraph.atoms[index].style).0 as i64,
@@ -461,6 +480,7 @@ impl<'a> Shaped<'a> {
             let boundary_shrink = boundary.glue.shrink.0.max(0) as i64;
             let is_cjk_latin = boundary.role == BoundaryRole::CjkLatin;
             glue.push(width);
+            pair.push(boundary.pair_squeeze.0.max(0) as i64);
             stretch.push(boundary_stretch);
             shrink.push(boundary_shrink);
             cjk_latin_stretch.push(if is_cjk_latin { boundary_stretch } else { 0 });
@@ -475,6 +495,7 @@ impl<'a> Shaped<'a> {
 
         let atom_prefix = prefix_sums(&atom_width);
         let glue_prefix = prefix_sums(&glue);
+        let pair_prefix = prefix_sums(&pair);
         // A broken hyphen is drawn in the style of the atom before the break.
         let hyphen: Vec<i64> = paragraph
             .boundaries
@@ -514,6 +535,7 @@ impl<'a> Shaped<'a> {
             .max()
             .unwrap_or(0)
             .max(0);
+        let max_pair_squeeze = pair.iter().copied().max().unwrap_or(0).max(0);
 
         Self {
             paragraph,
@@ -524,6 +546,8 @@ impl<'a> Shaped<'a> {
             shrink,
             atom_prefix,
             glue_prefix,
+            pair,
+            pair_prefix,
             hyphen,
             stretch_prefix,
             shrink_prefix,
@@ -538,6 +562,7 @@ impl<'a> Shaped<'a> {
             max_shrink,
             max_trim_left,
             max_trim_right,
+            max_pair_squeeze,
         }
     }
 
@@ -561,6 +586,10 @@ impl<'a> Shaped<'a> {
     fn natural(&self, start: usize, end: usize) -> i64 {
         let atoms = self.atom_prefix[end] - self.atom_prefix[start];
         let boundaries = self.glue_prefix[end - 1] - self.glue_prefix[start];
+        // Punctuation pairs tighten the ink gap inside the line. The boundary
+        // a line breaks at is outside this range, exactly like its glue: the
+        // pair is split across lines and each edge is handled by trim.
+        let pairs = self.pair_prefix[end - 1] - self.pair_prefix[start];
         // A hyphen exists only where the line breaks; internal hyphenation
         // points contribute nothing (they are not a rendered glyph).
         let hyphen = if end < self.len() {
@@ -568,7 +597,7 @@ impl<'a> Shaped<'a> {
         } else {
             0
         };
-        atoms + boundaries + hyphen
+        atoms + boundaries - pairs + hyphen
     }
 
     fn total_stretch(&self, start: usize, end: usize) -> i64 {
@@ -724,6 +753,7 @@ impl<'a> Shaped<'a> {
         }
 
         let max_trim = (self.max_trim_left + self.max_trim_right) as i128;
+        let max_pair = self.max_pair_squeeze as i128;
 
         // How far past the target a line may legally run, expressed as a
         // per-mille shrink ratio plus a fixed allowance in width units.
@@ -758,6 +788,7 @@ impl<'a> Shaped<'a> {
                 let k = k as i128;
                 let margin = k * min_atom * 1000
                     - max_trim * 1000
+                    - (k - 1) * max_pair * 1000
                     - target_max * 1000
                     - tolerance_eff * (k - 1) * max_shrink
                     - extra_overfull;
@@ -879,8 +910,13 @@ impl<'a> Shaped<'a> {
                 c += c_start;
             }
             if natural > target {
-                compress_cost =
-                    compression_cost(c, costs.compress_amount.0, costs.compress_count.0);
+                compress_cost = compression_cost(
+                    c,
+                    trim_left > 0,
+                    trim_right > 0,
+                    costs.compress_amount.0,
+                    costs.compress_count.0,
+                );
                 cost += compress_cost;
             }
         }
@@ -1627,6 +1663,7 @@ fn build_boxes(
             let boundary_index = atom_index - start;
             x += shaped.glue_width(atom_index);
             x += adjustments.get(boundary_index).copied().unwrap_or(0) as i64;
+            x -= shaped.pair[atom_index];
         }
     }
 
@@ -1749,13 +1786,20 @@ fn break_penalty_cost(penalty: i64, weight: u32) -> i64 {
     value.min(i64::MAX as i128) as i64
 }
 
-fn compression_cost(trim: i64, amount_weight: u32, count_weight: u32) -> i64 {
+fn compression_cost(
+    trim: i64,
+    trimmed_left: bool,
+    trimmed_right: bool,
+    amount_weight: u32,
+    count_weight: u32,
+) -> i64 {
     if trim <= 0 {
         return 0;
     }
     let amount =
         (amount_weight as i128 * trim as i128 / Width::EM.0 as i128).min(i64::MAX as i128) as i64;
-    amount.saturating_add(count_weight as i64)
+    let events = i64::from(trimmed_left as u8) + i64::from(trimmed_right as u8);
+    amount.saturating_add(count_weight as i64 * events)
 }
 
 fn badness(ratio_milli: i64, scale: u32, exponent: u8) -> i64 {
@@ -1838,6 +1882,7 @@ mod tests {
             role: crate::ir::BoundaryRole::Plain,
             glue,
             penalty: 0,
+            pair_squeeze: Width::ZERO,
         }
     }
 

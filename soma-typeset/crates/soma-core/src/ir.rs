@@ -119,6 +119,11 @@ pub struct Boundary {
     /// Additional cost for breaking here. Forbidden breaks are expressed with
     /// `breakable`, not with an infinite penalty.
     pub penalty: i32,
+    /// Fixed tightening of the gap between two adjacent punctuation atoms.
+    /// Measured in the same units as `Glue::width`; zero means “not a pair”.
+    /// The breaker subtracts it from the natural width of a line that keeps
+    /// the boundary inside, and closes the box gap by the same amount.
+    pub pair_squeeze: Width,
 }
 
 /// Inline decorations carried from the source to the renderers.
@@ -328,6 +333,11 @@ impl Paragraph {
                     index: index as u32,
                 });
             }
+            if boundary.pair_squeeze < Width::ZERO {
+                return Err(IrError::InvalidPairSqueeze {
+                    index: index as u32,
+                });
+            }
         }
         Ok(())
     }
@@ -343,6 +353,7 @@ pub enum IrError {
     EmptyAtom { index: u32 },
     InvalidCompression { index: u32 },
     InvalidGlue { index: u32 },
+    InvalidPairSqueeze { index: u32 },
 }
 
 impl core::fmt::Display for IrError {
@@ -362,6 +373,9 @@ impl core::fmt::Display for IrError {
             }
             Self::InvalidGlue { index } => {
                 write!(f, "boundary {index} has negative glue")
+            }
+            Self::InvalidPairSqueeze { index } => {
+                write!(f, "boundary {index} has a negative pair squeeze")
             }
         }
     }
@@ -395,6 +409,7 @@ mod tests {
             role: BoundaryRole::Plain,
             glue: Glue::default(),
             penalty: 0,
+            pair_squeeze: Width::ZERO,
         }
     }
 

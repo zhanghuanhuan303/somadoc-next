@@ -30,6 +30,7 @@ fn allowed_boundary() -> Boundary {
         role: BoundaryRole::Plain,
         glue: Glue::default(),
         penalty: 0,
+        pair_squeeze: Width::ZERO,
     }
 }
 
@@ -114,6 +115,7 @@ fn opening_quote_paragraph() -> Paragraph {
             shrink: Width::ZERO,
         },
         penalty: 0,
+        pair_squeeze: Width::ZERO,
     };
     Paragraph {
         style: style(Width::from_em(4)),
@@ -474,6 +476,94 @@ fn an_underfull_line_drops_the_bearing_without_paying_for_it() {
     // The ragged last line is left aligned and does not overrun, so it keeps
     // its advance untouched.
     assert_eq!(result.lines[1].trim_right, Width::ZERO);
+}
+
+#[test]
+fn pair_squeeze_reduces_natural_width_and_closes_the_box_gap() {
+    let mut boundary = allowed_boundary();
+    boundary.pair_squeeze = Width::from_em_frac(1, 4);
+    let paragraph = Paragraph {
+        style: style(Width::from_em_frac(7, 4)),
+        atoms: vec![
+            atom(
+                "中",
+                AtomKind::Cjk,
+                PunctClass::None,
+                Width::ZERO,
+                Width::ZERO,
+            ),
+            atom(
+                "中",
+                AtomKind::Cjk,
+                PunctClass::None,
+                Width::ZERO,
+                Width::ZERO,
+            ),
+        ],
+        boundaries: vec![boundary],
+    };
+
+    let (result, trace) = break_paragraph_traced(
+        &paragraph,
+        &SyntheticMetrics::default(),
+        &BreakConfig::default(),
+    )
+    .unwrap();
+
+    let line = &result.lines[0];
+    assert_eq!(line.natural_width, Width::from_em_frac(7, 4));
+    assert_eq!(line.adjustment, 0);
+    assert_eq!(
+        line.boxes[1].x,
+        Width::from_em_frac(3, 4),
+        "the second box starts one quarter em earlier"
+    );
+    assert_eq!(trace.lines[0].pair_squeeze, 1024);
+    assert_eq!(trace.lines[0].pair_squeeze_count, 1);
+}
+
+#[test]
+fn trim_cost_counts_both_edges() {
+    let paragraph = Paragraph {
+        style: style(Width::from_em(2)),
+        atoms: vec![
+            atom(
+                "“",
+                AtomKind::Other,
+                PunctClass::Open,
+                Width::from_em_frac(1, 2),
+                Width::ZERO,
+            ),
+            atom(
+                "中",
+                AtomKind::Cjk,
+                PunctClass::None,
+                Width::ZERO,
+                Width::ZERO,
+            ),
+            atom(
+                "，",
+                AtomKind::Other,
+                PunctClass::Middle,
+                Width::ZERO,
+                Width::from_em_frac(1, 2),
+            ),
+        ],
+        boundaries: vec![forbidden_boundary(), forbidden_boundary()],
+    };
+
+    let (result, trace) = break_paragraph_traced(
+        &paragraph,
+        &SyntheticMetrics::default(),
+        &BreakConfig::default(),
+    )
+    .unwrap();
+
+    let line = &result.lines[0];
+    assert_eq!(line.trim_left, Width::from_em_frac(1, 2));
+    assert_eq!(line.trim_right, Width::from_em_frac(1, 2));
+    // 1em of trim (20) + two edge events (5 each) = 30.
+    assert_eq!(trace.lines[0].compression_cost, 30);
 }
 
 #[test]

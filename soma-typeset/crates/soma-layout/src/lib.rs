@@ -35,14 +35,14 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use soma_core::{
-    break_paragraph as break_paragraph_core, Align, BoundaryKind, BreakConfig, Cost, Decorations,
-    FallbackStage, Line, Metrics, Paragraph, ParagraphStyle, PunctClass, StyleId, SyntaxClass,
-    VerticalParams as KernelVerticalParams, Width,
+    break_paragraph as break_paragraph_core, Align, AtomKind, BoundaryKind, BreakConfig,
+    Breakability, Cost, Decorations, FallbackStage, Line, Metrics, Paragraph, ParagraphStyle,
+    PunctClass, StyleId, SyntaxClass, VerticalParams as KernelVerticalParams, Width,
 };
 use soma_doc::{Block, Document, Inline, NodeId};
 use soma_rules::{
-    paragraph_from_code_line, paragraph_from_spans, paragraph_from_text, InlineSpan, RuleError,
-    SpanKind,
+    is_full_width_punct, pair_gap, paragraph_from_code_line, paragraph_from_spans,
+    paragraph_from_text, InlineSpan, RuleError, SpanKind,
 };
 use soma_template::{ComputedStyle, ResolvedPage, StyledDoc};
 
@@ -2846,6 +2846,9 @@ impl Builder<'_> {
         scale_trim(&mut paragraph, self.metrics, |style| {
             self.computed(style).font_size.0
         });
+        apply_pair_gap(&mut paragraph, self.metrics, |style| {
+            self.computed(style).font_size.0
+        });
 
         let object_metrics = math::ObjectMetrics::new(self.metrics, &objects);
         let mut result = break_paragraph(&paragraph, &object_metrics, self.engine)
@@ -5138,6 +5141,61 @@ fn align_lines(lines: &mut [Line], align: Align) {
     }
 }
 
+/// Close the optical gap between two adjacent punctuation marks.
+///
+/// The rule table says what the gap should look like; the metrics table says
+/// how much empty side bearing the face actually leaves. Subtracting the two
+/// gives a font-independent target instead of a class constant, and the result
+/// is stored on the boundary so the breaker can treat it as a fixed width
+/// reduction. A source without outline ink falls back to the class bearings
+/// that `scale_trim` already wrote into `compress_*`.
+fn apply_pair_gap(
+    paragraph: &mut Paragraph,
+    metrics: &dyn Metrics,
+    size_of: impl Fn(StyleId) -> i32,
+) {
+    for index in 0..paragraph.boundaries.len() {
+        let boundary = &paragraph.boundaries[index];
+        if boundary.kind != BoundaryKind::Normal || boundary.breakable == Breakability::Forced {
+            continue;
+        }
+        let left = &paragraph.atoms[index];
+        let right = &paragraph.atoms[index + 1];
+        if left.class == PunctClass::None
+            || right.class == PunctClass::None
+            || left.class == PunctClass::Dash
+            || right.class == PunctClass::Dash
+        {
+            continue;
+        }
+        if matches!(left.kind, AtomKind::InlineObject | AtomKind::Ruby)
+            || matches!(right.kind, AtomKind::InlineObject | AtomKind::Ruby)
+        {
+            continue;
+        }
+        let left_char = left.text.chars().next().unwrap_or('\0');
+        let right_char = right.text.chars().next().unwrap_or('\0');
+        let full_width = is_full_width_punct(left_char) && is_full_width_punct(right_char);
+        let Some((target, cap)) = pair_gap(left.class, right.class, full_width) else {
+            continue;
+        };
+        let size = size_of(left.style).max(size_of(right.style));
+        if size <= 0 {
+            continue;
+        }
+        let target = scale_units(target.0, size);
+        let cap = scale_units(cap.0, size).max(0);
+        let gap = match (
+            metrics.ink_right(&left.text, left.style),
+            metrics.ink_left(&right.text, right.style),
+        ) {
+            (Some(right_bearing), Some(left_bearing)) => (right_bearing.0 + left_bearing.0).max(0),
+            _ => (left.compress_right.0 + right.compress_left.0).max(0),
+        };
+        paragraph.boundaries[index].pair_squeeze = Width((gap - target).clamp(0, cap));
+    }
+}
+
 fn scale_trim(paragraph: &mut Paragraph, metrics: &dyn Metrics, size_of: impl Fn(StyleId) -> i32) {
     for atom in &mut paragraph.atoms {
         let size = size_of(atom.style);
@@ -5422,6 +5480,47 @@ mod unit {
     use super::*;
     use soma_core::SyntheticMetrics;
     use soma_rules::justified_style;
+
+    #[test]
+    fn pair_gap_squeezes_adjacent_marks_and_leaves_dash_alone() {
+        let style = justified_style(Width::from_em(10));
+        let mut paragraph =
+            paragraph_from_text("\u{201d}\u{3002}\u{ff08}", style, StyleId(0)).expect("paragraph");
+        scale_trim(&mut paragraph, &SyntheticMetrics::default(), |_| 4096);
+        apply_pair_gap(&mut paragraph, &SyntheticMetrics::default(), |_| 4096);
+
+        assert_eq!(paragraph.atoms.len(), 3);
+        assert_eq!(
+            paragraph.boundaries[0].pair_squeeze,
+            Width::from_em_frac(1, 2),
+            "close to middle closes half an em of class bearings"
+        );
+        assert_eq!(
+            paragraph.boundaries[1].pair_squeeze,
+            Width::from_em_frac(1, 2),
+            "middle to open closes half an em"
+        );
+
+        let mut dashes = paragraph_from_text("……", style, StyleId(0)).expect("paragraph");
+        apply_pair_gap(&mut dashes, &SyntheticMetrics::default(), |_| 4096);
+        assert!(
+            dashes
+                .boundaries
+                .iter()
+                .all(|b| b.pair_squeeze == Width::ZERO),
+            "the ellipsis carries its own space and must not be squeezed"
+        );
+
+        let mut middle = paragraph_from_text("，。", style, StyleId(0)).expect("paragraph");
+        apply_pair_gap(&mut middle, &SyntheticMetrics::default(), |_| 4096);
+        assert!(
+            middle
+                .boundaries
+                .iter()
+                .all(|b| b.pair_squeeze == Width::ZERO),
+            "middle-to-middle is deliberately not a pair"
+        );
+    }
 
     #[test]
     fn negative_ink_never_becomes_a_negative_trim() {

@@ -75,6 +75,7 @@ fn mixed(count: usize, width: i32) -> Paragraph {
                     },
                 },
                 penalty: 0,
+                pair_squeeze: Width::ZERO,
             });
         }
     }

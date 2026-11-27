@@ -122,12 +122,12 @@ impl ParamSet {
     pub fn default_v1() -> Self {
         Self {
             preset: PresetId("default-v1"),
-            // 5: a list marker's hang is its measured advance, not the
-            // template's first-indent (ADR-0123). 4: the short-line term also
-            // charges a short non-final line (D115). 2: ADR-0111/0112 changed
-            // code segmentation and the separator penalties.
-            model_version: 5,
-            rules_version: 2,
+            // 6: adjacent punctuation is tightened to a measured ink gap
+            // (ADR-0124). 5: a list marker's hang is measured (ADR-0123).
+            // 4: the short-line term also charges a non-final line (D115).
+            // 2: ADR-0111/0112 changed code segmentation and penalties.
+            model_version: 6,
+            rules_version: 3,
             metrics_version: 0,
             break_params: BreakParams {
                 tolerance: Permille(3000),
@@ -354,6 +354,12 @@ impl ParamSet {
         let params = self.break_params;
         let costs = params.costs;
 
+        // The engine hash is the reproducibility tag for the breaker: a model
+        // or rule change can move breaks even when every cost weight is the
+        // same, so both versions belong to it (ADR-0124).
+        hasher.write_u64(self.model_version as u64);
+        hasher.write_u64(self.rules_version as u64);
+
         hasher.write_u64(params.tolerance.0 as u64);
         hasher.write_u64(params.emergency_tolerance.0 as u64);
         hasher.write_option_u32(params.max_lines);
@@ -473,7 +479,7 @@ mod tests {
             base.break_params.costs.badness_scale
         );
         assert_eq!(publish.break_params.fallback, base.break_params.fallback);
-        assert_eq!(publish.rules_version, 2, "ADR-0111/0112 changed the rules");
+        assert_eq!(publish.rules_version, 3, "ADR-0124 changed the rules");
         publish.validate().expect("publish-v1 must be valid");
         assert_ne!(publish.param_hash(), base.param_hash());
     }

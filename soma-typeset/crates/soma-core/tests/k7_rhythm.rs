@@ -35,6 +35,7 @@ fn space() -> Boundary {
             shrink: Width::from_em_frac(1, 8),
         },
         penalty: 0,
+        pair_squeeze: Width::ZERO,
     }
 }
 
@@ -46,6 +47,7 @@ fn glue() -> Boundary {
         role: soma_core::BoundaryRole::Plain,
         glue: Glue::default(),
         penalty: 0,
+        pair_squeeze: Width::ZERO,
     }
 }
 

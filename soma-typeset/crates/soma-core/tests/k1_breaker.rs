@@ -48,6 +48,7 @@ fn two_atom_paragraph(align: Align) -> Paragraph {
             role: soma_core::BoundaryRole::Plain,
             glue: Glue::default(),
             penalty: 0,
+            pair_squeeze: Width::ZERO,
         }],
     }
 }

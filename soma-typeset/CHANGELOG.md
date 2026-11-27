@@ -2,6 +2,12 @@
 
 ## Unreleased — 2026-11-28
 
+- Adjacent punctuation now closes to a measured ink gap (`。”（`, `），`,
+  `“（`), independent of the face: `soma-layout` measures the two outlines and
+  the breaker subtracts the fixed `pair_squeeze` from the natural width and the
+  box positions. Edge trim stays separate and is priced; `PAIR_TRIM` is gone;
+  `modelVersion` 6 / `rulesVersion` 3 (ADR-0124).
+- The edge-trim cost counts each trimmed side instead of charging once per line.
 - List items hang by the measured marker prefix (`• `, `1. `, `10. `), not by
   the template's `first-indent` guess. The text after the marker is pinned to
   the wrapped-line column and the marker is kept on its hang column, so a

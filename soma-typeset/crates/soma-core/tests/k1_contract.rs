@@ -33,7 +33,7 @@ fn default_v1_matches_the_frozen_table() {
     let params = ParamSet::default_v1();
 
     assert_eq!(params.preset.0, "default-v1");
-    assert_eq!(params.model_version, 5);
+    assert_eq!(params.model_version, 6);
     assert_eq!(params.break_params.tolerance, Permille(3000));
     assert_eq!(params.break_params.emergency_tolerance, Permille(10_000));
     assert_eq!(params.break_params.max_lines, None);
@@ -183,9 +183,9 @@ fn param_hash_is_stable_and_weight_sensitive() {
     changed_feature.features.edge_trim = false;
     assert_ne!(hash, changed_feature.param_hash());
 
-    // rules/metrics versions are separate version tags, not part of the
-    // BreakParams + flags hash.
+    // Model and rule versions are part of the engine hash: a change there can
+    // move breaks without touching a cost weight.
     let mut changed_metadata = base;
     changed_metadata.rules_version = changed_metadata.rules_version.wrapping_add(1);
-    assert_eq!(hash, changed_metadata.param_hash());
+    assert_ne!(hash, changed_metadata.param_hash());
 }

@@ -29,6 +29,7 @@ fn boundary(breakable: Breakability, kind: BoundaryKind, glue: Glue) -> Boundary
         role: soma_core::BoundaryRole::Plain,
         glue,
         penalty: 0,
+        pair_squeeze: Width::ZERO,
     }
 }
 

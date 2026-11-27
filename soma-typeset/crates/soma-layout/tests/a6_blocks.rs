@@ -1097,6 +1097,28 @@ fn a_two_digit_ordered_marker_keeps_the_text_column() {
 }
 
 #[test]
+fn adjacent_punctuation_closes_in_the_layout_path() {
+    let doc = document(vec![paragraph("\u{201d}\u{3002}\u{ff08}")]);
+    let styled = styled(&doc, TIGHT);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = &layout.pages[0].blocks[0];
+    let line = &block.lines[0].line;
+
+    // Three one-em atoms, two class-bearing pairs at half an em each.
+    assert_eq!(line.natural_width, Width::from_em(2));
+    assert_eq!(
+        line.boxes[1].x,
+        line.indent + Width::from_em_frac(1, 2),
+        "the period starts half an em after the quote"
+    );
+    assert_eq!(
+        line.boxes[2].x,
+        line.indent + Width::from_em(1),
+        "the bracket starts one em after the quote"
+    );
+}
+
+#[test]
 fn a_quote_indents_the_blocks_it_holds() {
     let doc = document(vec![
         paragraph("正文"),

@@ -11,7 +11,7 @@
 1. **采用 K-P 的全局 DP 结构，但用加法加权代价，不用 TeX 的平方 demerits。** 这样才能满足 F6「每类惩罚有独立权重」，也更容易标定。
 2. **输入是 `Atom` + `Boundary`；box/glue/penalty 是内部编译产物。** 中文规则在 IR 构建时编译进边界，breaker 保持脚本无关。
 3. **`Forbidden` 是硬约束；`Forced` 单独建模。** 不要用负 penalty 模拟强制换行。
-4. **标点挤压是行边裁剪，不是全局 glue。** 行尾只在超宽时裁；行首开标点在 justified 行、以及左对齐/ragged 行的行首做贴墨裁剪（ADR-0082/ADR-0105）。line cost 仍只依赖 `(i, j)`，DP 不受影响。
+4. **标点挤压不是全局 glue。** 行内相邻标点用固定 `pair_squeeze` 收到字体感知的目标墨距（ADR-0124）；行尾/行首用侧边距裁剪（ADR-0036/0082/0105）。两者都是 `(i, j)` 的函数，DP 不需要额外状态。
 5. **中英边界间距偏差用「比例分配 + 前缀和」做 O(1) 聚合。** 不逐边界遍历。
 6. **MVP 不把相邻行 fitness 放进 DP 状态。** 先测行间调整量方差；有证据再升级到 `(breakpoint, fitness)`。
 7. **边裁剪会破坏行宽单调性，所以先不要上 TeX 式 active-node 剪枝。** 先 O(n²) + 前缀和，correctness first。
@@ -218,9 +218,25 @@ for k in i..j:
 
 #### 与规则层的关系
 
-- 规则层决定每个标点的 `compress_*` 上限，以及「连续标点」是否可以叠加。
+- 规则层决定每个标点的 `compress_*` 上限，以及相邻标点的 pair 资格/目标。
 - breaker 只做确定性裁剪，不认识「中文逗号」。
 - 如果未来要支持悬挂标点（hanging punctuation），可以把它建模成「允许负的 trim 超出内容盒」，不需要改 DP。
+
+#### 相邻标点的固定墨距（ADR-0124）
+
+行内两个标点相邻时，不把标点做成 shrinkable glue，而是先把它们的**墨迹间距**收到规则目标：
+
+```text
+gap_ink = ink_right(left) + ink_left(right)
+target  = pair_target(class_left, class_right, full_width, max(font_size))
+pair_squeeze = clamp(gap_ink - target, 0, pair_cap)
+```
+
+- `pair_squeeze` 写在 `Boundary` 上，是固定的宽度减少量；`natural(i, j)` 减去行内 pair，`build_boxes` 把后续 box 左移同样多。
+- 断点边界上的 pair 不计入（和 glue 一样被丢弃）；行首/行尾仍由 `trim_left/right` 负责。
+- 支持的 pair：`Close→Open`、`Close→Close`、`Close→Middle`、`Middle→Open`、`Middle→Close`、`Open→Open`、`Open→Close`；`Dash`（`… — – ·`）和 `Middle→Middle` 不做。
+- 起始目标：全角 0.25em、半角 0.125em；`Open→Close` 减半；cap 全角 0.5em、半角 0.125em。
+- `pair_squeeze` 是规则，不单独计价；DP 看到的是收紧后的真实宽度。行边 trim 仍按 `compress_amount + compress_count` 计价，`compress_count` 按被裁的边计数。
 
 ### 2.6 代价函数
 
@@ -238,7 +254,7 @@ C(i, j) = line
         + badness_scale × abs(r)^badness_exponent
         + break_penalty × penalty(j) / PENALTY_REF
         + compress_amount × c / EM
-        + compress_count × [c > 0]
+        + compress_count × ([trim_left > 0] + [trim_right > 0])
         + boundary_deviation × D(i, j) / ideal_gap
         + short_score(i, j)
         + height_cost(i, j)
@@ -252,7 +268,7 @@ C(i, j) = line
 | `badness_scale × abs(r)^p` | `abs(r)^p` | `|r|=1` 时的 cost |
 | `break_penalty × penalty / 100` | 规则层 penalty（0..100） | penalty=100 时的 cost |
 | `compress_amount × c / EM` | `c` 占 1 em 的比例 | 每 1em trim 的 cost |
-| `compress_count` | 一次 trim 事件 | cost / event |
+| `compress_count` | 一条被裁的边 | cost / trimmed edge |
 | `boundary_deviation × D / ideal_gap` | `D` 占 ideal gap 的比例 | 每 1 个 ideal gap 偏差的 cost |
 | `short_score` | `short / short_last_threshold` | 短行为 0 宽时的 cost（末行与非末行共用） |
 | `height_cost` | `excess / body_height` | 每 1 个 body height 超出的 cost |
@@ -1230,7 +1246,7 @@ pub struct Boundary {
 | `badness_exponent` | 3 | 默认 3；高级参数 |
 | `break_penalty` | 100 | `penalty=100` 时 cost=100（10 行） |
 | `compress_amount` | 20 | 每 1 em trim；0.25em = 5 |
-| `compress_count` | 5 | 每次裁剪；0.25em 事件合计约 10（1 行） |
+| `compress_count` | 5 | 每条被裁的边；一行两侧都裁计两次 |
 | `boundary_deviation` | 50 | 每 1 个 ideal gap 的平均偏差；满 gap 偏差 = 5 行 |
 | `short_last_scale` | 1_000_000 | `short_score` 0..1e6 |
 | `short_last_threshold` | 2em | 低于此值计费 |
