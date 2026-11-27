@@ -15,6 +15,7 @@ soma-studio-core = { path = "../soma-studio-core" }
 soma-core = { path = "../soma-core" }
 soma-doc = { path = "../soma-doc" }
 soma-layout = { path = "../soma-layout" }
+soma-math = { path = "../soma-math" }
 soma-render-html = { path = "../soma-render-html" }
 soma-render-svg = { path = "../soma-render-svg" }
 soma-render-pdf = { path = "../soma-render-pdf" }

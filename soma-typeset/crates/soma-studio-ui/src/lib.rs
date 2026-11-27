@@ -4,6 +4,7 @@
 pub mod ai;
 pub mod api;
 pub mod app;
+pub mod diagnostics;
 pub mod engine;
 pub mod inspect;
 pub mod local;

@@ -1,4 +1,4 @@
-//! Browser self-test for the Studio shell (gates S1–S11).
+//! Browser self-test for the Studio shell (gates S1–S11; local S12–S14).
 //!
 //! It runs only when the URL carries `?selftest=1`. Every assertion writes a
 //! line into `<pre id="selftest">` (`S1|ok|…` / `S1|fail|…`), so a headless
@@ -73,6 +73,8 @@ async fn run(studio: Studio, only: Option<String>) {
             lines.push(s12(studio).await);
             emit(&document, &lines);
             lines.push(s13(studio).await);
+            emit(&document, &lines);
+            lines.push(s14(&document, studio).await);
             emit(&document, &lines);
         } else {
             lines.push(s2(&document, studio).await);
@@ -1065,6 +1067,60 @@ async fn s13(studio: Studio) -> String {
         "S13",
         opened && built && source_ok && format_ok,
         format!("打开 {opened} · 构建 {built} · 源文 {source_ok} · 格式 {format_ok}"),
+    )
+}
+
+/// Static mode: a source diagnostic appears in the panel and underlines the
+/// exact bytes; clicking the row selects the span in the editor.
+async fn s14(document: &Document, studio: Studio) -> String {
+    let original = studio.source.get_untracked();
+    state::set_mode(studio, Mode::Split);
+    studio.source_open.set(true);
+    TimeoutFuture::new(120).await;
+
+    let sample = "# 诊断测试\n\n未定义脚注[^missing]，以及公式 $\\unknown{x}$。\n";
+    studio.source.set(sample.to_string());
+    let ready = wait_for(|| !query_all(document, ".diag-row").is_empty(), 40).await;
+    let panel = query(document, "#source-diagnostics")
+        .map(|element| !element.has_attribute("hidden"))
+        .unwrap_or(false);
+    let count = query_all(document, ".diag-row").len();
+    let underline = query_all(document, ".source-diag-underline")
+        .iter()
+        .map(text)
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let suggestion = query_all(document, ".diag-fix")
+        .iter()
+        .any(|element| text(element).contains("建议"));
+
+    click_selector(document, ".diag-row");
+    TimeoutFuture::new(120).await;
+    let selected = query(document, "#source-editor")
+        .and_then(|element| element.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
+        .map(|element| {
+            (
+                element.selection_start().ok().flatten().unwrap_or(0),
+                element.selection_end().ok().flatten().unwrap_or(0),
+            )
+        })
+        .unwrap_or((0, 0));
+    let selected_ok = selected.1 > selected.0;
+    studio.source.set(original);
+    TimeoutFuture::new(120).await;
+
+    result(
+        "S14",
+        ready
+            && panel
+            && count >= 2
+            && (underline.contains("[^missing]") || underline.contains("\\unknown"))
+            && suggestion
+            && selected_ok,
+        format!(
+            "问题 {count} · 面板 {panel} · 下划线 {underline} · 建议 {suggestion} · 选中 {}..{}",
+            selected.0, selected.1
+        ),
     )
 }
 

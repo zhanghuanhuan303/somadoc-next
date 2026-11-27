@@ -10,16 +10,46 @@ use gloo_timers::future::TimeoutFuture;
 use leptos::html;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use soma_studio_core::SourceFormat;
 
+use crate::diagnostics::{self, Diagnostic, Origin};
 use crate::state::{self, use_studio, Mode, Studio};
 
 #[component]
 pub fn SourcePane() -> impl IntoView {
     let studio = use_studio();
     let textarea = NodeRef::<html::Textarea>::new();
+    let mirror = NodeRef::<html::Div>::new();
     let cursor = RwSignal::new(String::from("1:1"));
     let input_seq = RwSignal::new(0u64);
     let composing = RwSignal::new(false);
+
+    let active_format = move || {
+        let active = studio.active.get();
+        studio
+            .tabs
+            .with(|tabs| tabs.get(active).map(|tab| tab.format))
+            .or_else(|| {
+                studio
+                    .project
+                    .with(|project| project.as_ref().map(|project| project.format))
+            })
+            .unwrap_or(SourceFormat::Markdown)
+    };
+    let diagnostics = Memo::new(move |_| {
+        diagnostics::analyze(
+            &studio.source.get(),
+            active_format(),
+            studio.build_error.get().as_deref(),
+        )
+    });
+    let highlights = Memo::new(move |_| {
+        diagnostics
+            .get()
+            .into_iter()
+            .filter(|diagnostic| diagnostic.start < diagnostic.end)
+            .collect::<Vec<_>>()
+    });
 
     // Keep the DOM value in sync with programmatic changes (tab switch, file
     // open) without resetting the caret on every keystroke: on input the two
@@ -112,14 +142,15 @@ pub fn SourcePane() -> impl IntoView {
         }
     });
 
-    let docx = move || {
-        studio.project.with(|project| {
-            project
-                .as_ref()
-                .map(|project| project.format == soma_studio_core::SourceFormat::Docx)
-                .unwrap_or(false)
-        })
-    };
+    let docx = move || active_format() == SourceFormat::Docx;
+
+    Effect::new(move |_| {
+        let _ = studio.source.get();
+        let _ = diagnostics.get();
+        if let (Some(input), Some(mirror)) = (textarea.get(), mirror.get()) {
+            mirror.set_scroll_top(input.scroll_top());
+        }
+    });
 
     let visible =
         move || studio.source_open.get() && matches!(studio.mode.get(), Mode::Split | Mode::Source);
@@ -140,7 +171,7 @@ pub fn SourcePane() -> impl IntoView {
                 <button class="icon-btn small" title="关闭源文面板" aria-label="关闭源文面板"
                     on:click=move |_| { studio.source_open.set(false); state::persist(studio); }>"×"</button>
             </div>
-            <div class="pane-body" style="overflow:hidden">
+            <div class="pane-body source-body">
                 {move || if docx() {
                     view! {
                         <div class="empty-state">
@@ -151,7 +182,62 @@ pub fn SourcePane() -> impl IntoView {
                     }.into_any()
                 } else {
                     view! {
+                        <div class="source-diagnostics" id="source-diagnostics"
+                            hidden=move || diagnostics.with(|items| items.is_empty())>
+                            <div class="diag-head">
+                                <span class="diag-title">"问题"</span>
+                                <span class="diag-count" id="diag-count">
+                                    {move || diagnostics.with(|items| items.len()).to_string()}
+                                </span>
+                                <span class="fill"></span>
+                                <span class="faint">"点击定位"</span>
+                            </div>
+                            <div class="diag-list">
+                                <For
+                                    each=move || diagnostics.get()
+                                    key=|diagnostic| {
+                                        (diagnostic.start, diagnostic.end, diagnostic.message.clone())
+                                    }
+                                    children=move |diagnostic| {
+                                        let click = diagnostic.clone();
+                                        let label = if diagnostic.line > 0 {
+                                            format!("L{}:{}", diagnostic.line, diagnostic.column)
+                                        } else {
+                                            String::from("构建")
+                                        };
+                                        let build = diagnostic.origin == Origin::Build;
+                                        view! {
+                                            <button class="diag-row" class:build=build
+                                                title=format!("{} — {}", diagnostic.message, diagnostic.suggestion)
+                                                on:click=move |_| reveal_diagnostic(studio, textarea, &click)>
+                                                <span class="diag-dot"></span>
+                                                <span class="diag-loc">{label}</span>
+                                                <span class="diag-main">
+                                                    <span class="diag-msg">{diagnostic.message.clone()}</span>
+                                                    <span class="diag-fix">
+                                                        {format!("建议：{}", diagnostic.suggestion)}
+                                                    </span>
+                                                </span>
+                                            </button>
+                                        }
+                                    }
+                                />
+                            </div>
+                        </div>
                         <div class="editor-wrap">
+                            {move || {
+                                let spans = highlights.get();
+                                if spans.is_empty() {
+                                    return view! { <div class="source-mirror" style="display:none"></div> }.into_any();
+                                }
+                                let source = studio.source.get();
+                                let pieces = highlight_pieces(&source, &spans);
+                                view! {
+                                    <div class="source-mirror" node_ref=mirror aria-hidden="true">
+                                        {pieces.into_iter().collect_view()}
+                                    </div>
+                                }.into_any()
+                            }}
                             <textarea
                                 class="source-input"
                                 id="source-editor"
@@ -165,6 +251,11 @@ pub fn SourcePane() -> impl IntoView {
                                 on:keyup=move |_| update_cursor()
                                 on:click=move |_| update_cursor()
                                 on:select=move |_| update_cursor()
+                                on:scroll=move |_| {
+                                    if let (Some(input), Some(mirror)) = (textarea.get(), mirror.get()) {
+                                        mirror.set_scroll_top(input.scroll_top());
+                                    }
+                                }
                                 on:compositionstart=move |_| {
                                     composing.set(true);
                                     input_seq.update(|seq| *seq += 1);
@@ -180,6 +271,61 @@ pub fn SourcePane() -> impl IntoView {
             </div>
         </section>
     }
+}
+
+fn reveal_diagnostic(studio: Studio, textarea: NodeRef<html::Textarea>, diagnostic: &Diagnostic) {
+    let source = studio.source.get_untracked();
+    if diagnostic.start < diagnostic.end && diagnostic.start < source.len() {
+        let start = byte_to_utf16(&source, diagnostic.start.min(source.len()));
+        let end = byte_to_utf16(&source, diagnostic.end.min(source.len()));
+        if let Some(input) = textarea.get() {
+            let _ = input.set_selection_range(start as u32, end as u32);
+            input.focus().ok();
+        }
+    } else {
+        state::toast(
+            studio,
+            format!("{}；{}", diagnostic.message, diagnostic.suggestion),
+            "warn",
+        );
+    }
+}
+
+/// Split the source into plain text and wavy-underline spans. Overlaps are
+/// merged so the mirror never nests decorations.
+fn highlight_pieces(source: &str, diagnostics: &[Diagnostic]) -> Vec<leptos::prelude::AnyView> {
+    let mut ranges = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.start < diagnostic.end)
+        .map(|diagnostic| {
+            (
+                diagnostic.start.min(source.len()),
+                diagnostic.end.min(source.len()),
+            )
+        })
+        .collect::<Vec<_>>();
+    ranges.sort_unstable();
+
+    let mut pieces = Vec::new();
+    let mut cursor = 0;
+    for (start, end) in ranges {
+        if start >= end || end <= cursor {
+            continue;
+        }
+        let start = start.max(cursor);
+        if start > cursor {
+            pieces.push(view! { {source[cursor..start].to_string()} }.into_any());
+        }
+        pieces.push(
+            view! { <span class="source-diag-underline">{source[start..end].to_string()}</span> }
+                .into_any(),
+        );
+        cursor = end;
+    }
+    if cursor < source.len() {
+        pieces.push(view! { {source[cursor..].to_string()} }.into_any());
+    }
+    pieces
 }
 
 /// UTF-16 selection offset → UTF-8 byte offset.

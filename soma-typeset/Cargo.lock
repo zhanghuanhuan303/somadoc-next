@@ -1859,6 +1859,7 @@ dependencies = [
  "soma-core",
  "soma-doc",
  "soma-layout",
+ "soma-math",
  "soma-render-html",
  "soma-render-pdf",
  "soma-render-svg",

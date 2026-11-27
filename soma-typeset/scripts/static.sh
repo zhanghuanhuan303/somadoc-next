@@ -2,7 +2,7 @@
 # Gate static: the public Studio is a pure static bundle.
 #
 # It serves `dist/` with a plain file server (no Axum), runs the browser
-# self-test with `?local=1`, asserts S1/S3-S10/S12, and proves that a local
+# self-test with `?local=1`, asserts S1/S3-S10/S12-S14, and proves that a local
 # session never requests `/api`. `/api/health` must be a 404 from the static
 # server.
 #
@@ -119,7 +119,7 @@ curl -sI "http://127.0.0.1:$PORT/" | grep -qi 'content-security-policy:' \
 curl -sI "http://127.0.0.1:$PORT/" | grep -qi 'x-content-type-options: nosniff' \
     || fail "missing nosniff"
 
-echo "== static gate: S1/S3-S10/S12 (chromium, no Axum) =="
+echo "== static gate: S1/S3-S10/S12-S14 (chromium, no Axum) =="
 if command -v chromium >/dev/null 2>&1; then
     timeout 240s chromium --headless --no-sandbox --disable-gpu \
         --hide-scrollbars --user-data-dir="$WORK/chrome" \
@@ -128,7 +128,7 @@ if command -v chromium >/dev/null 2>&1; then
         > "$WORK/dom.html" 2>"$WORK/chrome.err" || true
     grep -oE 'S[0-9]+\|(ok|fail)\|[^<]*' "$WORK/dom.html" > "$WORK/results.txt" || true
     cat "$WORK/results.txt"
-    for id in S1 S3 S4 S5 S6 S7 S8 S9 S10 S12 S13; do
+    for id in S1 S3 S4 S5 S6 S7 S8 S9 S10 S12 S13 S14; do
         if ! grep -q "^$id|ok|" "$WORK/results.txt"; then
             fail "$id missing or failed"
         fi

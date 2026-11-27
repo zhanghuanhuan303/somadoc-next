@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased — 2026-11-27
+## Unreleased — 2026-11-28
+
+- The Studio source pane now shows a diagnostics panel above the editor:
+  line/column, message and a suggested fix. Exact spans get a GitHub-style red
+  wavy underline through a transparent text mirror; clicking a row selects the
+  span (ADR-0122).
+- Source lints cover unclosed fences, math parse errors, undefined/duplicate
+  footnotes, unclosed `[[...]]` extensions and unmatched LaTeX environments;
+  build errors map to a node span when the message names `node N`.
+- S14 locks the panel, wavy spans, suggestions and click-to-select in the
+  static gate.
+
+## 2026-11-27
 
 - The public Studio is a pure static bundle (ADR-0121). Apache serves `dist/`
   and `/fonts/v2/`; there is no `/api` and no Axum process on somadoc.art.

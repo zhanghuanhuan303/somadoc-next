@@ -9,7 +9,7 @@ normative contracts with historical reports; the distinction matters.
 |---|---|
 | [`soma-atlas.html`](soma-atlas.html) | Single-file current map: capability, architecture, gates, numbers, pitfalls, boundaries |
 | [`architecture-v2.md`](architecture-v2.md) | Frozen layer contract and dependency rules |
-| [`adr/README.md`](adr/README.md) | All accepted decisions (ADR-0001–0121) |
+| [`adr/README.md`](adr/README.md) | All accepted decisions (ADR-0001–0122) |
 | [`notes/README.md`](notes/README.md) | Three hardcore notes: static `/api` removal, browser file open, wasm verification truth |
 | [`debt.md`](debt.md) | Explicit not-done register (D01–D119, N1–N6) |
 | [`studio.md`](studio.md) | The browser/Studio boundary, flags and security |

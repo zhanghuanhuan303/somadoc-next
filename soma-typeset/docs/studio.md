@@ -99,7 +99,7 @@ tab is open.
 | View | What it is |
 |---|---|
 | **分栏** (Split, default) | Source on the left, proof on the right, with a draggable splitter. Either pane can be closed with its `×`; the sidebar 「视图 → 分栏」 restores both. The ratio and open state persist in `localStorage`. |
-| **源文** (Source) | A soft-wrapping `<textarea>`; a long line wraps at the pane width instead of scrolling horizontally. Typing schedules a build 220 ms after the last keystroke; IME composition defers the build until `compositionend`. `⌘S` saves, `⌘↵` rebuilds now. |
+| **源文** (Source) | A soft-wrapping `<textarea>`; a long line wraps at the pane width instead of scrolling horizontally. A diagnostics panel above it lists line/column, message and a suggested fix; exact spans get a red wavy underline (ADR-0122). Typing schedules a build 220 ms after the last keystroke; IME composition defers the build until `compositionend`. `⌘S` saves, `⌘↵` rebuilds now. |
 | **校样** (Proof) | Each page is a Shadow DOM root containing one SVG page rendered from the engine's `PagedLayout` (ADR-0109). Text is `<text>` with `data-node`/`data-atom`, so it stays selectable and inspectable; the SVG is scaled by the UI's zoom. The page CSS is scoped inside the shadow root; UI tokens never leak into the document. |
 | **检视** (Inspect) | The exported line facts for the current page: ratio, adjustment, trim, boundary deviation, cost, flags. Clicking a row selects the same line in the overlay. Per-term cost is not exported (D102); the detail bar shows `—`. |
 | **校验** (Verify) | Static mode: the wasm build summary (canonical hash, parameter hash, pages, lines per page); native equality is a CI property. Development mode: wasm vs native, where a mismatch is a red state. |
@@ -117,6 +117,29 @@ the proof closed, and the toast reports the page count and file size. A
 downloaded PDF is never zero-length by construction (the UI rejects an empty
 response). TikZ export needs a diagram in the active tab; a document without
 one gets a readable error instead of an empty file.
+
+### Source diagnostics (ADR-0122)
+
+The source pane has a diagnostics strip above the editor. Each row shows
+`Lline:column` (or `构建`), the message and `建议：…`. Clicking a source row
+selects the exact span and focuses the editor; a build row without a source
+span shows the suggestion as a toast.
+
+The editor itself is still a textarea. A transparent text mirror with the same
+font, padding, line-height and wrapping rules renders the source underneath;
+diagnostic ranges get `text-decoration: underline wavy` plus a light red
+background while the textarea keeps the visible text, caret, IME and selection.
+Scroll positions are synchronised. The mirror is mounted only when at least one
+diagnostic has a span.
+
+The first lint set is deliberately conservative: unclosed fenced code blocks,
+paired math parse errors (unbalanced group/delimiter/environment, unsupported
+command, missing argument), undefined or duplicate footnote definitions,
+unclosed `[[ruby:...]]` / `[[index:...]]` extensions, and unmatched LaTeX
+`\begin{...}` / `\end{...}`. A build failure is always appended; when it names
+`node N`, the pane re-parses the source and maps that node to a byte span.
+Template, engine and metrics errors appear as `构建` rows without a source
+underline, because they point at another file.
 
 Line numbers are intentionally not shown: with soft wrap, one logical line can
 occupy several visual rows, and a one-number-per-logical-line gutter would drift.
@@ -226,7 +249,7 @@ The public site does not expose these routes. They exist only when
 bash scripts/studio.sh          # S1–S11, starts its own server on port 7091
 SOMA_STUDIO_SKIP_TRUNK=1 bash scripts/studio.sh   # reuse dist/
 SOMA_STUDIO_PORT=7099 bash scripts/studio.sh      # another port
-bash scripts/static.sh          # static bundle: S1/S3–S10/S12, zero /api
+bash scripts/static.sh          # static bundle: S1/S3–S10/S12–S14, zero /api
 SOMA_STATIC_SKIP_TRUNK=1 bash scripts/static.sh   # reuse dist/
 ```
 
@@ -250,6 +273,9 @@ directory; `examples/` is not modified.
 | S9 | Probe p95 with fonts and `不一致` without them; the proof's first block resolves to a dark ink colour (`color-scheme: light`); SSE `built`/`error`; a failed reload keeps the previous build; PDF page count. |
 | S10 | The assistant has no engine write path; its reply renders as text; remote is off. |
 | S11 | From a Markdown project, `extra.html` and `extra.tex` each rebuild with their own frontend: the wasm hash equals native verify, the proof shows the frontend marker, and raw `<h1>` / `\section` does not survive. |
+| S12 | In static mode, the PDF is written by wasm: non-empty `%PDF-` bytes and a reported page count. |
+| S13 | A browser `File` opens as an HTML tab, parses with the HTML frontend, builds, and closes without a server. |
+| S14 | A source with an undefined footnote and an unsupported math command shows a diagnostics panel, red wavy spans on the exact bytes, a suggestion, and click-to-select in the textarea. |
 
 ## Known limits
 
@@ -264,6 +290,13 @@ directory; `examples/` is not modified.
   artifact.
 - **Inspect shows total cost only** (D102), and line text is best-effort
   because atoms carry no source offsets (D103).
+- **Source diagnostics are UI-side and conservative (D120).** Only the lint
+  set above gets an underline; a build error that points at the template,
+  engine or metrics table is shown as a `构建` row without a source span. The
+  transparent mirror duplicates the source text while diagnostics exist, and
+  its wrapping depends on matching the textarea's font and scrollbar width.
+  A future structured-error pass in the engine can replace the heuristics
+  without changing the panel contract.
 - **The proof's ink is pinned to `#111`.** Page CSS sets `color:#111;color-scheme:light`
   so a dark browser preference can never turn text white on white paper; the
   proof therefore does not follow the UI theme's ink token. Templates may still

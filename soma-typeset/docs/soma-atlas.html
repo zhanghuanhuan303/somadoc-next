@@ -109,7 +109,7 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
 <div class="classbar">
   <span class="cls">研究档案</span>
   <span>SOMA ATLAS · 中文优先排版引擎 · 公开研究记录</span>
-  <span class="push">v1.2 · 2026-11-27 · 静态包</span>
+  <span class="push">v1.3 · 2026-11-28 · 源文诊断</span>
 </div>
 
 <div class="page">
@@ -123,8 +123,8 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
   每个优势都带边界，每个未完成项都显式登记。</p>
   <dl class="meta">
     <div><dt>构建</dt><dd><code>main@c5948a1</code>（数据快照：浏览器本地 Studio、GB2312 子集与内容哈希已并入）</dd></div>
-    <div><dt>日期</dt><dd>2026-11-27</dd></div>
-    <div><dt>规模</dt><dd>28 个 crate · 92,936 行 Rust · 121 份 ADR · 1,009 个测试（另 1 个 ignored）</dd></div>
+    <div><dt>日期</dt><dd>2026-11-28</dd></div>
+    <div><dt>规模</dt><dd>28 个 crate · 93,968 行 Rust · 122 份 ADR · 1,016 个测试（另 1 个 ignored）</dd></div>
     <div><dt>环境</dt><dd>Linux x86_64 · Rust 1.99 · <code>wasm32-wasip1</code> · <code>wasm32-unknown-unknown</code> · A4 / 10pt 基准</dd></div>
     <div><dt>字体</dt><dd>默认模板 IBM Plex Sans SC（正文/标题/代码）· 数学 New Computer Modern Math · 浏览器校样/PDF 用 GB2312 一、二级子集（7,199 字）</dd></div>
     <div><dt>数据源</dt><dd><code>docs/*.md</code> · <code>docs/adr/0001–0120</code> · <code>scripts/gates.sh</code> · <code>scripts/studio.sh</code> · <code>scripts/local-assets.sh</code> · <code>corpus/zh</code></dd></div>
@@ -147,10 +147,10 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
 </div>
 
 <div class="counters">
-  <div class="counter"><b>1,009</b><span>测试 / 0 失败</span></div>
+  <div class="counter"><b>1,016</b><span>测试 / 0 失败</span></div>
   <div class="counter"><b>12 + S</b><span>门禁检查 / 全绿</span></div>
   <div class="counter"><b>120</b><span>ADR / 冻结架构</span></div>
-  <div class="counter"><b>28</b><span>crate / 92,936 行</span></div>
+  <div class="counter"><b>28</b><span>crate / 93,968 行</span></div>
 </div>
 
 <table>
@@ -425,7 +425,7 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
 <h2><span class="num">§4</span>质量与性能 · 可重跑的数字</h2>
 
 <h3>4.1 测试分布</h3>
-<p><b>1,009</b> 个测试（另 1 个 ignored）按层分布。布局与内核占大头，因为这两层的失败最难从输出看出来：
+<p><b>1,016</b> 个测试（另 1 个 ignored）按层分布。布局与内核占大头，因为这两层的失败最难从输出看出来：
 一个错误的 tie-break 只会让某一段的断点不同，不会让 PDF 报错。图 3 的分层条是
 2026-11-25 的 917 个快照；新增约 89 个测试集中在 Studio、字体子集、PDF 导出与部署，
 没有重画分层，总量以 §0 与本节文字为准。</p>
@@ -472,7 +472,7 @@ footer{margin-top:5rem;border-top:1.5px solid var(--rule-strong);padding-top:.8r
   </g>
 </svg>
 <figcaption><b>图 3 · 测试分布（2026-11-25 分层快照）。</b>按 crate 单独跑 <code>cargo test -p &lt;crate&gt; --all-targets</code> 汇总得 917 个通过（另有 1 个 ignored），
-当前 <code>cargo test --workspace</code> 报告 <b>1,009 passed / 1 ignored</b>；新增测试集中在 Studio、字体子集与 PDF 导出。
+当前 <code>cargo test --workspace</code> 报告 <b>1,016 passed / 1 ignored</b>；新增测试集中在 Studio、字体子集与 PDF 导出。
 分布用于看重心，不作门禁。</figcaption>
 </figure>
 
@@ -589,7 +589,7 @@ D91 已关闭（ADR-0072 候选窗口），<code>bench --check</code> PASS。</f
 <h2><span class="num">§5</span>工程方法 · 为什么这些数字可信</h2>
 
 <h3>5.1 ADR 先于代码</h3>
-<p>121 份 ADR 不是事后文档，而是决策记录：每个非平凡选择都先写「Context / Decision /
+<p>122 份 ADR 不是事后文档，而是决策记录：每个非平凡选择都先写「Context / Decision /
 Consequences / Alternatives」，再动代码。冻结后的架构只允许由新 ADR 扩展，
 所以「为什么现在不这样做」与「以后怎么做」都能查到。</p>
 
@@ -759,7 +759,7 @@ bash scripts/studio.sh         # S1–S11（服务端模式）
 bash scripts/web.sh            # W1–W6（浏览器切片）
 SOMA_FONT_DIR=/path/to/fonts \
   bash scripts/local-assets.sh # GB2312 v2 字体 + welcome.md
-cargo test --workspace         # 1,009 passed / 1 ignored
+cargo test --workspace         # 1,016 passed / 1 ignored
 # 本地 S12：打开 https://somadoc.art/?selftest=1&theme=dark</pre>
 </section>
 
@@ -850,10 +850,10 @@ Axum 的 <code>soma-studio</code> 只保留文件读写、字体服务和可选�
 
 <h3>10.2 验证与数字</h3>
 <ul>
-  <li><b>测试：</b><code>cargo test --workspace</code> → <b>1,009 passed / 1 ignored</b>；共 121 份 ADR、28 个 crate、92,936 行 Rust。</li>
-  <li><b>浏览器门禁：</b>公网 <code>?selftest=1</code> → S1–S10 + S12 + S13 全过；S12 为本地 PDF 224 KB / 50 ms，S13 为浏览器 File 打开 HTML 并重建。</li>
-  <li><b>静态门禁：</b><code></code>scripts/static.sh</code> → 无 Axum 的文件服务器上 S1/S3–S10/S12/S13 全过；会话 0 次 <code>/api</code>；<code>/api/health</code> 为 404。</li>
-  <li><b>服务端门禁：</b><code>scripts/studio.sh</code> → S1–S11 全过；</b></code>S2/S11 在本地模式按设计跳过。</li>
+  <li><b>测试：</b><code>cargo test --workspace</code> → <b>1,016 passed / 1 ignored</b>；共 122 份 ADR、28 个 crate、93,968 行 Rust。</li>
+  <li><b>浏览器门禁：</b>公网 <code>?selftest=1</code> → S1–S10 + S12–S14 全过；S12 为本地 PDF 224 KB / 50 ms，S13 为浏览器 File 打开 HTML 并重建，S14 为源文诊断面板 + 波浪线 + 点击定位。</li>
+  <li><b>静态门禁：</b><code>scripts/static.sh</code> → 无 Axum 的文件服务器上 S1/S3–S10/S12–S14 全过；会话 0 次 <code>/api</code>；<code>/api/health</code> 为 404。</li>
+  <li><b>服务端门禁：</b><code>scripts/studio.sh</code> → S1–S11 全过；S2/S11 在本地模式按设计跳过。</li>
   <li><b>语料：</b><code>ALL,48,599,1213,0,0,3,0,0,6,809,1404,428,0</code>；过度压缩 0、紧急回退 0。</li>
   <li><b>线上：</b><code>somadoc.art</code> HTTPS + HTTP/2；v2 五个字体全部 200；编辑与导出路径无 <code>/api</code> 请求。</li>
 </ul>
@@ -861,7 +861,7 @@ Axum 的 <code>soma-studio</code> 只保留文件读写、字体服务和可选�
 <h3>10.3 边界</h3>
 <ul>
   <li><b>D119：</b>浏览器字体覆盖 GB2312 一、二级（7,199 字）；字集外生僻字在校样/PDF 中为空框，CLI 仍用完整字体。</li>
-  <li><b>文件入口：</b>线上默认打开 <code>welcome.md</code></code>；<code>.md/.html/.tex/.docx</code> 可从文件选择器或窗口拖放打开，字节留在 wasm；native 对照只在开发服务端（<code>?server=1</code></code>）。</li>
+  <li><b>文件入口：</b>线上默认打开 <code>welcome.md</code>；<code>.md/.html/.tex/.docx</code> 可从文件选择器或窗口拖放打开，字节留在 wasm；native 对照只在开发服务端（<code>?server=1</code>）。</li>
   <li><b>D104/D105：</b>构建仍在主线程；没有单文件离线导出；大文档与离线分享留作后续。</li>
   <li><b>CDN 未接入：</b>wasm/字体已可缓存，但首次仍从源站取；COS+CDN 是下一步的交付优化，不是排版模型的一部分。</li>
 </ul>
@@ -873,39 +873,69 @@ Axum 的 <code>soma-studio</code> 只保留文件读写、字体服务和可选�
 <h2><span class="num">§11</span>更新 · 纯静态公网（2026-11-27）</h2>
 
 <p>这一期把最后一个服务端依赖从公网拿掉：<code>somadoc.art</code> 不再反代 Axum，
-只由 Apache 提供</p> <code>dist/</code> 与 <code>/</code></code>fonts/v2/</code>。<code>/api</code> 不存在；
+只由 Apache 提供 <code>dist/</code> 与 <code>/fonts/v2/</code>。<code>/api</code> 不存在；
 排版、PDF、TikZ 与文件打开都在浏览器内完成（ADR-0121）。</p>
 
 <table>
   <caption>表 8 · 从「浏览器本地 + 服务端」到「纯静态」</caption>
-  <thead><t</table></caption>r><th>维度</th><th>v1.1</th><th>v1.2 / 纯静态</th></tr></thead></th></th></th>
+  <thead><tr><th>维度</th><th>v1.1</th><th>v1.2 / 纯静态</th></tr></thead>
   <tbody>
-    <tr><td>公网入口</td><td>Apache 全量反代 <code>127.0.0.1:7070</code></td><td>Apache <code>DocumentRoot /opt/</tbody></td></td></code></td></code>somadoc/dist</code>；无 ProxyPass</td></tr>
-    <tr><td><code>/api</code></td><td>可达；<code>/</td>api/health</code> 200</td><td>404；无 Axum 进程</td></tr>
+    <tr><td>公网入口</td><td>Apache 全量反代 <code>127.0.0.1:7070</code></td><td>Apache <code>DocumentRoot /opt/somadoc/dist</code>；无 ProxyPass</td></tr>
+    <tr><td><code>/api</code></td><td>可达；<code>/api/health</code> 200</td><td>404；无 Axum 进程</td></tr>
     <tr><td>主机判定</td><td>somadoc 域名白名单，其他主机默认服务端</td><td>非 loopback 一律本地；<code>?server=1</code> 显式开发</td></tr>
-    <tr><td>本地校验</td><td>把 wasm summary 写进 verify，显示 <code>wasm = </td></td></td></td></code></td></td></code>native</code></td><td>显示 <code>wasm 构建</code>；native 一致性由 CI <code>wasm-hash.sh</code> 锁定</td></tr>
+    <tr><td>本地校验</td><td>把 wasm summary 写进 verify，显示 <code>wasm = native</code></td><td>显示 <code>wasm 构建</code>；native 一致性由 CI <code>wasm-hash.sh</code> 锁定</td></tr>
     <tr><td>文件打开</td><td><code>welcome.md</code>；其他文件走 <code>?server=1</code></td><td>文件选择器/拖放 <code>.md/.html/.tex/.docx</code>；字节不进服务器</td></tr>
     <tr><td>字体</td><td><code>/fonts/v2/</code> 4.4 MB</td><td>不变；仍外置，不嵌入 wasm</td></tr>
-    <tr><td>门禁</td><td></td></code></code></td></code></code></td></td></td></td></td>S1–S10 + S12</td><td>S1/S3–S10/S12/S13 + 零 <code>/api</code> + <code>/api/health</code> 404</td></tr>
+    <tr><td>门禁</td><td>S1–S10 + S12</td><td>S1/S3–S10/S12–S14 + 零 <code>/api</code> + <code>/api/health</code> 404</td></tr>
   </tbody>
 </table>
 
 <h3>11.1 边界</h3>
 <ul>
-  <li><b>没有服务端日志：</b>公网只付静态流量；C</h3></ul></b>OS/CDN 被刷只剩带宽，不再有 CPU 与写文件面。</li>
+  <li><b>没有服务端日志：</b>公网只付静态流量；COS/CDN 被刷只剩带宽，不再有 CPU 与写文件面。</li>
   <li><b>GB2312 覆盖不变：</b>6,763 字（一、二级）之外仍是空框；全量字体或字体上传是后续项。</li>
   <li><b>不是单文件：</b><code>index.html</code> + 内容哈希资源 + <code>/fonts/v2/</code> 一起发布；<code>embed-fonts</code> 仍是可选未来项。</li>
   <li><b>开发服务端保留：</b>loopback 上 <code>soma-studio</code> 仍提供文件树与 native 校验；<code>--host</code> 暴露的写 API 不得上公网。</li>
 </ul>
 
-<p class="mono" style="font-size:.78rem;color:</b>var(--muted)">ADR-0121 · scripts/static.sh · 1,009 tests · 121 ADR</p>
+<p class="mono" style="font-size:.78rem;color:var(--muted)">ADR-0121 · scripts/static.sh · 1,016 tests · 122 ADR</p>
+</section>
+
+<section id="s12">
+<h2><span class="num">§12</span>更新 · 源文诊断（2026-11-28）</h2>
+
+<p>这一期把构建失败从“校样里的一个字符串”变成“源文里的一个位置”：诊断面板列出行号、消息和建议，
+编辑器在精确的字节范围上画红色波浪线；点击面板行会选中对应 span（ADR-0122）。</p>
+
+<table>
+  <caption>表 9 · 从「构建失败」到「具体位置 + 建议」</caption>
+  <thead><tr><th>维度</th><th>v1.2</th><th>v1.3 / 源文诊断</th></tr></thead>
+  <tbody>
+    <tr><td>错误展示</td><td>校样中的一条构建失败 banner</td><td>源文上方面板：行号/列、消息、建议；校样 banner 保留</td></tr>
+    <tr><td>定位</td><td>块级或不可定位</td><td>高置信度 lint 精确到 byte span；<code>node N</code> 构建错误映射到节点 span</td></tr>
+    <tr><td>标记</td><td>无源文标记</td><td>透明文本镜像 + 红色 wavy underline + 浅红背景；textarea 仍负责输入/IME</td></tr>
+    <tr><td>建议</td><td>无</td><td>每条诊断一条可执行建议（补 <code>$</code>、补脚注定义、补 <code>\end</code> 等）</td></tr>
+    <tr><td>模板/引擎错误</td><td>只有错误字符串</td><td>显示为「构建」行，不画源文下划线，提示去模板/引擎配置检查</td></tr>
+    <tr><td>门禁</td><td>S1/S3–S10/S12/S13</td><td>新增 S14：面板、波浪线、建议、点击选中</td></tr>
+  </tbody>
+</table>
+
+<h3>12.1 边界</h3>
+<ul>
+  <li><b>UI 侧启发式：</b>当前只覆盖高置信度结构错误；不猜货币 <code>$</code>，不把普通文本当公式。</li>
+  <li><b>跨文件错误：</b>模板、引擎、度量错误没有源文 span，面板显示「构建」而不是画错位置。</li>
+  <li><b>镜像层契约：</b>字体、padding、行高、滚动条宽度必须与 textarea 一致；S14 锁 DOM 结构，截图检查锁视觉对齐。</li>
+  <li><b>性能：</b>诊断在每次输入后即时运行；镜像只在有 span 时挂载，并限制在 48 条以内。</li>
+</ul>
+
+<p class="mono" style="font-size:.78rem;color:var(--muted)">ADR-0122 · diagnostics.rs · S14 · 1,016 tests · 122 ADR</p>
 </section>
 
 <footer>
-  <span>SO</b></code></code></b></code>MA ATLAS · v1.2 · 2026-11-27</span>
-  <span>构建 main · 静态包</span>
-  <span>1,009 tests · 121 ADRs · 28 crates</span>
-  <span>纯静态公网：无 /api / GB2312 子集 / 内容哈希</span>
+  <span>SOMA ATLAS · v1.3 · 2026-11-28</span>
+  <span>构建 main · 静态包 + 源文诊断</span>
+  <span>1,016 tests · 122 ADRs · 28 crates</span>
+  <span>纯静态公网 · 源文波浪线诊断 · GB2312 子集</span>
   <span>本图集只描述当期状态；未排期项以 <code>docs/debt.md</code> 为准</span>
 </footer>
 
