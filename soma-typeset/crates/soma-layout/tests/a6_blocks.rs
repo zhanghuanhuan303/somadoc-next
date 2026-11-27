@@ -3,7 +3,7 @@
 mod common;
 
 use common::{document, engine, metrics, paragraph, paragraph_with, styled, text, TIGHT};
-use soma_core::Width;
+use soma_core::{LineMetrics, Metrics, StyleId, SyntheticMetrics, Width};
 use soma_doc::block::{
     BlockQuote, Cell, CodeBlock, Column, Figure, List, ListItem, MathBlock, Paragraph, RawBlock,
     Row, Table, ThematicBreak,
@@ -979,33 +979,121 @@ fn a_list_marker_hangs_outside_the_text_column() {
     // A negative first indent is a hanging indent: line 0 starts where the
     // marker goes and is that much wider, every later line starts at the text
     // column (ADR-0058).
+    //
+    // The synthetic face has no outline, so it cannot trim a leading bearing.
+    // Give the bullet one, the way a real outline does: a wrapped item's first
+    // line is justified and would otherwise pull the marker off its column.
+    struct BulletInk(SyntheticMetrics);
+    impl Metrics for BulletInk {
+        fn advance(&self, text: &str, style: StyleId) -> Width {
+            self.0.advance(text, style)
+        }
+        fn line_metrics(&self, style: StyleId) -> LineMetrics {
+            self.0.line_metrics(style)
+        }
+        fn ink_left(&self, text: &str, _style: StyleId) -> Option<Width> {
+            (text == "\u{2022}").then(|| Width::from_em_frac(3, 16))
+        }
+    }
+
     let long = "这是一条足够长、必定换行的列表项，用来确认续行与首行的起点不同。";
     let doc = document(vec![Block::List(List::new(
         NodeMeta::synthesized(),
         false,
         1,
-        vec![ListItem::new(
-            NodeMeta::synthesized(),
-            vec![paragraph(long)],
-        )],
+        vec![
+            ListItem::new(NodeMeta::synthesized(), vec![paragraph(long)]),
+            ListItem::new(NodeMeta::synthesized(), vec![paragraph("短项")]),
+        ],
     ))]);
     let styled = styled(&doc, LISTS);
-    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let ink = BulletInk(SyntheticMetrics::default());
+    let layout = layout(&doc, &styled, &ink, &engine()).expect("layout");
     let block = &layout.pages[0].blocks[0];
     let first = &block.lines[0].line;
     let second = &block.lines[1].line;
+    let short = &layout.pages[0].blocks[1].lines[0].line;
 
-    assert_eq!(first.indent.0, -4915, "the first line starts 1.2em left");
+    let marker_width = ink.advance("\u{2022} ", styled.style_of(block.node).unwrap());
+
+    assert_eq!(
+        first.indent.0, -marker_width.0,
+        "the first line hangs by the measured marker width"
+    );
     assert_eq!(
         first.target_width.0,
-        block.width.0 + 4915,
-        "and is 1.2em wider"
+        block.width.0 + marker_width.0,
+        "and is that much wider"
     );
     assert_eq!(
         second.indent.0, 0,
         "a wrapped line starts at the text column"
     );
     assert_eq!(second.target_width.0, block.width.0);
+
+    let text_box = first
+        .boxes
+        .iter()
+        .find(|box_| {
+            let text = layout.text.atom_text(block.node, box_.atom);
+            text != "\u{2022}" && text != " "
+        })
+        .expect("text after the marker");
+    assert_eq!(
+        text_box.x, second.boxes[0].x,
+        "the first text column and the wrapped line share an absolute x"
+    );
+    assert!(
+        first.trim_left.0 > 0,
+        "the wrapped first line trims the bullet bearing, so this test exercises the undo"
+    );
+    assert_eq!(
+        first.boxes[0].x, short.boxes[0].x,
+        "a wrapped item and an unwrapped item put their marker on the same column"
+    );
+}
+
+#[test]
+fn a_two_digit_ordered_marker_keeps_the_text_column() {
+    // `1. ` and `10. ` are different widths, so the hang has to be measured
+    // per item; the template's first-indent cannot know the number of digits.
+    let long = "这是一条足够长、必定换行的列表项，用来确认两位数字编号之后的文字仍然对齐。";
+    let doc = document(vec![Block::List(List::new(
+        NodeMeta::synthesized(),
+        true,
+        9,
+        vec![
+            ListItem::new(NodeMeta::synthesized(), vec![paragraph("短项")]),
+            ListItem::new(NodeMeta::synthesized(), vec![paragraph(long)]),
+        ],
+    ))]);
+    let styled = styled(&doc, LISTS);
+    let layout = layout(&doc, &styled, &metrics(), &engine()).expect("layout");
+    let block = layout.pages[0].blocks.last().expect("the tenth item");
+    let first = &block.lines[0].line;
+    let second = &block.lines[1].line;
+
+    let marker_width = metrics().advance("10. ", styled.style_of(block.node).unwrap());
+    assert_eq!(
+        first.indent.0, -marker_width.0,
+        "the hang is the measured two-digit marker"
+    );
+    assert_ne!(
+        marker_width,
+        Width::from_em_frac(6, 5),
+        "a fixture that happens to be 1.2em wide would hide the bug"
+    );
+
+    let text_box = first
+        .boxes
+        .iter()
+        .find(|box_| layout.text.atom_text(block.node, box_.atom) == "这")
+        .expect("text after the marker");
+    assert_eq!(text_box.x, Width::ZERO, "the text column is the origin");
+    assert_eq!(
+        text_box.x, second.boxes[0].x,
+        "the text after `10. ` and the wrapped line share an absolute x"
+    );
 }
 
 #[test]

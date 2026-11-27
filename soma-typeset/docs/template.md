@@ -247,7 +247,7 @@ DocIR 的 `Section.page_template: <name>` 选择母版；换母版会强制新�
 |---|---|---|
 | `font-size` | length | 根规则必须绝对单位；子节点可用 `em` |
 | `line-height` | 无单位倍数或 length | 解析成绝对行距 |
-| `first-indent` | length | 首行缩进 |
+| `first-indent` | length | 首行缩进；负值表示悬挂缩进（列表项的实际悬挂宽度取 marker 前缀的实测 advance，模板的负值只表示“这是悬挂”，ADR-0123） |
 | `indent-left` / `indent-right` | length | 块级左右缩进 |
 | `background` | `#rrggbb` / `rrggbb` | 块背后的填充色；默认不画（ADR-0090） |
 | `padding-top` / `padding-right` / `padding-bottom` / `padding-left` | length | 块内容与面板边缘的距离；负值报错（ADR-0090） |
@@ -378,7 +378,9 @@ IBM Plex Sans SC 正文 10pt / 1.44 行高、零首行缩进 + 20pt 段距、LaT
 模板版本 2 面向提案文档做了一轮收尾：单元格 1.5 行高 + 0.12em 上下留白、
 表前 0.8em；目录标题 18pt 并下移 16mm、条目行高 1.9；封面标题 26pt、
 副标题与日期用静音色，版权块是居中发丝线 + 居中 8pt 小字。正文、标题与
-列表仍保持 pandoc 参考的尺寸与间距。
+列表仍保持 pandoc 参考的尺寸与间距。列表项的悬挂宽度由 marker 的实测
+advance 决定（`• ` 与 `10. ` 不同宽），`first-indent: -1.2em` 只声明悬挂
+意图，不再决定文字列的位置（ADR-0123）。
 
 运行 `scripts/plex.sh` 会用本机 Plex 面与 Noto Sans Mono 生成度量表
 （不随仓库分发字体），并排出：

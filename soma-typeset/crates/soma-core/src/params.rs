@@ -122,10 +122,11 @@ impl ParamSet {
     pub fn default_v1() -> Self {
         Self {
             preset: PresetId("default-v1"),
-            // 4: the short-line term also charges a short non-final line
-            // (D115). 2: ADR-0111/0112 changed code segmentation and the
-            // separator penalties.
-            model_version: 4,
+            // 5: a list marker's hang is its measured advance, not the
+            // template's first-indent (ADR-0123). 4: the short-line term also
+            // charges a short non-final line (D115). 2: ADR-0111/0112 changed
+            // code segmentation and the separator penalties.
+            model_version: 5,
             rules_version: 2,
             metrics_version: 0,
             break_params: BreakParams {

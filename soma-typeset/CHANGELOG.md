@@ -2,6 +2,11 @@
 
 ## Unreleased — 2026-11-28
 
+- List items hang by the measured marker prefix (`• `, `1. `, `10. `), not by
+  the template's `first-indent` guess. The text after the marker is pinned to
+  the wrapped-line column and the marker is kept on its hang column, so a
+  wrapped item and an unwrapped item share both columns exactly; `modelVersion`
+  5 (ADR-0123).
 - The Studio source pane now shows a diagnostics panel above the editor:
   line/column, message and a suggested fix. Exact spans get a GitHub-style red
   wavy underline through a transparent text mirror; clicking a row selects the

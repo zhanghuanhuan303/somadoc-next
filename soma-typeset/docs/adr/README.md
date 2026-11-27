@@ -141,6 +141,7 @@ only).
 | [0120](0120-content-hashed-assets.md) | Trunk hashes JS/CSS/wasm; `index.html` revalidates, fonts stay under a versioned namespace, and `welcome.md` is published as a downloadable source | Accepted |
 | [0121](0121-static-browser-local-studio.md) | The public Studio is a static bundle: local is the default on every non-loopback host, Axum is development-only, files open and PDF render in wasm, and local verify no longer claims a runtime native comparison | Accepted |
 | [0122](0122-studio-source-diagnostics.md) | The source pane adds a diagnostics panel, a transparent text mirror with red wavy underlines on exact byte spans, and fix suggestions; build errors map to a node span when possible | Accepted |
+| [0123](0123-measured-list-marker-hang.md) | A list marker's hang is its measured advance (`• `, `1. `, `10. `), not the template's first-indent; the marker gap is not adjustable and the text column is pinned after breaking; `modelVersion` 5 | Accepted |
 
 ## Rules
 

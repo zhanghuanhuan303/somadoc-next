@@ -1940,12 +1940,24 @@ impl Builder<'_> {
                                         self.prefixed_inlines(&paragraph.inlines, &marker)
                                     };
                                     let style = self.style(paragraph.meta.id, item_style);
+                                    // The template's negative first-indent says
+                                    // "hang"; the actual hang is the measured
+                                    // marker prefix, not the template's 1.2em
+                                    // guess. Otherwise the first text column and
+                                    // the wrapped lines differ by the font's
+                                    // bullet/space advance.
+                                    let marker_width = if description {
+                                        None
+                                    } else {
+                                        Some(self.metrics.advance(&format!("{marker} "), style))
+                                    };
                                     self.suppress_hang = description;
-                                    let result = self.paragraph_item(
+                                    let result = self.paragraph_item_with_hang(
                                         paragraph.meta.id,
                                         BoxKind::Paragraph,
                                         &inlines,
                                         style,
+                                        marker_width,
                                     );
                                     self.suppress_hang = false;
                                     if let Some(item) = result? {
@@ -2736,6 +2748,17 @@ impl Builder<'_> {
         inlines: &[Inline],
         style_id: StyleId,
     ) -> Result<Option<FlowItem>, LayoutError> {
+        self.paragraph_item_with_hang(node, kind, inlines, style_id, None)
+    }
+
+    fn paragraph_item_with_hang(
+        &mut self,
+        node: NodeId,
+        kind: BoxKind,
+        inlines: &[Inline],
+        style_id: StyleId,
+        hang_override: Option<Width>,
+    ) -> Result<Option<FlowItem>, LayoutError> {
         let computed = self.computed(style_id);
         // A quote or a list indents the blocks it holds; the blocks declare
         // their own indent on top of it.
@@ -2744,11 +2767,15 @@ impl Builder<'_> {
         let consumed = left.saturating_add(right);
         let inner = Width(self.content_width.0 - consumed.0);
         // A negative `first-indent` is a hanging indent: the template says
-        // where the marker goes, the kernel gets `hang` (ADR-0058).
+        // where the marker goes, the kernel gets `hang` (ADR-0058). A list
+        // marker overrides the guess with its measured prefix width so the
+        // first text column and every wrapped line start at the same x.
         let hang = if self.suppress_hang {
             Width::ZERO
+        } else if computed.first_indent.0 < 0 {
+            hang_override.unwrap_or(Width(-computed.first_indent.0))
         } else {
-            Width((-computed.first_indent.0).max(0))
+            Width::ZERO
         };
         let first_indent = if self.suppress_hang {
             Width::ZERO
@@ -2800,6 +2827,22 @@ impl Builder<'_> {
             Err(RuleError::EmptyText) => return Ok(None),
         };
         let mut paragraph = paragraph;
+        // The marker gap is part of the prefix, not of the justified text
+        // column. If it kept its stretch/shrink, justification would move the
+        // first text run away from the wrap column by a few units. The gap
+        // keeps its natural space width; only its adjustability is removed.
+        let mut marker_content = None;
+        if hang_override.is_some() {
+            if let Some(index) = paragraph
+                .boundaries
+                .iter()
+                .position(|boundary| boundary.kind == BoundaryKind::Space)
+            {
+                paragraph.boundaries[index].glue.stretch = Width::ZERO;
+                paragraph.boundaries[index].glue.shrink = Width::ZERO;
+                marker_content = Some(index as u32 + 1);
+            }
+        }
         scale_trim(&mut paragraph, self.metrics, |style| {
             self.computed(style).font_size.0
         });
@@ -2808,6 +2851,11 @@ impl Builder<'_> {
         let mut result = break_paragraph(&paragraph, &object_metrics, self.engine)
             .map_err(|_| LayoutError::new(Some(node), "line breaking failed"))?;
         align_lines(&mut result.lines, computed.align);
+        if let (Some(first), Some(content), Some(marker_width)) =
+            (result.lines.first_mut(), marker_content, hang_override)
+        {
+            pin_marker_gap(first, content, marker_width);
+        }
 
         // Ruby: one base atom per annotation, in document order. The base was
         // pushed as a single atom (`SpanKind::Ruby`), so the zip is exact even
@@ -5115,6 +5163,38 @@ fn scale_trim(paragraph: &mut Paragraph, metrics: &dyn Metrics, size_of: impl Fn
 
 fn scale_units(value: i32, size: i32) -> i32 {
     (value as i64 * size as i64 / 4096) as i32
+}
+
+/// Put the text after a list marker on the measured marker column.
+///
+/// Justification spreads `adjustment` over the line's boundaries. The marker
+/// gap is a prefix, not part of the justified text column: even with its
+/// stretch and shrink zeroed, `distribute` still shares the remainder, so the
+/// first text run can drift a few units away from the wrap column. Shift the
+/// content box and everything after it by the same delta, so the first text
+/// glyph and every wrapped line start at the same absolute x.
+fn pin_marker_gap(line: &mut Line, content: u32, marker_width: Width) {
+    let Some(content_index) = line.boxes.iter().position(|box_| box_.atom == content) else {
+        return;
+    };
+    // The marker is a column, not text. A justified first line trims the
+    // leading bearing (ADR-0082/0105), which moves the marker but not the
+    // ragged items in the same list. Undo that trim on the prefix so every
+    // item puts its marker at the same x and the gap keeps its natural width.
+    let trim = line.trim_left.0;
+    if trim != 0 {
+        for box_ in line.boxes.iter_mut().take(content_index) {
+            box_.x = Width(box_.x.0 + trim);
+        }
+    }
+    let target = line.indent.0 + marker_width.0;
+    let delta = target - line.boxes[content_index].x.0;
+    if delta == 0 {
+        return;
+    }
+    for box_ in line.boxes.iter_mut().skip(content_index) {
+        box_.x = Width(box_.x.0 + delta);
+    }
 }
 
 /// How far the final punctuation hangs into the margin. Chinese closing
