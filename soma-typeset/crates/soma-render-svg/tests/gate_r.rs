@@ -384,4 +384,7 @@ fn svg_bytes_are_a_visual_regression_lock() {
 /// 2026-11-26: each block is a `<g class="block">`, text carries its family
 /// and bold/italic attributes so the SVG can be a standalone Studio proof
 /// (ADR-0109).
-const GOLDEN_SVG_HASH: u64 = 6291207987599973007;
+/// 2026-11-28: punctuation pair gaps are measured and punctuation-adjacent
+/// boundaries carry a dynamic shrink reserve; the fixture's boxes move when a
+/// line spends it (ADR-0124/0125).
+const GOLDEN_SVG_HASH: u64 = 7361102556664643390;

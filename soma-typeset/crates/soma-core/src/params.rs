@@ -122,12 +122,13 @@ impl ParamSet {
     pub fn default_v1() -> Self {
         Self {
             preset: PresetId("default-v1"),
-            // 6: adjacent punctuation is tightened to a measured ink gap
-            // (ADR-0124). 5: a list marker's hang is measured (ADR-0123).
-            // 4: the short-line term also charges a non-final line (D115).
-            // 2: ADR-0111/0112 changed code segmentation and penalties.
-            model_version: 6,
-            rules_version: 3,
+            // 7: punctuation-adjacent boundaries carry a shrink reserve that
+            // only an overfull line can spend (ADR-0125). 6: pair gap
+            // (ADR-0124). 5: measured list marker hang (ADR-0123). 4: the
+            // short-line term also charges a non-final line (D115). 2:
+            // ADR-0111/0112 changed code segmentation and penalties.
+            model_version: 7,
+            rules_version: 4,
             metrics_version: 0,
             break_params: BreakParams {
                 tolerance: Permille(3000),
@@ -479,7 +480,7 @@ mod tests {
             base.break_params.costs.badness_scale
         );
         assert_eq!(publish.break_params.fallback, base.break_params.fallback);
-        assert_eq!(publish.rules_version, 3, "ADR-0124 changed the rules");
+        assert_eq!(publish.rules_version, 4, "ADR-0125 changed the rules");
         publish.validate().expect("publish-v1 must be valid");
         assert_ne!(publish.param_hash(), base.param_hash());
     }

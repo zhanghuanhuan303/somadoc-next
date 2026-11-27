@@ -42,7 +42,7 @@ use soma_core::{
 use soma_doc::{Block, Document, Inline, NodeId};
 use soma_rules::{
     is_full_width_punct, pair_gap, paragraph_from_code_line, paragraph_from_spans,
-    paragraph_from_text, InlineSpan, RuleError, SpanKind,
+    paragraph_from_text, punct_shrink_budget, InlineSpan, RuleError, SpanKind,
 };
 use soma_template::{ComputedStyle, ResolvedPage, StyledDoc};
 
@@ -2846,7 +2846,7 @@ impl Builder<'_> {
         scale_trim(&mut paragraph, self.metrics, |style| {
             self.computed(style).font_size.0
         });
-        apply_pair_gap(&mut paragraph, self.metrics, |style| {
+        apply_punctuation_spacing(&mut paragraph, self.metrics, |style| {
             self.computed(style).font_size.0
         });
 
@@ -5141,15 +5141,17 @@ fn align_lines(lines: &mut [Line], align: Align) {
     }
 }
 
-/// Close the optical gap between two adjacent punctuation marks.
+/// Close the optical gap between adjacent punctuation marks and leave a small
+/// shrink reserve on every punctuation-adjacent boundary.
 ///
-/// The rule table says what the gap should look like; the metrics table says
-/// how much empty side bearing the face actually leaves. Subtracting the two
-/// gives a font-independent target instead of a class constant, and the result
-/// is stored on the boundary so the breaker can treat it as a fixed width
-/// reduction. A source without outline ink falls back to the class bearings
-/// that `scale_trim` already wrote into `compress_*`.
-fn apply_pair_gap(
+/// The pair target is the comfortable baseline: the rule table says what the
+/// gap should look like, and the metrics table says how much empty side
+/// bearing the face actually leaves. The shrink reserve is ordinary
+/// `Glue::shrink`: it is only consumed when the line is overfull, and the
+/// residual is capped so two outlines cannot touch. A source without outline
+/// ink falls back to the class bearings that `scale_trim` already wrote into
+/// `compress_*`.
+fn apply_punctuation_spacing(
     paragraph: &mut Paragraph,
     metrics: &dyn Metrics,
     size_of: impl Fn(StyleId) -> i32,
@@ -5161,11 +5163,12 @@ fn apply_pair_gap(
         }
         let left = &paragraph.atoms[index];
         let right = &paragraph.atoms[index + 1];
-        if left.class == PunctClass::None
-            || right.class == PunctClass::None
-            || left.class == PunctClass::Dash
-            || right.class == PunctClass::Dash
-        {
+        if left.class == PunctClass::Dash || right.class == PunctClass::Dash {
+            continue;
+        }
+        let left_punct = left.class != PunctClass::None;
+        let right_punct = right.class != PunctClass::None;
+        if !left_punct && !right_punct {
             continue;
         }
         if matches!(left.kind, AtomKind::InlineObject | AtomKind::Ruby)
@@ -5175,16 +5178,20 @@ fn apply_pair_gap(
         }
         let left_char = left.text.chars().next().unwrap_or('\0');
         let right_char = right.text.chars().next().unwrap_or('\0');
-        let full_width = is_full_width_punct(left_char) && is_full_width_punct(right_char);
-        let Some((target, cap)) = pair_gap(left.class, right.class, full_width) else {
-            continue;
+        // For a pair, half-width on either side uses the half budget. For a
+        // punctuation/text boundary, the punctuation mark decides: a full-width
+        // comma next to a Han character still has a full-width bearing.
+        let full_width = if left_punct && right_punct {
+            is_full_width_punct(left_char) && is_full_width_punct(right_char)
+        } else if left_punct {
+            is_full_width_punct(left_char)
+        } else {
+            is_full_width_punct(right_char)
         };
         let size = size_of(left.style).max(size_of(right.style));
         if size <= 0 {
             continue;
         }
-        let target = scale_units(target.0, size);
-        let cap = scale_units(cap.0, size).max(0);
         let gap = match (
             metrics.ink_right(&left.text, left.style),
             metrics.ink_left(&right.text, right.style),
@@ -5192,7 +5199,24 @@ fn apply_pair_gap(
             (Some(right_bearing), Some(left_bearing)) => (right_bearing.0 + left_bearing.0).max(0),
             _ => (left.compress_right.0 + right.compress_left.0).max(0),
         };
-        paragraph.boundaries[index].pair_squeeze = Width((gap - target).clamp(0, cap));
+
+        let mut pair_squeeze = 0;
+        if left_punct && right_punct {
+            if let Some((target, cap)) = pair_gap(left.class, right.class, full_width) {
+                let target = scale_units(target.0, size);
+                let cap = scale_units(cap.0, size).max(0);
+                pair_squeeze = (gap - target).clamp(0, cap);
+            }
+        }
+
+        let (extra_cap, min_gap) = punct_shrink_budget(full_width);
+        let extra_cap = scale_units(extra_cap.0, size).max(0);
+        let min_gap = scale_units(min_gap.0, size).max(0);
+        let extra = (gap - pair_squeeze - min_gap).clamp(0, extra_cap);
+
+        let boundary = &mut paragraph.boundaries[index];
+        boundary.pair_squeeze = Width(pair_squeeze);
+        boundary.glue.shrink = boundary.glue.shrink.saturating_add(Width(extra));
     }
 }
 
@@ -5482,12 +5506,12 @@ mod unit {
     use soma_rules::justified_style;
 
     #[test]
-    fn pair_gap_squeezes_adjacent_marks_and_leaves_dash_alone() {
+    fn pair_gap_and_dynamic_shrink_leave_dash_alone() {
         let style = justified_style(Width::from_em(10));
         let mut paragraph =
             paragraph_from_text("\u{201d}\u{3002}\u{ff08}", style, StyleId(0)).expect("paragraph");
         scale_trim(&mut paragraph, &SyntheticMetrics::default(), |_| 4096);
-        apply_pair_gap(&mut paragraph, &SyntheticMetrics::default(), |_| 4096);
+        apply_punctuation_spacing(&mut paragraph, &SyntheticMetrics::default(), |_| 4096);
 
         assert_eq!(paragraph.atoms.len(), 3);
         assert_eq!(
@@ -5500,9 +5524,19 @@ mod unit {
             Width::from_em_frac(1, 2),
             "middle to open closes half an em"
         );
+        assert_eq!(
+            paragraph.boundaries[0].glue.shrink,
+            Width::from_em_frac(1, 8),
+            "the forbidden pair boundary carries the emergency shrink reserve"
+        );
+        assert_eq!(
+            paragraph.boundaries[1].glue.shrink,
+            Width::from_em_frac(1, 8) + Width::from_em_frac(1, 32),
+            "the CJK gap before the bracket keeps its own shrink and gains the reserve"
+        );
 
         let mut dashes = paragraph_from_text("……", style, StyleId(0)).expect("paragraph");
-        apply_pair_gap(&mut dashes, &SyntheticMetrics::default(), |_| 4096);
+        apply_punctuation_spacing(&mut dashes, &SyntheticMetrics::default(), |_| 4096);
         assert!(
             dashes
                 .boundaries
@@ -5512,13 +5546,28 @@ mod unit {
         );
 
         let mut middle = paragraph_from_text("，。", style, StyleId(0)).expect("paragraph");
-        apply_pair_gap(&mut middle, &SyntheticMetrics::default(), |_| 4096);
+        apply_punctuation_spacing(&mut middle, &SyntheticMetrics::default(), |_| 4096);
         assert!(
             middle
                 .boundaries
                 .iter()
                 .all(|b| b.pair_squeeze == Width::ZERO),
             "middle-to-middle is deliberately not a pair"
+        );
+        assert!(
+            middle
+                .boundaries
+                .iter()
+                .all(|b| b.glue.shrink > Width::ZERO),
+            "but it still carries the emergency shrink reserve"
+        );
+
+        let mut mixed = paragraph_from_text("中，中", style, StyleId(0)).expect("paragraph");
+        apply_punctuation_spacing(&mut mixed, &SyntheticMetrics::default(), |_| 4096);
+        assert_eq!(
+            mixed.boundaries[0].glue.shrink,
+            Width::from_em_frac(1, 8),
+            "a full-width comma next to a Han character gets the full reserve"
         );
     }
 

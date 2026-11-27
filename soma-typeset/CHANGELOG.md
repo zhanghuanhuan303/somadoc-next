@@ -2,6 +2,11 @@
 
 ## Unreleased — 2026-11-28
 
+- Punctuation-adjacent boundaries now carry a small ordinary-glue shrink
+  reserve. Only an overfull justified line spends it, so a punctuation-dense
+  line can close its empty bearings instead of going overfull or emergency;
+  short lines still only stretch and never tighten. `modelVersion` 7 /
+  `rulesVersion` 4 (ADR-0125).
 - Adjacent punctuation now closes to a measured ink gap (`。”（`, `），`,
   `“（`), independent of the face: `soma-layout` measures the two outlines and
   the breaker subtracts the fixed `pair_squeeze` from the natural width and the

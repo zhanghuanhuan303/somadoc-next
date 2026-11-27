@@ -11,7 +11,7 @@
 1. **采用 K-P 的全局 DP 结构，但用加法加权代价，不用 TeX 的平方 demerits。** 这样才能满足 F6「每类惩罚有独立权重」，也更容易标定。
 2. **输入是 `Atom` + `Boundary`；box/glue/penalty 是内部编译产物。** 中文规则在 IR 构建时编译进边界，breaker 保持脚本无关。
 3. **`Forbidden` 是硬约束；`Forced` 单独建模。** 不要用负 penalty 模拟强制换行。
-4. **标点挤压不是全局 glue。** 行内相邻标点用固定 `pair_squeeze` 收到字体感知的目标墨距（ADR-0124）；行尾/行首用侧边距裁剪（ADR-0036/0082/0105）。两者都是 `(i, j)` 的函数，DP 不需要额外状态。
+4. **标点挤压分两条路径。** 行内相邻标点先用 `pair_squeeze` 收到字体感知的目标墨距（ADR-0124），再由标点边界的 `Glue::shrink` 在超宽行上应急收缩（ADR-0125）；行尾/行首用侧边距裁剪（ADR-0036/0082/0105）。三者都是 `(i, j)` 的函数，DP 不需要额外状态。
 5. **中英边界间距偏差用「比例分配 + 前缀和」做 O(1) 聚合。** 不逐边界遍历。
 6. **MVP 不把相邻行 fitness 放进 DP 状态。** 先测行间调整量方差；有证据再升级到 `(breakpoint, fitness)`。
 7. **边裁剪会破坏行宽单调性，所以先不要上 TeX 式 active-node 剪枝。** 先 O(n²) + 前缀和，correctness first。
@@ -156,11 +156,11 @@ E < 0   → 行不足（underfull）
 - **联合约束：** 用于质量门禁的 preset 必须满足 `badness_scale >= line`，保证 `|r| = 1` 时 badness 至少等于一行固定代价；否则「多一行」可能比「把行拉到名义极限」更便宜。`default-v1` 为 `100 >= 10`。
 - **正常阶段不使用紧急伸展。** 如果无可行路径，进入 4.5 的 fallback。
 
-### 2.5 行边标点裁剪
+### 2.5 标点间距与行边裁剪
 
-#### 为什么不能建模成全局 glue
+#### 行边裁剪与行内动态收缩
 
-如果把「标点可挤压」做成每个标点边界的 shrink，那么行中间也会被压缩，导致整段标点都被挤扁。中文排版里的挤压主要发生在**行首/行尾**；行中间应该优先用字间距调整。
+标点的“挤压”分两条路径：行边用 `compress_left/right` 做光学裁剪；行内相邻标点先用 pair target 收到基线，再给每个标点边界一小段 `Glue::shrink` 作为应急储备。后者只在行**超宽**（负 adjustment）时被比例分配使用，短行只会走 stretch，不会把标点拉开或挤紧。
 
 因此：
 
@@ -224,7 +224,7 @@ for k in i..j:
 
 #### 相邻标点的固定墨距（ADR-0124）
 
-行内两个标点相邻时，不把标点做成 shrinkable glue，而是先把它们的**墨迹间距**收到规则目标：
+行内两个标点相邻时，先给它们一个**基线墨距**（always-on），再由普通 glue shrink 在超宽行上提供应急收缩：
 
 ```text
 gap_ink = ink_right(left) + ink_left(right)
@@ -233,10 +233,11 @@ pair_squeeze = clamp(gap_ink - target, 0, pair_cap)
 ```
 
 - `pair_squeeze` 写在 `Boundary` 上，是固定的宽度减少量；`natural(i, j)` 减去行内 pair，`build_boxes` 把后续 box 左移同样多。
-- 断点边界上的 pair 不计入（和 glue 一样被丢弃）；行首/行尾仍由 `trim_left/right` 负责。
+- 同一遍 `apply_punctuation_spacing` 还给标点边界加 `Glue::shrink`：全角最多 0.125em、半角 0.0625em，并保证收缩后至少保留 0.0625em/0.03125em 的墨距。它只进入负 adjustment 的分配，不影响 stretch。
+- 断点边界上的 pair 与 shrink 都不计入（和 glue 一样被丢弃）；行首/行尾仍由 `trim_left/right` 负责。
 - 支持的 pair：`Close→Open`、`Close→Close`、`Close→Middle`、`Middle→Open`、`Middle→Close`、`Open→Open`、`Open→Close`；`Dash`（`… — – ·`）和 `Middle→Middle` 不做。
 - 起始目标：全角 0.25em、半角 0.125em；`Open→Close` 减半；cap 全角 0.5em、半角 0.125em。
-- `pair_squeeze` 是规则，不单独计价；DP 看到的是收紧后的真实宽度。行边 trim 仍按 `compress_amount + compress_count` 计价，`compress_count` 按被裁的边计数。
+- `pair_squeeze` 是基线规则，不单独计价；应急 shrink 走普通 glue 的 ratio/badness，不另立权重。DP 看到的是收紧后的真实宽度和更大的 shrink 上限。
 
 ### 2.6 代价函数
 

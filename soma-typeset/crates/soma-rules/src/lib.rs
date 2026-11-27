@@ -133,6 +133,11 @@ pub const RULES: &[RuleInfo] = &[
         source: "W3C clreq §6.3.2.2 / GB/T 15834-2011; target Tbd",
     },
     RuleInfo {
+        id: "punct.shrink",
+        status: RuleStatus::ParamOnly,
+        source: "clreq line adjustment; emergency punctuation shrink, ratio Tbd",
+    },
+    RuleInfo {
         id: "hard_break.forced",
         status: RuleStatus::Verified,
         source: "author intent via Breakability::Forced",
@@ -176,6 +181,26 @@ pub const PAIR_CAP_FULL: Width = Width::from_em_frac(1, 2);
 pub const PAIR_CAP_HALF: Width = Width::from_em_frac(1, 8);
 pub const PAIR_CAP_TIGHT_FULL: Width = Width::from_em_frac(1, 4);
 pub const PAIR_CAP_TIGHT_HALF: Width = Width::from_em_frac(1, 8);
+
+/// Extra shrink a punctuation-adjacent boundary may take when a line is
+/// overfull. The pair target above is the comfortable baseline; this budget is
+/// the emergency reserve that keeps a tight line from becoming an overfull
+/// line. It is ordinary glue shrink, so it is only used by the negative
+/// justification path and never opens a short line further.
+pub const PUNCT_SHRINK_FULL: Width = Width::from_em_frac(1, 8);
+pub const PUNCT_SHRINK_HALF: Width = Width::from_em_frac(1, 16);
+/// Minimum ink gap left after the pair target and the emergency shrink. This
+/// is the line between “tight” and “the two outlines touch”.
+pub const PUNCT_MIN_GAP_FULL: Width = Width::from_em_frac(1, 16);
+pub const PUNCT_MIN_GAP_HALF: Width = Width::from_em_frac(1, 32);
+
+pub fn punct_shrink_budget(full_width: bool) -> (Width, Width) {
+    if full_width {
+        (PUNCT_SHRINK_FULL, PUNCT_MIN_GAP_FULL)
+    } else {
+        (PUNCT_SHRINK_HALF, PUNCT_MIN_GAP_HALF)
+    }
+}
 
 /// Target ink gap and squeeze cap for an adjacent punctuation pair.
 ///

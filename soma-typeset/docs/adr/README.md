@@ -143,6 +143,7 @@ only).
 | [0122](0122-studio-source-diagnostics.md) | The source pane adds a diagnostics panel, a transparent text mirror with red wavy underlines on exact byte spans, and fix suggestions; build errors map to a node span when possible | Accepted |
 | [0123](0123-measured-list-marker-hang.md) | A list marker's hang is its measured advance (`• `, `1. `, `10. `), not the template's first-indent; the marker gap is not adjustable and the text column is pinned after breaking; `modelVersion` 5 | Accepted |
 | [0124](0124-measured-punctuation-pair-gap.md) | Adjacent punctuation closes to a measured ink gap (`pair_squeeze`) before breaking; edge trim stays separate and is priced per edge; `modelVersion` 6 / `rulesVersion` 3 | Accepted |
+| [0125](0125-dynamic-punctuation-shrink.md) | Punctuation-adjacent boundaries carry a small ordinary-glue shrink reserve; only an overfull justified line spends it, with a minimum ink gap; `modelVersion` 7 / `rulesVersion` 4 | Accepted |
 
 ## Rules
 

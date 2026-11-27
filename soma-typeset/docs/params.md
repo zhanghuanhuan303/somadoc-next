@@ -329,10 +329,10 @@ pub struct ParamError {
 
 ```json
 {
-  "modelVersion": 6,
+  "modelVersion": 7,
   "preset": "default-v1",
   "metricsVersion": 2,
-  "rulesVersion": 3,
+  "rulesVersion": 4,
   "paramHash": "9f2c..."
 }
 ```
@@ -502,9 +502,9 @@ pub struct EvalParams {
 > 短行阈值都与 `default-v1` 相同，便于对照。`book-v1`（ADR-0106）在
 > `publish-v1` 上只把 `short_last_threshold` 提到 3em，用于中文书籍样张；
 > 自 ADR-0112 起同一个短行项也计非末行的孤字行。
-> `rules_version = 3` 对应 ADR-0124（相邻标点 pair gap、trim 按边计数、移除
-> `PAIR_TRIM`）；2 对应 ADR-0111/0112（代码分段、分隔符 penalty 与短行口径）；
-> 初值是 ADR-0023 的开标点 trim。
+> `rules_version = 4` 对应 ADR-0125（标点 shrink reserve）；3 对应 ADR-0124
+> （相邻标点 pair gap、trim 按边计数、移除 `PAIR_TRIM`）；2 对应 ADR-0111/0112
+> （代码分段、分隔符 penalty 与短行口径）；初值是 ADR-0023 的开标点 trim。
 | `compress_count` | 5 | 0..=1e9 | 是 | 每条被裁的边；一行两侧都裁计两次 |
 | `boundary_deviation` | 50 | 0..=1e9 | 是 | 每 1 个 ideal gap 的平均偏差；满 gap = 5 行 |
 | `short_last_scale` | 1_000_000 | 0..=1e9 | 是 | 短行（末行与孤字行）；0 宽行的 cost |
@@ -554,12 +554,14 @@ pub struct EvalParams {
 | `punct_penalty_table` | 0 | table id | 标点堆叠等 |
 | `pair_gap` | 250‰ / 125‰ | 0..=1000‰ | 相邻标点的目标墨距（全角/半角） |
 | `pair_cap` | 500‰ / 125‰ | 0..=1000‰ | 单个 pair 的最大收紧量 |
+| `punct_shrink` | 1/8em / 1/16em | 0..=1em | 超宽行的标点应急 shrink 上限 |
+| `punct_min_gap` | 1/16em / 1/32em | 0..=1em | shrink 后保留的最小墨距 |
 
 > 规则比例属于 `RuleSet`，有来源和版本；不要从 `CostParams` 里改。
 > 这些比例都是 **base em**。如果业务希望按字号缩放（例如大字号标点的 trim 更大），规则层用 `font_scale` 乘一下再写入 IR；breaker 只看最终宽度。
 > **K4/v2 状态：** `soma-rules` 已把 `open_trim_left` / `close_trim_right` / `middle_trim_left` / `middle_trim_right` 写进 `Atom.compress_*`。行尾收尾标点的右侧侧空在**两端对齐行上恒裁**，与宽窄无关（ADR-0036）；行首开标点在两端对齐与左对齐/ragged 行上都贴墨裁（ADR-0082/0105），其余行首侧空只在行超宽时裁。半角标点的侧空为 `125‰`（`LATIN_TRIM`，代码常量，不在 Tier B 表内）。这两组数值是**回退值**：`soma.metrics/2` 表若带标点轮廓（`ink_right`），`scale_trim` 用真实墨迹覆盖它们（ADR-0037）。
 > **相邻标点（v2）：** `PAIR_TRIM` 已删除。`soma-layout::apply_pair_gap` 用 `ink_right + ink_left` 得到真实墨距，按 `punct.pair.gap` 的目标收紧，写入 `Boundary.pair_squeeze`；规则只在行内边界生效，断点边界被排除。`pair_gap` / `pair_cap` 仍是 `ParamOnly`（未标定），不参与 Gate Q 的硬断言。
-> **K6 状态：** `soma_rules::RULES` 提供 `id / status / source` 盘点表；`RuleStatus` 为 `Verified | Tbd | ParamOnly`。当前盘点为 **8 `Verified` / 0 `Tbd` / 7 `ParamOnly`**：标点硬规则已引用 GB/T 15834-2011 via W3C clreq §6.1.1（basic）并升为 `Verified`；trim/gap 比例仍为 `ParamOnly`，Gate Q 不得把比例数值当作已核实来源。
+> **K6 状态：** `soma_rules::RULES` 提供 `id / status / source` 盘点表；`RuleStatus` 为 `Verified | Tbd | ParamOnly`。当前盘点为 **8 `Verified` / 0 `Tbd` / 8 `ParamOnly`**：标点硬规则已引用 GB/T 15834-2011 via W3C clreq §6.1.1（basic）并升为 `Verified`；trim/gap 比例仍为 `ParamOnly`，Gate Q 不得把比例数值当作已核实来源。
 > **每条规则带 `rule_id` / `source` / `status: Verified | Tbd | ParamOnly`。** `Tbd` 只能产生 `Allowed` + penalty/trim，不能产生 `Forbidden`/`Forced`；`ParamOnly` 只提供参数，不产生断点规则。K0 交付 `ruleId × source × status × golden` 盘点表；Gate Q 只对 `Verified` 断言。
 
 ### 10.3b Tier P：段落参数（ParagraphStyle）

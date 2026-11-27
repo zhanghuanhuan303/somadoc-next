@@ -523,6 +523,51 @@ fn pair_squeeze_reduces_natural_width_and_closes_the_box_gap() {
 }
 
 #[test]
+fn punctuation_shrink_is_used_only_by_the_overfull_path() {
+    let mut boundary = allowed_boundary();
+    boundary.glue.shrink = Width::from_em_frac(1, 4);
+    let paragraph = Paragraph {
+        style: style(Width::from_em_frac(7, 4)),
+        atoms: vec![
+            atom(
+                "中",
+                AtomKind::Cjk,
+                PunctClass::None,
+                Width::ZERO,
+                Width::ZERO,
+            ),
+            atom(
+                "中",
+                AtomKind::Cjk,
+                PunctClass::None,
+                Width::ZERO,
+                Width::ZERO,
+            ),
+            atom(
+                "中",
+                AtomKind::Cjk,
+                PunctClass::None,
+                Width::ZERO,
+                Width::ZERO,
+            ),
+        ],
+        boundaries: vec![boundary, allowed_boundary()],
+    };
+
+    let result = break_paragraph(
+        &paragraph,
+        &SyntheticMetrics::default(),
+        &BreakConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(result.lines.len(), 2, "the third atom starts the last line");
+    let line = &result.lines[0];
+    assert!(!line.overfull, "the reserve covers the quarter-em excess");
+    assert_eq!(line.adjustment, -1024);
+    assert_eq!(line.boxes[1].x, Width::from_em_frac(3, 4));
+}
+
+#[test]
 fn trim_cost_counts_both_edges() {
     let paragraph = Paragraph {
         style: style(Width::from_em(2)),

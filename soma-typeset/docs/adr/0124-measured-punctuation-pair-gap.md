@@ -1,6 +1,6 @@
 # ADR-0124: Adjacent punctuation closes to a measured ink gap
 
-- Status: Accepted
+- Status: Accepted; the dynamic shrink reserve added by ADR-0125 is layered on top of this baseline
 - Date: 2026-11-28
 - Related: ADR-0036 (line-end trim), ADR-0037 (punctuation ink), ADR-0082
   (line-start trim), ADR-0105 (ragged opening trim), ADR-0123 (measured list
